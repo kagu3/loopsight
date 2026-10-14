@@ -1,0 +1,38 @@
+{
+  "name": "insight-maker-mcp",
+  "version": "0.1.0",
+  "description": "Insight Maker のモデルを AI アシスタントから作成・実行・分析するための MCP サーバー",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "insight-maker-mcp": "dist/mcp/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/mcp/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suda0033/insight-maker-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/suda0033/insight-maker-mcp/issues"
+  },
+  "homepage": "https://github.com/suda0033/insight-maker-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "simulation": "^9.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

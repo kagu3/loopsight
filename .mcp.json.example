@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "insight-maker": {
+      "command": "node",
+      "args": ["/absolute/path/to/insight-maker-mcp/dist/mcp/index.js"],
+      "env": {
+        "INSIGHT_MAKER_MODELS_DIR": "/absolute/path/to/models"
+      }
+    }
+  }
+}
