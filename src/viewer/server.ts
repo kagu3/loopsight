@@ -2,11 +2,13 @@ import { watch, type FSWatcher } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
-import { ModelError, ModelStore, StoreError, runModel, validateModel } from "../core/index.js";
-import type { ChangeEvent, ModelListResponse, ModelResponse, RunResult } from "./api.js";
+import { EditError, ModelError, ModelStore, StoreError, runModel, upsertElements, validateModel, type ModelJSON } from "../core/index.js";
+import { VIEWER_HEADER, type ChangeEvent, type EditErrorResponse, type EditRequest, type EditResponse, type ModelListResponse, type ModelResponse, type RunResult, type UndoRequest } from "./api.js";
 
-// 見るための Web 画面のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
+// ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
+// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements と同じ処理を通す）。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
+// 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
 
 export interface ViewerOptions {
   /** 作業フォルダ */
@@ -47,11 +49,15 @@ function toNumber(v: unknown): number | null {
   return null;
 }
 
-export async function loadModelResponse(store: ModelStore, name: string): Promise<ModelResponse> {
-  const model = await store.read(name);
+export async function loadModelResponse(store: ModelStore, name: string, undoAvailable = 0): Promise<ModelResponse> {
+  const { model, version } = await store.readVersioned(name);
+  return modelResponse(store, name, model, version, undoAvailable);
+}
+
+async function modelResponse(store: ModelStore, name: string, model: ModelJSON, version: string, undoAvailable: number): Promise<ModelResponse> {
   const modified = (await stat(store.pathOf(name))).mtime.toISOString();
   const validation = validateModel(model, { trialRun: false });
-  const res: ModelResponse = { name, modified, model, validation };
+  const res: ModelResponse = { name, modified, version, undo_available: undoAvailable, model, validation };
   if (validation.ok) {
     try {
       const data = runModel(model);
@@ -64,6 +70,55 @@ export async function loadModelResponse(store: ModelStore, name: string): Promis
     }
   }
   return res;
+}
+
+/** 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版 */
+interface HistoryEntry {
+  before: string;
+  after: string;
+}
+const HISTORY_LIMIT = 50;
+const MAX_BODY = 1024 * 1024;
+
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** 書き込みの要求が、このビューアの画面から来たものか確かめる */
+function checkWriteRequest(req: IncomingMessage): void {
+  if (req.method !== "POST") throw new HttpError(405, "POST で送ってください。");
+  if (req.headers[VIEWER_HEADER.toLowerCase()] !== "1") throw new HttpError(403, "ビューアの画面からしか書き込めません。");
+  if (!(req.headers["content-type"] ?? "").startsWith("application/json")) throw new HttpError(415, "JSON で送ってください。");
+  const origin = req.headers.origin;
+  if (origin) {
+    let host = "";
+    try {
+      host = new URL(origin).hostname;
+    } catch {
+      // 読めない Origin は断る
+    }
+    if (!ALLOWED_HOSTS.has(host) && host !== "::1") throw new HttpError(403, "ほかのサイトからは書き込めません。");
+  }
+}
+
+async function readBody<T>(req: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY) throw new HttpError(413, "送る内容が大きすぎます。");
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+  } catch {
+    throw new HttpError(400, "JSON として読めません。");
+  }
 }
 
 function sendJSON(res: ServerResponse, status: number, body: unknown): void {
@@ -101,6 +156,67 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     // 作業フォルダがまだないときは監視しない（一覧は空になる）
   }
 
+  // 画面からの書き込みの記録（モデル名 → 古い順）。メモリの中だけに持つ
+  const history = new Map<string, HistoryEntry[]>();
+  const historyOf = (name: string) => {
+    const key = name.toLowerCase();
+    if (!history.has(key)) history.set(key, []);
+    return history.get(key)!;
+  };
+  // 同じモデルへの書き込みは 1 つずつ（読んで、確かめて、書くあいだに割り込ませない）
+  const locks = new Map<string, Promise<unknown>>();
+  const serial = <T>(name: string, task: () => Promise<T>): Promise<T> => {
+    const key = name.toLowerCase();
+    const run = (locks.get(key) ?? Promise.resolve()).then(task, task);
+    locks.set(
+      key,
+      run.catch(() => undefined),
+    );
+    return run;
+  };
+
+  const conflict = async (name: string, message: string): Promise<EditErrorResponse> => ({
+    error: message,
+    conflict: true,
+    current: await loadModelResponse(store, name, historyOf(name).length),
+  });
+
+  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "undo") => {
+    try {
+      checkWriteRequest(req);
+      const body = await readBody<EditRequest & UndoRequest>(req);
+      if (typeof body?.version !== "string") throw new HttpError(400, "version がありません。");
+      const result = await serial(name, async (): Promise<[number, EditResponse | EditErrorResponse]> => {
+        const current = await store.readVersioned(name);
+        const hist = historyOf(name);
+        if (current.version !== body.version) {
+          return [409, await conflict(name, "ほかのところ（AI など）で先にモデルが変わっていたため、書き込みませんでした。最新の内容を読み直しました。")];
+        }
+        if (action === "edit") {
+          if (!Array.isArray(body.elements) || body.elements.length === 0) throw new HttpError(400, "elements がありません。");
+          const report = upsertElements(current.model, body.elements);
+          const version = await store.writeVersioned(name, current.model);
+          hist.push({ before: current.text, after: version });
+          if (hist.length > HISTORY_LIMIT) hist.shift();
+          return [200, { report, model: await modelResponse(store, name, current.model, version, hist.length) }];
+        }
+        const last = hist.at(-1);
+        if (!last) throw new HttpError(400, "元に戻せる変更がありません。");
+        if (last.after !== current.version) {
+          hist.length = 0;
+          return [409, await conflict(name, "画面で変えたあとに、ほかのところ（AI など）でモデルが変わったため、元に戻せません。")];
+        }
+        hist.pop();
+        await store.writeVersioned(name, { text: last.before });
+        return [200, { model: await loadModelResponse(store, name, hist.length) }];
+      });
+      sendJSON(res, result[0], result[1]);
+    } catch (e) {
+      const status = e instanceof HttpError ? e.status : e instanceof StoreError ? 404 : e instanceof EditError ? 400 : 500;
+      sendJSON(res, status, { error: (e as Error).message } satisfies EditErrorResponse);
+    }
+  };
+
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = (req.headers.host ?? "").replace(/:\d+$/, "");
     if (!ALLOWED_HOSTS.has(host)) {
@@ -115,9 +231,15 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
       sendJSON(res, 200, body);
       return;
     }
+    const write = p.match(/^\/api\/models\/([^/]+)\/(edit|undo)$/);
+    if (write) {
+      await handleWrite(req, res, write[1]!, write[2] as "edit" | "undo");
+      return;
+    }
     if (p.startsWith("/api/models/")) {
       try {
-        sendJSON(res, 200, await loadModelResponse(store, p.slice("/api/models/".length)));
+        const name = p.slice("/api/models/".length);
+        sendJSON(res, 200, await loadModelResponse(store, name, historyOf(name).length));
       } catch (e) {
         sendJSON(res, e instanceof StoreError ? 404 : 500, { error: (e as Error).message });
       }

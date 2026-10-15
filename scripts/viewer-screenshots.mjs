@@ -4,7 +4,7 @@
 //   npm run screenshots
 //
 // 見本のモデルを一時フォルダに作ってビューアを起動し、Edge か Chrome をヘッドレスで動かして撮る。
-// 撮った画像は docs/images/viewer/ に上書きする。ブラウザの場所は環境変数 BROWSER_PATH でも指定できる。
+// 撮った画像は docs/images/viewer/ に上書きする（見本のモデルは一時フォルダにあるので、編集の場面を撮っても作業フォルダは変わらない）。ブラウザの場所は環境変数 BROWSER_PATH でも指定できる。
 // ブラウザは DevTools プロトコルで操作する（Node 22 以降の組み込みの WebSocket を使うので、追加の依存はない）。
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -197,6 +197,15 @@ try {
   await b.click('.react-flow__node[data-id="el:β"]');
   await b.waitFor("document.querySelector('.details')");
   await b.shot("details");
+
+  // 要素を編集しているところ
+  await b.clickText(".details .small-button", "編集");
+  await b.waitFor("document.querySelector('.form textarea')");
+  await b.evaluate("(() => { const t = document.querySelector('.form textarea'); t.focus(); t.select(); })()");
+  await b.send("Input.insertText", { text: "0.02" });
+  await sleep(200);
+  await b.shot("edit");
+  await b.clickText(".form-buttons button", "やめる");
 
   // 自動配置に切り替えたところ
   await b.clickText(".toggle", "自動配置");

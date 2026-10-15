@@ -310,6 +310,104 @@ button.link {
   background: var(--error-bg);
   color: var(--error);
 }
+.banner.notice {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* ボタンと編集の欄 */
+button.small-button,
+button.toolbar-button,
+.form-buttons button {
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+button.small-button {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 1px 8px;
+}
+button.small-button:hover,
+button.toolbar-button:hover:not(:disabled),
+.form-buttons button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.form-buttons button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.form-buttons button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.form label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.form input:not([type="checkbox"]),
+.form textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  resize: vertical;
+}
+.form textarea.code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+.form input:focus,
+.form textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.form small {
+  font-size: 11px;
+}
+.form-error {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--error-bg);
+  color: var(--error);
+  font-size: 13px;
+}
+.form-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .diagram {
   position: relative;
@@ -328,6 +426,12 @@ button.link {
 }
 
 /* 図の要素 */
+.react-flow__node.draggable .node {
+  cursor: grab;
+}
+.react-flow__node.dragging .node {
+  cursor: grabbing;
+}
 .node {
   position: relative;
   display: flex;

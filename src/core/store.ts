@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ModelJSON } from "./modeljson.js";
 
@@ -24,6 +25,11 @@ export function checkModelName(name: string): string {
     throw new StoreError(`モデル名 "${name}" には使えない文字が含まれています（/ \\ : * ? " < > | と先頭の . は使えません）。`);
   }
   return n.replace(/\.json$/i, "");
+}
+
+/** ファイルの中身から版を作る（中身が同じなら同じ版） */
+export function versionOf(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
 
 export interface ModelInfo {
@@ -93,6 +99,14 @@ export class ModelStore {
   }
 
   async read(name: string): Promise<ModelJSON> {
+    return (await this.readVersioned(name)).model;
+  }
+
+  /**
+   * モデルと、その版（ファイルの中身のハッシュ）を読む。
+   * 版は、読んでから書くまでのあいだにほかから変えられていないかを確かめるのに使う。
+   */
+  async readVersioned(name: string): Promise<{ model: ModelJSON; version: string; text: string }> {
     const file = this.pathOf(name);
     let text: string;
     try {
@@ -108,7 +122,7 @@ export class ModelStore {
       if (!json || typeof json !== "object" || !Array.isArray(json.elements)) {
         throw new Error("elements 配列がありません");
       }
-      return json;
+      return { model: json, version: versionOf(text), text };
     } catch (e) {
       throw new StoreError(`${file} を ModelJSON として読めません: ${(e as Error).message}`);
     }
@@ -116,6 +130,13 @@ export class ModelStore {
 
   async write(name: string, model: ModelJSON): Promise<string> {
     return this.writeJSONFile(this.pathOf(name), model);
+  }
+
+  /** 書いて、書いた中身の版を返す。text を渡すと、その中身をそのまま書く */
+  async writeVersioned(name: string, model: ModelJSON | { text: string }): Promise<string> {
+    const text = "text" in model && typeof model.text === "string" ? model.text : JSON.stringify(model, null, 2) + "\n";
+    await this.writeTextFile(this.pathOf(name), text);
+    return versionOf(text);
   }
 
   async remove(name: string): Promise<void> {

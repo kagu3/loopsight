@@ -22,6 +22,8 @@ export interface GraphNode {
   width: number;
   height: number;
   shape: Shape;
+  /** 雲なら、どのフローのどちらの端か（位置を保存するときに使う） */
+  cloudOf?: { flow: string; end: "from" | "to" };
   /** 弁の名前を出す側。フローが縦向きなら右、横向きなら下（線に重ならないように） */
   labelSide?: "below" | "right";
 }
@@ -115,6 +117,7 @@ export function toGraph(model: ModelJSON, options: { forceAutoLayout?: boolean }
         id: cloudId(f.name!, which),
         kind: "CLOUD",
         label: "",
+        cloudOf: { flow: f.name!, end: which },
         x: p ? p[0] - w / 2 : 0,
         y: p ? p[1] - h / 2 : 0,
         width: w,
@@ -196,6 +199,41 @@ function layoutWithDagre(nodes: GraphNode[], edges: GraphEdge[]): void {
     n.x = Math.round(p.x - n.width / 2);
     n.y = Math.round(p.y - (n.kind === "VALVE" ? (n.height + 28) / 2 : n.height / 2));
   }
+}
+
+/**
+ * 表示している位置を、モデルに保存する形（upsert_elements の要素の変更）にする。
+ * ids を渡すとそのノードだけ、渡さなければ弁以外のすべて（自動配置をまとめて保存するとき）。
+ */
+export function positionPatches(
+  nodes: GraphNode[],
+  ids?: Set<string>,
+): { name: string; display: Record<string, [number, number]> }[] {
+  const out: { name: string; display: Record<string, [number, number]> }[] = [];
+  for (const n of nodes) {
+    if (ids && !ids.has(n.id)) continue;
+    if (n.kind === "CLOUD" && n.cloudOf) {
+      // 雲の座標は中心
+      const key = n.cloudOf.end === "from" ? "from_coordinates" : "to_coordinates";
+      out.push({ name: n.cloudOf.flow, display: { [key]: [Math.round(n.x + n.width / 2), Math.round(n.y + n.height / 2)] } });
+    } else if (n.kind !== "VALVE" && n.kind !== "CLOUD" && n.element) {
+      // 箱の座標は左上
+      out.push({ name: n.element, display: { coordinates: [Math.round(n.x), Math.round(n.y)] } });
+    }
+  }
+  return out;
+}
+
+/**
+ * 左上が MARGIN より左や上にはみ出していたら、全体をずらしたコピーを返す（はみ出していなければ undefined）。
+ * 負の座標で保存すると、Insight Maker の Web 版で画面の外に出てしまうため。
+ */
+export function shiftIntoView(nodes: GraphNode[], margin = 20): GraphNode[] | undefined {
+  const b = bounds(nodes);
+  const dx = b.x < margin ? margin - b.x : 0;
+  const dy = b.y < margin ? margin - b.y : 0;
+  if (!dx && !dy) return undefined;
+  return nodes.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy }));
 }
 
 /** 図の範囲 */

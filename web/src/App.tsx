@@ -1,21 +1,18 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, Issue, ModelElement, ModelListResponse, ModelResponse } from "../../src/viewer/api.js";
+import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse } from "../../src/viewer/api.js";
+import { fetchList, fetchModel, postEdit, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatValue } from "./Chart.js";
+import { Details } from "./Details.js";
 import { Diagram } from "./Diagram.js";
 import { toGraph } from "./graph.js";
+import { Problems } from "./Problems.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
+// 画面からの編集（式などの変更、位置の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
-
-async function getJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: "no-store" });
-  const body = (await res.json()) as T & { error?: string };
-  if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-  return body;
-}
 
 /** 前の版と比べて、変わった（または増えた）要素の名前（小文字） */
 function changedElements(prev: ModelResponse | undefined, next: ModelResponse): Set<string> {
@@ -29,46 +26,61 @@ function changedElements(prev: ModelResponse | undefined, next: ModelResponse): 
   return out;
 }
 
+/** 入力欄で打っているときは、元に戻すのショートカットを横取りしない */
+const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
 export function App() {
   const [list, setList] = useState<ModelListResponse>();
   const [current, setCurrent] = useState(nameFromHash());
   const [data, setData] = useState<ModelResponse>();
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
   const [connected, setConnected] = useState(false);
   const [autoLayout, setAutoLayout] = useState(false);
   const [selected, setSelected] = useState<string>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [updatedAt, setUpdatedAt] = useState<Date>();
+  const [busy, setBusy] = useState(false);
   const dataRef = useRef<ModelResponse>(undefined);
   const currentRef = useRef(current);
   currentRef.current = current;
 
   const loadList = useCallback(async () => {
     try {
-      setList(await getJSON<ModelListResponse>("/api/models"));
+      setList(await fetchList());
     } catch (e) {
       setError(`モデルの一覧を読めません: ${(e as Error).message}`);
     }
   }, []);
 
-  const loadModel = useCallback(async (name: string) => {
-    if (!name) return;
-    try {
-      const next = await getJSON<ModelResponse>(`/api/models/${encodeURIComponent(name)}`);
-      if (currentRef.current !== name) return;
-      const diff = changedElements(dataRef.current, next);
-      dataRef.current = next;
-      setData(next);
-      setError(undefined);
-      setUpdatedAt(new Date());
-      if (diff.size) {
-        setChanged(diff);
-        setTimeout(() => setChanged(new Set()), 2500);
-      }
-    } catch (e) {
-      setError(`モデル "${name}" を読めません: ${(e as Error).message}`);
+  /** 新しい内容を表示する。highlight なら、変わった要素に枠を付ける（ほかで変わったとき） */
+  const show = useCallback((next: ModelResponse, highlight: boolean) => {
+    const diff = highlight ? changedElements(dataRef.current, next) : new Set<string>();
+    dataRef.current = next;
+    setData(next);
+    setError(undefined);
+    setUpdatedAt(new Date());
+    if (diff.size) {
+      setChanged(diff);
+      setTimeout(() => setChanged(new Set()), 2500);
     }
   }, []);
+
+  const loadModel = useCallback(
+    async (name: string) => {
+      if (!name) return;
+      try {
+        const next = await fetchModel(name);
+        if (currentRef.current !== name) return;
+        // 画面から書き込んだ結果の知らせなら、もう表示しているので何もしない
+        if (dataRef.current?.name === next.name && dataRef.current.version === next.version) return;
+        show(next, true);
+      } catch (e) {
+        setError(`モデル "${name}" を読めません: ${(e as Error).message}`);
+      }
+    },
+    [show],
+  );
 
   // 一覧と変更の知らせ
   useEffect(() => {
@@ -103,8 +115,77 @@ export function App() {
     dataRef.current = undefined;
     setData(undefined);
     setSelected(undefined);
+    setNotice(undefined);
+    setAutoLayout(false);
     void loadModel(current);
   }, [current, loadModel]);
+
+  /** 書き込みの結果を画面に反映する。失敗したらその文を返す */
+  const applyWrite = useCallback(
+    (result: WriteResult): string | undefined => {
+      if (result.ok) {
+        show(result.data.model, false);
+        setNotice(undefined);
+        return undefined;
+      }
+      if (result.error.current) {
+        // AI などが先に変えていた。最新を出し、変わったところに枠を付ける
+        show(result.error.current, true);
+        setNotice(result.error.error);
+      }
+      return result.error.error;
+    },
+    [show],
+  );
+
+  const edit = useCallback(
+    async (elements: ElementPatch[]): Promise<string | undefined> => {
+      const d = dataRef.current;
+      if (!d) return "モデルを読み込んでいません。";
+      setBusy(true);
+      try {
+        return applyWrite(await postEdit(d.name, d.version, elements));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyWrite],
+  );
+
+  const undo = useCallback(async () => {
+    const d = dataRef.current;
+    if (!d || !d.undo_available) return;
+    setBusy(true);
+    try {
+      const err = applyWrite(await postUndo(d.name, d.version));
+      if (err) setNotice(err);
+    } finally {
+      setBusy(false);
+    }
+  }, [applyWrite]);
+
+  // Ctrl+Z（Mac は ⌘Z）で元に戻す
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !typing(e.target)) {
+        e.preventDefault();
+        void undo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo]);
+
+  /** 図で動かした位置を保存する。自動配置で見ていたなら、保存後はモデルの座標で見る */
+  const move = useCallback(
+    async (patches: ElementPatch[]) => {
+      const err = await edit(patches);
+      if (err) setNotice(err);
+      else setAutoLayout(false);
+      return err;
+    },
+    [edit],
+  );
 
   const graph = useMemo(() => (data ? toGraph(data.model, { forceAutoLayout: autoLayout }) : undefined), [data, autoLayout]);
   const finalValues = useMemo(() => {
@@ -145,7 +226,11 @@ export function App() {
 
         <section className="panel">
           <h2>選んだ要素</h2>
-          {selectedEl ? <Details el={selectedEl} value={finalValues[selectedEl.name!]} /> : <p className="muted">図の要素を押すと、式などをここに出します。</p>}
+          {selectedEl ? (
+            <Details el={selectedEl} value={finalValues[selectedEl.name!]} onSave={(patch) => edit([patch])} />
+          ) : (
+            <p className="muted">図の要素を押すと、式などをここに出します。「編集」で直せます。</p>
+          )}
         </section>
       </aside>
 
@@ -155,23 +240,51 @@ export function App() {
             <h2>{title || "モデルを選んでください"}</h2>
             {data?.model.description && <p className="muted">{data.model.description}</p>}
           </div>
-          {graph && (
+          {graph && data && (
             <div className="toolbar-right">
-              {graph.missingCoordinates && <span className="note">座標のない要素があるので自動配置にしています</span>}
+              {graph.autoLayout && (
+                <span className="note">
+                  {graph.missingCoordinates ? "座標のない要素があるので自動配置にしています。" : "自動配置で表示しています。"}動かすと、この配置を保存します
+                </span>
+              )}
               <label className="toggle">
                 <input type="checkbox" checked={graph.autoLayout} disabled={graph.missingCoordinates} onChange={(e) => setAutoLayout(e.target.checked)} />
                 自動配置
               </label>
-              {updatedAt && <span className="muted small">更新 {updatedAt.toLocaleTimeString("ja-JP")}</span>}
+              <button
+                className="toolbar-button"
+                onClick={() => void undo()}
+                disabled={!data.undo_available || busy}
+                title={data.undo_available ? `画面で変えたことを元に戻します（あと ${data.undo_available} 回、Ctrl+Z）` : "元に戻せる変更はありません"}
+              >
+                ↶ 元に戻す
+              </button>
+              {updatedAt && <span className="muted small">{busy ? "保存しています…" : `更新 ${updatedAt.toLocaleTimeString("ja-JP")}`}</span>}
             </div>
           )}
         </div>
         {error && <div className="banner error">{error}</div>}
+        {notice && (
+          <div className="banner notice">
+            <span>{notice}</span>
+            <button className="link" onClick={() => setNotice(undefined)}>
+              閉じる
+            </button>
+          </div>
+        )}
 
         <div className="diagram">
           {graph && data ? (
             <ReactFlowProvider>
-              <Diagram graph={graph} modelName={data.name} selected={selected} changed={changed} values={finalValues} onSelect={setSelected} />
+              <Diagram
+                graph={graph}
+                modelName={data.name}
+                selected={selected}
+                changed={changed}
+                values={finalValues}
+                onSelect={setSelected}
+                onMove={move}
+              />
             </ReactFlowProvider>
           ) : (
             !error && <p className="muted pad">読み込んでいます…</p>
@@ -186,78 +299,6 @@ export function App() {
           ) : null}
         </div>
       </main>
-    </div>
-  );
-}
-
-function Problems({ data, onSelect }: { data: ModelResponse; onSelect(name: string): void }) {
-  const issues: { level: "error" | "warning"; issue: Issue }[] = [
-    ...data.validation.errors.map((issue) => ({ level: "error" as const, issue })),
-    ...(data.run_error ? (data.run_error.issues.length ? data.run_error.issues : [{ message: data.run_error.message }]) : []).map((issue) => ({
-      level: "error" as const,
-      issue,
-    })),
-    ...data.validation.warnings.map((issue) => ({ level: "warning" as const, issue })),
-  ];
-  if (!issues.length) return null;
-  return (
-    <section className="panel">
-      <h2>問題</h2>
-      <ul className="issues">
-        {issues.map(({ level, issue }, i) => (
-          <li key={i} className={level}>
-            <span className="issue-level">{level === "error" ? "エラー" : "警告"}</span>
-            {issue.element ? (
-              <button className="link" onClick={() => onSelect(issue.element!)}>
-                {issue.element}
-              </button>
-            ) : null}
-            <span>{issue.message}</span>
-            {issue.hint && <span className="muted"> {issue.hint}</span>}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-const TYPE_LABEL: Record<string, string> = {
-  STOCK: "ストック",
-  FLOW: "フロー",
-  VARIABLE: "変数",
-  CONVERTER: "コンバーター",
-  STATE: "状態",
-  TRANSITION: "遷移",
-};
-
-function Details({ el, value }: { el: ModelElement; value?: string }) {
-  const b = el.behavior ?? {};
-  const rows: [string, string][] = [];
-  if (el.type === "FLOW" || el.type === "TRANSITION") rows.push(["流れ", `${el.from ?? "（外）"} → ${el.to ?? "（外）"}`]);
-  if (b.initial_value !== undefined) rows.push(["初期値", String(b.initial_value)]);
-  if (b.value !== undefined) rows.push([el.type === "FLOW" ? "流量" : "式", String(b.value)]);
-  if (el.type === "CONVERTER") {
-    rows.push(["入力", b.input === "ELEMENT" ? String(b.input_element ?? "") : "時間"]);
-    if (Array.isArray(b.data)) rows.push(["表", (b.data as [number, number][]).map(([x, y]) => `${x}→${y}`).join(", ")]);
-  }
-  if (b.units) rows.push(["単位", String(b.units)]);
-  if (b.non_negative) rows.push(["負にしない", "はい"]);
-  if (value !== undefined) rows.push(["最終値", value]);
-  return (
-    <div className="details">
-      <div className="details-head">
-        <span className={`type-badge type-${el.type.toLowerCase()}`}>{TYPE_LABEL[el.type] ?? el.type}</span>
-        <strong>{el.name}</strong>
-      </div>
-      {el.description && <p className="muted">{el.description}</p>}
-      <dl>
-        {rows.map(([k, v]) => (
-          <div key={k}>
-            <dt>{k}</dt>
-            <dd className={k === "式" || k === "流量" || k === "初期値" ? "code" : ""}>{v}</dd>
-          </div>
-        ))}
-      </dl>
     </div>
   );
 }

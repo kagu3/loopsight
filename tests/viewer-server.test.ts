@@ -3,7 +3,7 @@ import { request } from "node:http";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ModelStore, emptyModel, upsertElements } from "../src/core/index.js";
-import type { ChangeEvent, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
+import type { ChangeEvent, EditErrorResponse, EditResponse, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
 import { tempDir } from "./helpers.js";
 
@@ -22,6 +22,15 @@ function population() {
 
 async function get<T>(p: string): Promise<{ status: number; body: T }> {
   const res = await fetch(new URL(p, viewer.url));
+  return { status: res.status, body: (await res.json()) as T };
+}
+
+async function post<T>(p: string, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: T }> {
+  const res = await fetch(new URL(p, viewer.url), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-IM-Viewer": "1", Origin: viewer.url.replace(/\/$/, ""), ...headers },
+    body: JSON.stringify(body),
+  });
   return { status: res.status, body: (await res.json()) as T };
 }
 
@@ -108,5 +117,82 @@ describe("ビューアのサーバー", () => {
     await new ModelStore(dir).write("pop", m);
     expect(await received).toEqual({ type: "changed", name: "pop" });
     controller.abort();
+  });
+});
+
+describe("ビューアからの編集", () => {
+  test("要素を変えて保存し、新しい版と実行結果を返す", async () => {
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    const { status, body } = await post<EditResponse>("/api/models/pop/edit", {
+      version: before.version,
+      elements: [{ name: "Rate", behavior: { value: 0.2 } }, { name: "Population", display: { coordinates: [300, 200] } }],
+    });
+    expect(status).toBe(200);
+    expect(body.report!.updated).toEqual(['VARIABLE "Rate"', 'STOCK "Population"']);
+    expect(body.model.version).not.toBe(before.version);
+    expect(body.model.undo_available).toBe(1);
+    expect(body.model.run!.series.Population!.at(-1)).toBeCloseTo(100 * 1.2 ** 10, 6);
+    // ファイルにも書かれている
+    const saved = await new ModelStore(dir).readVersioned("pop");
+    expect(saved.version).toBe(body.model.version);
+    expect(saved.model.elements.find((e) => e.name === "Population")!.display!.coordinates).toEqual([300, 200]);
+  });
+
+  test("版が違えば書き込まず、最新を返す（AI などが先に変えた場合）", async () => {
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    // AI が先に書き換える
+    const m = population();
+    m.elements.find((e) => e.name === "Rate")!.behavior!.value = 0.5;
+    await new ModelStore(dir).write("pop", m);
+    const { status, body } = await post<EditErrorResponse>("/api/models/pop/edit", { version: before.version, elements: [{ name: "Rate", behavior: { value: 0.2 } }] });
+    expect(status).toBe(409);
+    expect(body.conflict).toBe(true);
+    expect(body.current!.model.elements.find((e) => e.name === "Rate")!.behavior!.value).toBe(0.5);
+    expect((await new ModelStore(dir).read("pop")).elements.find((e) => e.name === "Rate")!.behavior!.value).toBe(0.5);
+  });
+
+  test("元に戻す。戻すと版も元に戻る", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Rate", behavior: { value: 0.2 } }] });
+    const e2 = await post<EditResponse>("/api/models/pop/edit", { version: e1.body.model.version, elements: [{ name: "Rate", behavior: { value: 0.3 } }] });
+    expect(e2.body.model.undo_available).toBe(2);
+    const u1 = await post<EditResponse>("/api/models/pop/undo", { version: e2.body.model.version });
+    expect(u1.status).toBe(200);
+    expect(u1.body.model.version).toBe(e1.body.model.version);
+    const u2 = await post<EditResponse>("/api/models/pop/undo", { version: u1.body.model.version });
+    expect(u2.body.model.version).toBe(v0);
+    expect(u2.body.model.undo_available).toBe(0);
+    expect((await post<EditErrorResponse>("/api/models/pop/undo", { version: v0 })).status).toBe(400);
+  });
+
+  test("画面で変えたあとに AI が変えていたら、元に戻さない", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Rate", behavior: { value: 0.2 } }] });
+    const m = await new ModelStore(dir).read("pop");
+    m.elements.find((e) => e.name === "Rate")!.behavior!.value = 0.5;
+    await new ModelStore(dir).write("pop", m);
+    const latest = (await get<ModelResponse>("/api/models/pop")).body;
+    const { status, body } = await post<EditErrorResponse>("/api/models/pop/undo", { version: latest.version });
+    expect(status).toBe(409);
+    expect(body.current!.undo_available).toBe(0);
+    expect((await new ModelStore(dir).read("pop")).elements.find((e) => e.name === "Rate")!.behavior!.value).toBe(0.5);
+  });
+
+  test("編集の誤りは 400 で、ファイルは変えない", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const { status, body } = await post<EditErrorResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Rat", behavior: { value: 1 } }] });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/Rate/);
+    expect((await new ModelStore(dir).readVersioned("pop")).version).toBe(v0);
+  });
+
+  test("ほかのサイトからの書き込みは断る", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const edit = { version: v0, elements: [{ name: "Rate", behavior: { value: 9 } }] };
+    expect((await post("/api/models/pop/edit", edit, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await post("/api/models/pop/edit", edit, { "X-IM-Viewer": "" })).status).toBe(403);
+    expect((await post("/api/models/pop/edit", edit, { "Content-Type": "text/plain" })).status).toBe(415);
+    expect((await get("/api/models/pop/edit")).status).toBe(405);
+    expect((await new ModelStore(dir).readVersioned("pop")).version).toBe(v0);
   });
 });

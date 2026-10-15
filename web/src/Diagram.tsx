@@ -12,13 +12,16 @@ import {
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { useEffect, useMemo, useRef } from "react";
-import { borderPoint, type Graph, type GraphEdge, type GraphNode } from "./graph.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ElementPatch } from "../../src/viewer/api.js";
+import { borderPoint, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "./graph.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
+// 箱と雲はドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
 
 type NodeData = { g: GraphNode; selected: boolean; changed: boolean; value?: string };
 type EdgeData = { g: GraphEdge; selected: boolean; changed: boolean };
@@ -113,15 +116,50 @@ export interface DiagramProps {
   changed: Set<string>;
   values: Record<string, string>;
   onSelect(element: string | undefined): void;
+  /** 動かした位置を保存する。失敗したらその文を返す */
+  onMove(patches: ElementPatch[]): Promise<string | undefined>;
 }
 
+type Pos = { x: number; y: number };
+
 export function Diagram(props: DiagramProps) {
-  const { graph, selected, changed, values } = props;
+  const { graph, selected, changed, values, onMove } = props;
   // 要素が増えたり減ったりしたときも表示範囲を合わせ直す
   const nodeIds = useMemo(() => graph.nodes.map((n) => n.id).sort().join("|"), [graph]);
+
+  // ドラッグ中（と保存が終わるまで）の位置。新しい図が来たら捨てる
+  const [moved, setMoved] = useState<Map<string, Pos>>(new Map());
+  useEffect(() => setMoved(new Map()), [graph]);
+
+  // 弁 → 両端のノード
+  const valveEnds = useMemo(() => {
+    const ends = new Map<string, { a?: string; b?: string }>();
+    for (const e of graph.edges) {
+      if (e.kind === "link") continue;
+      if (e.id.endsWith(":in")) ends.set(e.target, { ...ends.get(e.target), a: e.source });
+      if (e.id.endsWith(":out")) ends.set(e.source, { ...ends.get(e.source), b: e.target });
+    }
+    return ends;
+  }, [graph]);
+
+  /** 動かした位置を当てたノード。弁は、両端のどちらかが動いていれば真ん中に置き直す */
+  const placed = useMemo<GraphNode[]>(() => {
+    if (!moved.size) return graph.nodes;
+    const byId = new Map(graph.nodes.map((n) => [n.id, { ...n, ...(moved.get(n.id) ?? {}) }]));
+    for (const [valve, { a, b }] of valveEnds) {
+      const v = byId.get(valve);
+      const na = a ? byId.get(a) : undefined;
+      const nb = b ? byId.get(b) : undefined;
+      if (!v || !na || !nb || !(moved.has(a!) || moved.has(b!))) continue;
+      v.x = (na.x + na.width / 2 + nb.x + nb.width / 2) / 2 - v.width / 2;
+      v.y = (na.y + na.height / 2 + nb.y + nb.height / 2) / 2 - v.height / 2;
+    }
+    return graph.nodes.map((n) => byId.get(n.id)!);
+  }, [graph, moved, valveEnds]);
+
   const nodes = useMemo<ModelNodeT[]>(
     () =>
-      graph.nodes.map((g) => ({
+      placed.map((g) => ({
         id: g.id,
         type: "model",
         position: { x: g.x, y: g.y },
@@ -133,10 +171,37 @@ export function Diagram(props: DiagramProps) {
           changed: !!g.element && changed.has(g.element.toLowerCase()),
           value: g.kind === "STOCK" && g.element ? values[g.element] : undefined,
         },
-        draggable: false,
+        draggable: g.kind !== "VALVE",
         connectable: false,
       })),
-    [graph, selected, changed, values],
+    [placed, selected, changed, values],
+  );
+
+  const onNodesChange = useCallback((changes: NodeChange<ModelNodeT>[]) => {
+    const updates = changes.filter((c) => c.type === "position" && c.position);
+    if (!updates.length) return;
+    setMoved((prev) => {
+      const next = new Map(prev);
+      for (const c of updates) if (c.type === "position" && c.position) next.set(c.id, c.position);
+      return next;
+    });
+  }, []);
+
+  // 離したら位置を保存する
+  const placedRef = useRef(placed);
+  placedRef.current = placed;
+  const onNodeDragStop = useCallback(
+    async (_: unknown, _node: ModelNodeT, dragged: ModelNodeT[]) => {
+      // 自動配置で見ているときは、見えている配置をまとめて保存する（座標のない要素を残さない）。
+      // 左や上にはみ出したときも、全体をずらしてまとめて保存する
+      const shifted = shiftIntoView(placedRef.current);
+      const ids = graph.autoLayout || shifted ? undefined : new Set(dragged.map((n) => n.id));
+      const patches = positionPatches(shifted ?? placedRef.current, ids);
+      if (!patches.length) return;
+      const err = await onMove(patches);
+      if (err) setMoved(new Map());
+    },
+    [graph, onMove],
   );
   const edges = useMemo<ModelEdgeT[]>(
     () =>
@@ -164,7 +229,9 @@ export function Diagram(props: DiagramProps) {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       colorMode="system"
-      nodesDraggable={false}
+      onNodesChange={onNodesChange}
+      onNodeDragStop={onNodeDragStop}
+      nodeDragThreshold={3}
       nodesConnectable={false}
       elementsSelectable
       fitView

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { emptyModel, layoutModel, upsertElements, type ModelJSON } from "../src/core/index.js";
-import { borderPoint, toGraph, type GraphNode } from "../web/src/graph.js";
+import { borderPoint, positionPatches, shiftIntoView, toGraph, type GraphNode } from "../web/src/graph.js";
 import { loadSample, sampleNames } from "./helpers.js";
 
 function population(): ModelJSON {
@@ -70,6 +70,47 @@ describe("図への変換", () => {
         expect(ids.has(e.source) && ids.has(e.target), e.id).toBe(true);
       }
     }
+  });
+
+  test("自動配置の位置をモデルに保存すると、その位置のまま座標つきで描ける", () => {
+    const m = population();
+    const auto = toGraph(m);
+    expect(auto.autoLayout).toBe(true);
+    upsertElements(m, positionPatches(auto.nodes));
+    const saved = toGraph(m);
+    expect(saved.autoLayout).toBe(false);
+    const pos = (g: typeof auto, id: string) => {
+      const n = g.nodes.find((x) => x.id === id)!;
+      return [Math.round(n.x), Math.round(n.y)];
+    };
+    for (const id of ["el:population", "el:birth rate", "cloud:births:from", "cloud:deaths:to"]) {
+      expect(pos(saved, id), id).toEqual(pos(auto, id));
+    }
+  });
+
+  test("動かしたノードだけを保存する形にできる（雲はフローの端の座標になる）", () => {
+    const m = population();
+    layoutModel(m);
+    const g = toGraph(m);
+    const cloud = g.nodes.find((n) => n.id === "cloud:births:from")!;
+    cloud.x = 40;
+    cloud.y = 60;
+    expect(positionPatches(g.nodes, new Set(["cloud:births:from"]))).toEqual([{ name: "Births", display: { from_coordinates: [58, 73] } }]);
+  });
+
+  test("左や上にはみ出した配置は、全体をずらす", () => {
+    const m = population();
+    layoutModel(m);
+    const g = toGraph(m);
+    expect(shiftIntoView(g.nodes)).toBeUndefined();
+    const stock = g.nodes.find((n) => n.id === "el:population")!;
+    stock.x = -30;
+    stock.y = 5;
+    const shifted = shiftIntoView(g.nodes)!;
+    const s = shifted.find((n) => n.id === "el:population")!;
+    expect([s.x, s.y]).toEqual([20, 20]);
+    expect(Math.min(...shifted.map((n) => n.x))).toBe(20);
+    expect(Math.min(...shifted.map((n) => n.y))).toBe(20);
   });
 
   test("線は箱の縁から出す（楕円と長方形）", () => {
