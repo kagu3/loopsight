@@ -3,9 +3,12 @@
 // - 箱どうし（雲も含む）の重なりと、フローの名前と箱の重なり
 // - 線（フロー、リンク）が、つながっていない箱や雲の上を通っているところ
 // - 線どうしの交差
+// - リンクがフローの名前の上を通るところ
+// - 1 か所に集まる線：1 つの要素にほぼ同じ向きでつながる線（重なって見分けにくい）と、
+//   1 つの弁に集まる多くのリンク（リンクは弁の中心につなぐので、1 点に集まる）
 // 線の形は画面と同じにする（フローは直線、リンクは linkControlPoint で曲げた 2 次ベジェ曲線）。
 import { toGraph, type Graph, type GraphEdge, type GraphNode } from "./diagram.js";
-import { flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
+import { flowLabelRect, linkControlPoint, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
 import type { ModelJSON, Point } from "./modeljson.js";
 
 export interface DiagramPosition {
@@ -26,6 +29,10 @@ export interface DiagramCheck {
   lines_through_elements: string[];
   /** 線どうしの交差の数と、その例 */
   crossings: { count: number; examples: string[] };
+  /** リンクがフローの名前の上を通るところ */
+  lines_through_labels: string[];
+  /** 1 か所に集まる線（ほぼ同じ向きでつながる線と、1 つの弁に集まる多くのリンク） */
+  converging_lines: string[];
   /** いまの位置（直すときは upsert_elements の display で変える） */
   positions: DiagramPosition[];
 }
@@ -33,12 +40,19 @@ export interface DiagramCheck {
 /** 線をいくつかの短い線分で表したもの */
 interface Line {
   label: string;
+  edge: GraphEdge;
   /** この線の両端のノード（その上を通るのは当然なので、確かめない） */
   ends: Set<string>;
   segments: [Point, Point][];
+  /** 両端のノードから見た、線が出ていく向き（ラジアン）。リンクは曲げてあるので制御点の向き */
+  angles: Map<string, number>;
 }
 
 const MAX_EXAMPLES = 30;
+/** これより向きの差が小さい線は、まとまって見える */
+const BUNDLE_ANGLE = (12 * Math.PI) / 180;
+/** 1 つの弁にこの数以上のリンクが入ると、1 点に集まって見分けにくい */
+const MANY_LINKS_TO_VALVE = 5;
 
 function nameOf(n: GraphNode): string {
   if (n.kind === "CLOUD" && n.cloudOf) return `雲（${n.cloudOf.flow} の${n.cloudOf.end === "from" ? "出元" : "行き先"}）`;
@@ -48,6 +62,8 @@ function nameOf(n: GraphNode): string {
 
 const center = (n: GraphNode): Point => [n.x + n.width / 2, n.y + n.height / 2];
 const rectOf = (n: GraphNode, shrink = 2): Rect => ({ x: n.x + shrink, y: n.y + shrink, w: n.width - 2 * shrink, h: n.height - 2 * shrink });
+/** from から to への向き（ラジアン） */
+const angleOf = (from: Point, to: Point): number => Math.atan2(to[1] - from[1], to[0] - from[0]);
 
 function linesOf(graph: Graph): Line[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -56,7 +72,14 @@ function linesOf(graph: Graph): Line[] {
     const s = byId.get(e.source);
     const t = byId.get(e.target);
     if (!s || !t) continue;
-    lines.push({ label: lineLabel(e, s, t), ends: new Set([s.id, t.id]), segments: segmentsOf(e, center(s), center(t)) });
+    const a = center(s);
+    const b = center(t);
+    const c = e.kind === "link" ? linkControlPoint(a, b) : undefined;
+    const angles = new Map([
+      [s.id, angleOf(a, c ?? b)],
+      [t.id, angleOf(b, c ?? a)],
+    ]);
+    lines.push({ label: lineLabel(e, s, t), edge: e, ends: new Set([s.id, t.id]), segments: segmentsOf(e, a, b), angles });
   }
   return lines;
 }
@@ -99,6 +122,7 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
 
   // フローの名前（弁の横か下）と箱の重なり
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const labels: { valve: GraphNode; rect: Rect }[] = [];
   for (const v of valves) {
     const a = graph.edges.find((e) => e.target === v.id && e.kind !== "link");
     const b = graph.edges.find((e) => e.source === v.id && e.kind !== "link");
@@ -106,6 +130,7 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
     const nb = b && byId.get(b.target);
     if (!na || !nb) continue;
     const r = flowLabelRect(v.label, center(na), center(nb));
+    labels.push({ valve: v, rect: r });
     for (const n of boxes) {
       if (r.x < n.x + n.width && n.x < r.x + r.w && r.y < n.y + n.height && n.y < r.y + r.h) {
         overlaps.push(`フロー ${v.label} の名前 と ${nameOf(n)}`);
@@ -139,6 +164,32 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
     }
   }
 
+  // リンクがフローの名前の上を通るところ（その弁につながるリンクも含める。名前を横切るので読みにくい）
+  const throughLabels: string[] = [];
+  for (const line of lines) {
+    if (line.edge.kind !== "link") continue;
+    for (const { valve, rect } of labels) {
+      if (line.segments.some(([a, b]) => segmentHitsRect(a, b, rect))) throughLabels.push(`${line.label} が フロー ${valve.label} の名前の上を通る`);
+    }
+  }
+
+  // 1 か所に集まる線
+  const converging: string[] = [];
+  for (const n of graph.nodes) {
+    const touching = lines.filter((l) => l.ends.has(n.id));
+    if (n.kind === "VALVE") {
+      const links = touching.filter((l) => l.edge.kind === "link");
+      if (links.length >= MANY_LINKS_TO_VALVE) converging.push(`${nameOf(n)} に ${links.length} 本のリンクが 1 点に集まる：${links.map((l) => l.label).join("、")}`);
+    }
+    const around = touching
+      .map((l) => ({ line: l, angle: l.angles.get(n.id)! }))
+      .sort((p, q) => p.angle - q.angle);
+    for (const group of bundles(around)) {
+      const spread = Math.round(((group.at(-1)!.angle - group[0]!.angle + 2 * Math.PI) % (2 * Math.PI)) * (180 / Math.PI));
+      converging.push(`${nameOf(n)} に ${group.length} 本の線がほぼ同じ向き（${spread}° の幅）でつながる：${group.map((g) => g.line.label).join("、")}`);
+    }
+  }
+
   const positions: DiagramPosition[] = boxes.map((n) =>
     n.kind === "CLOUD"
       ? { name: nameOf(n), type: "CLOUD", coordinates: center(n).map(Math.round) as [number, number] }
@@ -158,6 +209,36 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
     overlaps: overlaps.slice(0, MAX_EXAMPLES),
     lines_through_elements: through.slice(0, MAX_EXAMPLES),
     crossings: { count, examples },
+    lines_through_labels: throughLabels.slice(0, MAX_EXAMPLES),
+    converging_lines: converging.slice(0, MAX_EXAMPLES),
     positions,
   };
+}
+
+/**
+ * 向きの順に並べた線を、となりとの差が BUNDLE_ANGLE より小さいものどうしでまとめる（2 本以上のまとまりだけ返す）。
+ * 向きは一周するので、最後と最初もつなげて調べる。
+ * 少しずつずれた線がどこまでもつながらないよう、まとまりの先頭からの幅が BUNDLE_ANGLE 以上になったら分ける。
+ */
+function bundles<T extends { angle: number }>(sorted: T[]): T[][] {
+  if (sorted.length < 2) return [];
+  const diff = (a: number, b: number) => (b - a + 2 * Math.PI) % (2 * Math.PI);
+  const gap = (i: number) => diff(sorted[i]!.angle, sorted[(i + 1) % sorted.length]!.angle);
+  // まとまりの切れ目（となりと離れているところ）から始める。切れ目がなければ最初の線から始める
+  const found = sorted.findIndex((_, i) => gap(i) >= BUNDLE_ANGLE);
+  const start = found < 0 ? sorted.length - 1 : found;
+  const groups: T[][] = [];
+  let current: T[] = [];
+  const close = () => {
+    if (current.length >= 2) groups.push(current);
+    current = [];
+  };
+  for (let k = 1; k <= sorted.length; k++) {
+    const i = (start + k) % sorted.length;
+    if (current.length > 0 && diff(current[0]!.angle, sorted[i]!.angle) >= BUNDLE_ANGLE) close();
+    current.push(sorted[i]!);
+    if (gap(i) >= BUNDLE_ANGLE) close();
+  }
+  close();
+  return groups;
 }

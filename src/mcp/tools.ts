@@ -154,7 +154,7 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする
-5. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素の上を通るところ・線の交差の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
+5. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
 6. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
@@ -293,7 +293,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       title: "図の配置を付ける",
       description:
         "座標のない要素に、重ならないように座標を付けて保存する（書き出しと同じ簡易レイアウト）。reset: true ですべて並べ直す。" +
-        "結果に図の確認（重なり、線が要素の上を通るところ、線の交差）を付ける。直すときは view_diagram で図を見ながら upsert_elements の display で位置を変える。",
+        "結果に図の確認（重なり、線が要素や名前の上を通るところ、線の交差、1 か所に集まる線）を付ける。直すときは view_diagram で図を見ながら upsert_elements の display で位置を変える。",
       inputSchema: {
         model: modelName,
         reset: z.boolean().optional().describe("いまの座標を捨てて、すべて並べ直す（既定は false）"),
@@ -322,7 +322,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "図を見る",
       description:
-        "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、各要素の位置を返す。" +
+        "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、各要素の位置を返す。" +
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。",
       inputSchema: {
