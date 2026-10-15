@@ -164,13 +164,17 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
 
   // 画面からの書き込みの記録（モデル名 → 古い順）。メモリの中だけに持つ
   const history = new Map<string, HistoryEntry[]>();
-  // 同じファイルを指す名前（"foo" と "foo.json"、大文字と小文字）は同じ記録にする
+  // 同じファイルを指す名前（"foo" と "foo.json"）は同じ記録にする。
+  // 大文字と小文字は、ファイル名で区別しない Windows と macOS でだけ同じに扱う
+  const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
   const keyOf = (name: string) => {
+    let key = name;
     try {
-      return checkModelName(name).toLowerCase();
+      key = checkModelName(name);
     } catch {
-      return name.toLowerCase();
+      // 使えない名前は、そのまま（読み書きの前に断られる）
     }
+    return caseInsensitive ? key.toLowerCase() : key;
   };
   const historyOf = (name: string) => {
     const key = keyOf(name);

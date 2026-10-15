@@ -26,6 +26,9 @@ function changedElements(prev: ModelResponse | undefined, next: ModelResponse): 
   return out;
 }
 
+/** 順番待ちのあいだに AI などの変更が画面に出たため、送らなかった書き込みの知らせ */
+const SKIPPED_MESSAGE = "画面の変更を送る前に、ほかのところ（AI など）でモデルが変わったため、送りませんでした。いまの内容を確かめて、もう一度直してください。";
+
 /** 入力欄で打っているときは、元に戻すのショートカットを横取りしない */
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
@@ -51,6 +54,9 @@ export function App() {
   const pendingWrites = useRef(0);
   // 書き込み中に変更の知らせが来たら、書き込みが終わってから読み直す
   const reloadAfterWrite = useRef(false);
+  // ほかのところ（AI など）の変更を画面に出した回数。順番待ちの書き込みは、待っているあいだにこれが増えたら送らない
+  const externalSeq = useRef(0);
+  const sameModel = (a: string | undefined, b: string | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
   const loadList = useCallback(async () => {
     try {
@@ -64,6 +70,7 @@ export function App() {
   const show = useCallback((next: ModelResponse, highlight: boolean) => {
     // これより前に始めた読み込みの結果は捨てる
     loadSeq.current++;
+    if (highlight) externalSeq.current++;
     const diff = highlight ? changedElements(dataRef.current, next) : new Set<string>();
     dataRef.current = next;
     setData(next);
@@ -101,8 +108,20 @@ export function App() {
   useEffect(() => {
     void loadList();
     const es = new EventSource("/api/events");
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
+    // つながり直したら読み直す（切れているあいだの変更は知らせが来ないため）
+    let lost = false;
+    es.onopen = () => {
+      setConnected(true);
+      if (lost) {
+        lost = false;
+        void loadList();
+        void loadModel(currentRef.current);
+      }
+    };
+    es.onerror = () => {
+      setConnected(false);
+      lost = true;
+    };
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data as string) as ChangeEvent;
       void loadList();
@@ -138,9 +157,12 @@ export function App() {
   /** 書き込みの結果を画面に反映する。失敗したらその文を返す */
   const applyWrite = useCallback(
     (result: WriteResult): string | undefined => {
+      // 書き込んでいるあいだに別のモデルを開いていたら、結果は画面に出さない
+      const shown = result.ok ? result.data.model.name : result.error.current?.name;
+      if (shown && !sameModel(shown, currentRef.current)) return undefined;
       if (result.ok) {
+        // 前の知らせ（衝突など）は、利用者が閉じるまで残す
         show(result.data.model, false);
-        setNotice(undefined);
         return undefined;
       }
       if (result.error.current) {
@@ -153,12 +175,21 @@ export function App() {
     [show],
   );
 
-  /** 書き込みを順番待ちに入れる。版は、順番が来たときに表示している最新のものを使う */
+  /**
+   * 書き込みを順番待ちに入れる。版は、順番が来たときに表示している最新のものを使う。
+   * 待っているあいだに AI などの変更が画面に出たら（前の書き込みが衝突したときなど）、送らずに知らせる。
+   * 利用者が見ていない内容の上に、黙って書き込まないため。
+   */
   const enqueueWrite = useCallback(
-    <T,>(task: () => Promise<T>): Promise<T> => {
+    <T,>(task: () => Promise<T>, skipped: T): Promise<T> => {
       pendingWrites.current++;
       setBusy(true);
-      const run = writeQueue.current.then(task, task);
+      const seenExternal = externalSeq.current;
+      const guarded = async () => {
+        if (externalSeq.current !== seenExternal) return skipped;
+        return task();
+      };
+      const run = writeQueue.current.then(guarded, guarded);
       writeQueue.current = run.catch(() => undefined);
       return run.finally(() => {
         pendingWrites.current--;
@@ -175,21 +206,24 @@ export function App() {
 
   const edit = useCallback(
     (elements: ElementPatch[]): Promise<string | undefined> =>
-      enqueueWrite(async () => {
+      enqueueWrite<string | undefined>(async () => {
         const d = dataRef.current;
-        if (!d) return "モデルを読み込んでいません。";
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
         return applyWrite(await postEdit(d.name, d.version, elements));
-      }),
+      }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
   );
 
   const undo = useCallback(
     () =>
-      enqueueWrite(async () => {
+      enqueueWrite<string | undefined>(async () => {
         const d = dataRef.current;
-        if (!d || !d.undo_available) return;
+        if (!d || !d.undo_available || !sameModel(d.name, currentRef.current)) return undefined;
         const err = applyWrite(await postUndo(d.name, d.version));
         if (err) setNotice(err);
+        return err;
+      }, SKIPPED_MESSAGE).then((err) => {
+        if (err === SKIPPED_MESSAGE) setNotice(err);
       }),
     [applyWrite, enqueueWrite],
   );

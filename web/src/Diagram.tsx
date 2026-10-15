@@ -171,7 +171,7 @@ export function Diagram(props: DiagramProps) {
         height: g.height,
         data: {
           g,
-          selected: !!g.element && g.element === selected,
+          selected: !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(),
           changed: !!g.element && changed.has(g.element.toLowerCase()),
           value: g.kind === "STOCK" && g.element ? values[g.element] : undefined,
         },
@@ -220,7 +220,7 @@ export function Diagram(props: DiagramProps) {
         type: "floating",
         source: g.source,
         target: g.target,
-        data: { g, selected: !!g.element && g.element === selected, changed: !!g.element && changed.has(g.element.toLowerCase()) },
+        data: { g, selected: !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(), changed: !!g.element && changed.has(g.element.toLowerCase()) },
         // 矢印の色は線と同じトークンにする（React Flow は色を style に入れるので CSS 変数が効く）
         markerEnd: g.arrow
           ? g.kind === "link"
