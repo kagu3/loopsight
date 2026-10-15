@@ -144,6 +144,7 @@ npm test          # テスト（vitest）
 npm run typecheck # 型チェック
 npm run build     # dist/ にビルド（サーバーと画面）
 npm run dev:web   # 画面の開発用サーバー（/api は npm run viewer に回す）
+npm run screenshots # docs/VIEWER.md のスクリーンショットを撮り直す（先に npm run build。Edge か Chrome が必要）
 ```
 
 - `src/core`：モデルの保持、変換、編集、検証、実行。MCP に依存しない（段階 2 の Web 画面でも使う）

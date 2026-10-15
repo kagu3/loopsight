@@ -20,7 +20,8 @@
     "dev:web": "vite --config web/vite.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "screenshots": "node scripts/viewer-screenshots.mjs"
   },
   "repository": {
     "type": "git",
