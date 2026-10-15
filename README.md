@@ -23,13 +23,19 @@ npm run build
 
 ## Claude Code に登録する
 
+### このリポジトリの中で使う
+
+リポジトリのルートに [.mcp.json](.mcp.json) があるので、登録の作業はいらない。ビルドしてから、このリポジトリで Claude Code のセッションを始める。最初に、プロジェクトの MCP サーバーを使ってよいか聞かれるので許可する。モデルはリポジトリの `models/` に保存される（git の管理外）。
+
+### ほかのプロジェクトから使う
+
 `claude mcp add` で登録する。パスは自分の環境に合わせて絶対パスで書く。
 
 ```bash
-claude mcp add insight-maker -- node /absolute/path/to/insight-maker-mcp/dist/mcp/index.js --models-dir /absolute/path/to/models
+claude mcp add --scope user insight-maker -- node /absolute/path/to/insight-maker-mcp/dist/mcp/index.js --models-dir /absolute/path/to/models
 ```
 
-プロジェクトの `.mcp.json` に書いてもよい（[.mcp.json.example](.mcp.json.example)）。
+そのプロジェクトの `.mcp.json` に書いてもよい。作業フォルダは環境変数 `INSIGHT_MAKER_MODELS_DIR` でも指定できる。
 
 ```json
 {
