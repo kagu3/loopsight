@@ -1,0 +1,107 @@
+{
+  "engine": "SIMULATION_PACKAGE",
+  "name": "Population",
+  "simulation": {
+    "algorithm": "RK1",
+    "time_start": 0,
+    "time_length": 50,
+    "time_step": 1,
+    "time_units": "YEARS"
+  },
+  "elements": [
+    {
+      "type": "STOCK",
+      "name": "Population",
+      "behavior": {
+        "initial_value": 1000
+      },
+      "display": {
+        "coordinates": [
+          100,
+          260
+        ],
+        "size": [
+          100,
+          40
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "Birth Rate",
+      "behavior": {
+        "value": 0.03
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 0,
+        "interactive_max": 0.1,
+        "coordinates": [
+          90,
+          60
+        ],
+        "size": [
+          120,
+          50
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "Death Rate",
+      "behavior": {
+        "value": 0.01
+      },
+      "display": {
+        "coordinates": [
+          90,
+          460
+        ],
+        "size": [
+          120,
+          50
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "Births",
+      "from": null,
+      "to": "Population",
+      "behavior": {
+        "value": "[Population]*[Birth Rate]"
+      },
+      "display": {
+        "from_coordinates": [
+          150,
+          150
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "Deaths",
+      "from": "Population",
+      "to": null,
+      "behavior": {
+        "value": "[Population]*[Death Rate]"
+      },
+      "display": {
+        "to_coordinates": [
+          150,
+          410
+        ]
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "Birth Rate",
+      "to": "Births"
+    },
+    {
+      "type": "LINK",
+      "from": "Death Rate",
+      "to": "Deaths"
+    }
+  ]
+}
