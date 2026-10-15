@@ -98,6 +98,7 @@ export function layoutModel(model: ModelJSON): string[] {
       const py = end === "from" ? r.y - 110 : r.y + r.h + 110;
       f.display = { ...(f.display ?? {}), [key]: [Math.round(px), Math.round(py)] };
       occupied.push({ x: px - 15, y: py - 15, w: 30, h: 30 });
+      if (f.name && !placed.includes(f.name)) placed.push(f.name);
     }
   }
 
@@ -130,6 +131,7 @@ export function layoutModel(model: ModelJSON): string[] {
     while (!isFree(r)) r = { ...r, x: r.x + 250 };
     f.display = { ...(f.display ?? {}), from_coordinates: [r.x, r.y + 15], to_coordinates: [r.x + r.w, r.y + 15] };
     occupied.push(r);
+    if (f.name) placed.push(f.name);
   }
 
   // 3. 変数とコンバーター：リンクでつながる、位置の決まった要素の近くに置く

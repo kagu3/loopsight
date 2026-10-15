@@ -6,11 +6,13 @@ import {
   ModelStore,
   StoreError,
   buildModel,
+  checkBrackets,
   emptyModel,
   importInsightMakerXML,
   importModelText,
   removeElements,
   setSimulation,
+  similarNames,
   summarizeModel,
   upsertElements,
   validateModel,
@@ -162,6 +164,12 @@ describe("要素の編集", () => {
     expect(validateModel(m).ok).toBe(true);
   });
 
+  test("type なしで既存の名前に近い名前を指定すると、打ち間違いを指摘する", () => {
+    const m = sir();
+    expect(() => upsertElements(m, [{ name: "Bta", behavior: { value: 1 } }])).toThrow(/もしかして "Beta"/);
+    expect(() => removeElements(m, [{ name: "Gama" }])).toThrow(/もしかして "Gamma"/);
+  });
+
   test("種類の変更と、追加できない種類は断る", () => {
     const m = sir();
     expect(() => upsertElements(m, [{ type: "STOCK", name: "Beta" }])).toThrow(/種類/);
@@ -204,6 +212,7 @@ describe("要素の編集", () => {
     const s = summarizeModel(sir());
     expect(s.counts).toEqual({ STOCK: 3, VARIABLE: 2, FLOW: 2, LINK: 3 });
     expect(s.flows[0]).toMatchObject({ name: "Infection", from: "S", to: "I" });
+    expect(s.title).toBe("sir");
     expect(s.links).toContain("Beta → Infection");
     expect(JSON.stringify(s)).not.toMatch(/coordinates/);
   });
@@ -217,6 +226,55 @@ describe("検証", () => {
     expect(r.ok).toBe(false);
     expect(r.errors[0]).toMatchObject({ element: "y" });
     expect(r.errors[0]!.hint).toBeTruthy();
+  });
+
+  test("存在しない要素の参照には似た名前を示す", () => {
+    const m = emptyModel("t");
+    upsertElements(m, [
+      { type: "VARIABLE", name: "Birth Rate", behavior: { value: 0.03 } },
+      { type: "VARIABLE", name: "y", behavior: { value: "[Birth Rat] * 2" } },
+    ]);
+    const r = validateModel(m);
+    expect(r.errors[0]!.hint).toMatch(/もしかして "Birth Rate"/);
+  });
+
+  test("似た名前は近いものだけを返す", () => {
+    expect(similarNames("Birth Rat", ["Birth Rate", "Death Rate", "Population"])).toEqual(["Birth Rate"]);
+    expect(similarNames("mortality", ["Mortality"])).toEqual(["Mortality"]);
+    expect(similarNames("xyz", ["Population"])).toEqual([]);
+  });
+
+  test("括弧の対応の誤りを、エンジンより先にわかる言葉で返す", () => {
+    expect(checkBrackets("[A]*([B]")).toMatch(/\( を閉じる \) が 1 つ足りません/);
+    expect(checkBrackets("[A])")).toMatch(/対応する開き括弧のない \)/);
+    expect(checkBrackets("(1 + 2}")).toMatch(/\} で閉じています/);
+    expect(checkBrackets("[Rate (per year)] * {1/(Prey * Years)}")).toBeUndefined();
+    expect(checkBrackets('"(" + 1 // )')).toBeUndefined();
+    const m = emptyModel("t");
+    upsertElements(m, [{ type: "VARIABLE", name: "y", behavior: { value: "2*(3" } }]);
+    expect(validateModel(m).errors[0]!.message).toMatch(/足りません/);
+  });
+
+  test("エンジンの英語のメッセージは日本語にしてヒントを付ける", () => {
+    const m = emptyModel("t");
+    upsertElements(m, [{ type: "VARIABLE", name: "y", behavior: { value: "Foo(1)" } }]);
+    const e = validateModel(m).errors[0]!;
+    expect(e.message).toMatch(/変数か関数 "Foo" がありません/);
+    expect(e.hint).toMatch(/関数名/);
+    upsertElements(m, [{ name: "y", behavior: { value: "3 +* 2" } }]);
+    expect(validateModel(m).errors[0]!.message).toMatch(/式の文法が正しくありません/);
+  });
+
+  test("式のない変数だけのモデル（因果ループ図）には警告を出す", () => {
+    const r = validateModel(loadSample("cld"));
+    expect(r.ok).toBe(true);
+    expect(r.warnings[0]!.message).toMatch(/因果ループ図/);
+    const m = emptyModel("t");
+    upsertElements(m, [
+      { type: "STOCK", name: "S", behavior: { initial_value: 1 } },
+      { type: "VARIABLE", name: "k" },
+    ]);
+    expect(validateModel(m).warnings[0]!.message).toMatch(/式のない要素があります: k/);
   });
 
   test("ModelJSON の形の誤りはエンジンのメッセージをそのまま返す", () => {

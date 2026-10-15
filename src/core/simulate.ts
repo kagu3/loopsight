@@ -1,8 +1,8 @@
 import { Link } from "simulation";
 import type { Equation, ModelElement, ModelJSON, SimulationSettings } from "./modeljson.js";
-import { clone, findElement } from "./modeljson.js";
+import { clone, didYouMean, findElement } from "./modeljson.js";
 import { checkSimulation } from "./edit.js";
-import { ModelError, buildModel, toModelError } from "./validate.js";
+import { ModelError, buildModel, staticCheck, toModelError } from "./validate.js";
 
 /** 実行 1 回分の全データ */
 export interface RunData {
@@ -41,6 +41,19 @@ export interface RunSummary {
 }
 
 /** 上書きを当てたモデルのコピーを作る（元のモデルは変えない） */
+/** 値を変えられる要素（STOCK、VARIABLE、FLOW）の名前 */
+function valueNames(model: ModelJSON): string[] {
+  return model.elements.filter((e) => e.type === "STOCK" || e.type === "VARIABLE" || e.type === "FLOW").map((e) => e.name!);
+}
+
+/** 「見つかりません」の issue。似た名前があればヒントに出す */
+function notFound(name: string, candidates: string[], what: string): { element: string; message: string; hint?: string } {
+  const issue: { element: string; message: string; hint?: string } = { element: name, message: `${what}: ${candidates.join(", ")}` };
+  const guess = didYouMean(name, candidates);
+  if (guess) issue.hint = guess;
+  return issue;
+}
+
 export function applyOverrides(model: ModelJSON, options: RunOptions = {}): ModelJSON {
   const copy = clone(model);
   if (options.simulation) {
@@ -54,8 +67,8 @@ export function applyOverrides(model: ModelJSON, options: RunOptions = {}): Mode
   for (const [name, value] of Object.entries(options.overrides ?? {})) {
     const el = findElement(copy, name);
     if (!el) {
-      const candidates = copy.elements.filter((e) => e.type === "STOCK" || e.type === "VARIABLE" || e.type === "FLOW").map((e) => e.name);
-      throw new ModelError(`上書きする要素 "${name}" が見つかりません。`, [{ element: name, message: `上書きできる要素: ${candidates.join(", ")}` }]);
+      const candidates = valueNames(copy);
+      throw new ModelError(`上書きする要素 "${name}" が見つかりません。`, [notFound(name, candidates, "上書きできる要素")]);
     }
     setValue(el, value);
   }
@@ -71,7 +84,11 @@ function setValue(el: ModelElement, value: Equation): void {
 
 /** モデルを実行して全データを返す */
 export function runModel(model: ModelJSON, options: RunOptions = {}): RunData {
-  const m = buildModel(applyOverrides(model, options));
+  const applied = applyOverrides(model, options);
+  // 存在しない要素の参照などは、エンジンより先に見つけてわかりやすく返す
+  const { errors } = staticCheck(applied);
+  if (errors.length) throw new ModelError(`モデルにエラーがあるため実行できません（${errors.length} 件）。validate_model でも確かめられます。`, errors);
+  const m = buildModel(applied);
   let results;
   try {
     results = m.simulate();
@@ -103,7 +120,10 @@ export function resolveTargets(model: ModelJSON, targets: string[] | undefined):
   if (!targets?.length) return defaultTargets(model);
   return targets.map((t) => {
     const el = findElement(model, t);
-    if (!el) throw new ModelError(`要素 "${t}" が見つかりません。`, [{ element: t, message: `ある要素: ${defaultTargets(model).join(", ")} など` }]);
+    if (!el) {
+      const names = model.elements.filter((e) => e.type !== "LINK" && e.name).map((e) => e.name!);
+      throw new ModelError(`要素 "${t}" が見つかりません。`, [notFound(t, names, "ある要素")]);
+    }
     return el.name!;
   });
 }
@@ -244,7 +264,7 @@ export function sweepParameter(
   options: { targets?: string[]; samples?: number; simulation?: SimulationSettings; baseOverrides?: Record<string, Equation> } = {},
 ): Comparison {
   const el = findElement(model, parameter);
-  if (!el) throw new ModelError(`パラメータ "${parameter}" が見つかりません。`, [{ element: parameter, message: "STOCK、VARIABLE、FLOW の名前を指定してください。" }]);
+  if (!el) throw new ModelError(`パラメータ "${parameter}" が見つかりません。`, [notFound(parameter, valueNames(model), "振れる要素（STOCK、VARIABLE、FLOW）")]);
   const scenarios = values.map((v) => ({ name: `${el.name} = ${v}`, overrides: { ...(options.baseOverrides ?? {}), [el.name!]: v } }));
   return compareScenarios(model, scenarios, options);
 }

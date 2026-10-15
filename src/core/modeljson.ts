@@ -141,6 +141,37 @@ export function renameInEquation(equation: string, oldName: string, newName: str
   );
 }
 
+function editDistance(a: string, b: string): number {
+  let prev = [...Array(b.length + 1).keys()];
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+/** 打ち間違いの候補：name に近い名前を近い順に返す（最大 3 件） */
+export function similarNames(name: string, candidates: string[]): string[] {
+  const key = nameKey(name);
+  const limit = Math.max(2, Math.floor(key.length / 3));
+  return candidates
+    .map((c) => ({ c, k: nameKey(c), d: editDistance(key, nameKey(c)) }))
+    // 短い名前どうし（"x" と "z" など）は、1 文字も合っていなければ候補にしない
+    .filter((x) => x.d <= limit && x.d < Math.min(key.length, x.k.length))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 3)
+    .map((x) => x.c);
+}
+
+/** 「もしかして」の文。候補がなければ空文字 */
+export function didYouMean(name: string, candidates: string[]): string {
+  const s = similarNames(name, candidates);
+  return s.length ? `もしかして ${s.map((n) => `"${n}"`).join("、")} ですか？` : "";
+}
+
 export function emptyModel(name: string, simulation: SimulationSettings = {}): ModelJSON {
   return {
     engine: "SIMULATION_PACKAGE",

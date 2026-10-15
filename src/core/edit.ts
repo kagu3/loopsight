@@ -1,9 +1,18 @@
 import type { ElementBehavior, ElementDisplay, ElementType, ModelElement, ModelJSON, SimulationSettings } from "./modeljson.js";
-import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
+import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 import { canReference } from "./validate.js";
 
 export class EditError extends Error {
   override name = "EditError";
+}
+
+/** 「要素が見つかりません」のエラー。似た名前があれば添える */
+function notFoundError(model: ModelJSON, what: string, name: string): EditError {
+  return new EditError(`${what} "${name}" が見つかりません。${guessName(model, name)}`);
+}
+
+function guessName(model: ModelJSON, name: string): string {
+  return didYouMean(name, model.elements.filter((e) => e.type !== "LINK" && e.name).map((e) => e.name!));
 }
 
 /** upsert_elements の 1 件分。behavior と display は既存の値に重ねる（null を入れるとその項目を消す）。 */
@@ -66,7 +75,7 @@ function applyPatch(el: ModelElement, p: ElementPatch): void {
 /** 要素の名前を変え、モデル内の参照もすべて書き換える */
 export function renameElement(model: ModelJSON, oldName: string, newName: string): void {
   const el = findElement(model, oldName);
-  if (!el) throw new EditError(`要素 "${oldName}" が見つかりません。`);
+  if (!el) throw notFoundError(model, "要素", oldName);
   const clash = findElement(model, newName);
   if (clash && clash !== el) throw new EditError(`"${newName}" という名前の要素がすでにあります。`);
   const from = el.name!;
@@ -143,7 +152,10 @@ export function upsertElements(model: ModelJSON, patches: ElementPatch[], option
       applyPatch(existing, p);
       report.updated.push(describe(existing));
     } else {
-      if (p.rename_to) throw new EditError(`名前を変える要素 "${p.name}" が見つかりません。`);
+      if (p.rename_to) throw notFoundError(model, "名前を変える要素", p.name);
+      // 既存の要素を直すつもりで名前を打ち間違えた場合
+      const guess = p.type ? "" : guessName(model, p.name);
+      if (guess) throw new EditError(`要素 "${p.name}" が見つかりません。${guess}新しく追加するなら type を指定してください。`);
       const type = checkNewElement(p);
       const el: ModelElement = { type, name: p.name.trim() };
       if (type === "FLOW") {
@@ -205,7 +217,7 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
   for (const t of targets) {
     if (t.name) {
       const el = findElement(model, t.name);
-      if (!el) throw new EditError(`要素 "${t.name}" が見つかりません。`);
+      if (!el) throw notFoundError(model, "要素", t.name);
       removeOne(el);
     } else if (t.from && t.to) {
       const link = findLink(model, t.from, t.to);

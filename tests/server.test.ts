@@ -92,6 +92,7 @@ describe("MCP server", () => {
     expect(run.results.Infected.max).toBeGreaterThan(100);
     expect(run.results.Infected.series).toHaveLength(5);
     const csv = await readFile(run.csv, "utf8");
+    expect(csv.startsWith("﻿")).toBe(true);
     expect(csv.split("\n")[0]).toContain("Infected");
     expect(path.relative(dir, run.csv)).toMatch(/^output/);
 
@@ -177,5 +178,26 @@ describe("MCP server", () => {
     const err = JSON.parse(await callError("run_simulation", { model: "e" }));
     expect(err.issues[0].element).toBe("x");
     expect(await callError("export_model", { model: "e", path: "../../outside.json" })).toMatch(/外を指して/);
+    // どのエラーも { error } の JSON で返る
+    expect(JSON.parse(await callError("get_model", { model: "none" })).error).toMatch(/見つかりません/);
+    expect(JSON.parse(await callError("upsert_elements", { model: "e", elements: [{ name: "z" }] })).error).toMatch(/type が必要/);
+  });
+
+  test("時系列の [時刻, 値] は 1 行にまとめて返す", async () => {
+    await call("create_model", { model: "g", simulation: { time_length: 10 } });
+    await call("upsert_elements", {
+      model: "g",
+      elements: [
+        { type: "STOCK", name: "P", behavior: { initial_value: 1 } },
+        { type: "FLOW", name: "F", to: "P", behavior: { value: "[P]*0.1" } },
+      ],
+    });
+    const res = await client.callTool({ name: "run_simulation", arguments: { model: "g", samples: 3 } });
+    const text = (res.content as { text: string }[])[0]!.text;
+    expect(text).toMatch(/"series": \[\[0,1\],\[5,[\d.]+\],\[10,[\d.]+\]\]/);
+    expect(JSON.parse(text).results.P.series).toHaveLength(3);
+    const summary = await call("get_model", { model: "g" });
+    expect(summary).toMatchObject({ model: "g", title: "g" });
+    expect(summary.flows[0]).toMatchObject({ name: "F", from: null, to: "P" });
   });
 });

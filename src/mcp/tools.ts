@@ -71,18 +71,40 @@ const elementPatch = z.object({
 
 // ---- 共通の処理 ----
 
-function ok(data: unknown, compact = false): CallToolResult {
-  return { content: [{ type: "text", text: compact ? JSON.stringify(data) : JSON.stringify(data, null, 2) }] };
+const isPrimitive = (v: unknown) => v === null || typeof v !== "object";
+
+/**
+ * 読みやすさを保ちつつ短くした JSON。数や文字列だけの配列（時系列の [時刻, 値] など）は 1 行にまとめ、
+ * そうした配列が並ぶ配列も、短ければ 1 行にする。
+ */
+export function formatJSON(value: unknown, indent = ""): string {
+  if (isPrimitive(value)) return JSON.stringify(value) ?? "null";
+  const inner = indent + "  ";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    if (value.every(isPrimitive)) return JSON.stringify(value);
+    if (value.every((v) => Array.isArray(v) && v.every(isPrimitive))) {
+      const line = JSON.stringify(value);
+      if (line.length <= 120) return line;
+    }
+    return `[\n${value.map((v) => inner + formatJSON(v, inner)).join(",\n")}\n${indent}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) return "{}";
+  return `{\n${entries.map(([k, v]) => `${inner}${JSON.stringify(k)}: ${formatJSON(v, inner)}`).join(",\n")}\n${indent}}`;
 }
 
+function ok(data: unknown, compact = false): CallToolResult {
+  return { content: [{ type: "text", text: compact ? JSON.stringify(data) : formatJSON(data) }] };
+}
+
+/** エラーはどれも { error, issues? } の JSON で返す */
 function fail(e: unknown): CallToolResult {
-  if (e instanceof ModelError) {
-    return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: e.message, issues: e.issues }, null, 2) }] };
-  }
-  if (e instanceof StoreError || e instanceof EditError || e instanceof ImportError) {
-    return { isError: true, content: [{ type: "text", text: e.message }] };
-  }
-  return { isError: true, content: [{ type: "text", text: `予期しないエラー: ${(e as Error)?.message ?? String(e)}` }] };
+  let body: { error: string; issues?: unknown[] };
+  if (e instanceof ModelError) body = e.issues.length ? { error: e.message, issues: e.issues } : { error: e.message };
+  else if (e instanceof StoreError || e instanceof EditError || e instanceof ImportError) body = { error: e.message };
+  else body = { error: `予期しないエラー: ${(e as Error)?.message ?? String(e)}` };
+  return { isError: true, content: [{ type: "text", text: formatJSON(body) }] };
 }
 
 /** 例外を MCP のエラー応答に変える */
@@ -264,7 +286,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     async (a: { model: string; format?: "summary" | "full" }) => {
       try {
         const m = await store.read(a.model);
-        return a.format === "full" ? ok(m, true) : ok(summarizeModel(m));
+        return a.format === "full" ? ok(m, true) : ok({ model: a.model, ...summarizeModel(m) });
       } catch (e) {
         return fail(e);
       }
@@ -377,7 +399,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         if (a.overrides) summary.overrides = a.overrides;
         if (a.csv || a.csv_path) {
           const rel = a.csv_path ?? path.join("output", `${a.model}-${timestamp()}.csv`);
-          summary.csv = await store.writeTextFile(store.resolveInside(rel), runToCSV(data));
+          // BOM を付けて、Excel でも日本語の要素名が文字化けしないようにする
+          summary.csv = await store.writeTextFile(store.resolveInside(rel), "﻿" + runToCSV(data));
         }
         return summary;
       },

@@ -59,7 +59,8 @@ describe("簡易レイアウト", () => {
   test("座標のない要素すべてに、重ならないように座標を付ける", () => {
     const m = chain();
     const placed = layoutModel(m);
-    expect(placed.sort()).toEqual(["A", "B", "base", "C", "k1", "k2", "lonely", "scale", "table"].sort());
+    // 雲（モデルの外の端）の座標を付けたフローも入る
+    expect(placed.sort()).toEqual(["A", "B", "base", "C", "Inflow", "Inflow 2", "k1", "k2", "lonely", "Loss", "scale", "table"].sort());
     expectNoOverlap(m);
     expect(validateModel(m).ok).toBe(true);
   });

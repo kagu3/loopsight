@@ -2,7 +2,8 @@ import type { ModelElement, ModelJSON } from "./modeljson.js";
 
 /** AI が読みやすい、座標などを省いたモデルの要約 */
 export interface ModelSummary {
-  name?: string;
+  /** モデルの表示名（ModelJSON の name） */
+  title?: string;
   description?: string;
   simulation: ModelJSON["simulation"];
   counts: Record<string, number>;
@@ -32,7 +33,7 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
   for (const e of model.elements) counts[e.type] = (counts[e.type] ?? 0) + 1;
 
   const summary: ModelSummary = {
-    name: model.name,
+    title: model.name,
     description: model.description,
     simulation: model.simulation,
     counts,
@@ -40,7 +41,8 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
       compact({ name: e.name, initial_value: e.behavior?.initial_value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, slider: interactive(e), description: e.description }),
     ),
     flows: of("FLOW").map((e) =>
-      compact({ name: e.name, from: e.from ?? "（外）", to: e.to ?? "（外）", value: e.behavior?.value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, description: e.description }),
+      // from と to の null は「モデルの外」
+      ({ name: e.name, from: e.from ?? null, to: e.to ?? null, ...compact({ value: e.behavior?.value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, description: e.description }) }),
     ),
     variables: of("VARIABLE").map((e) => compact({ name: e.name, value: e.behavior?.value, units: e.behavior?.units, slider: interactive(e), description: e.description })),
     converters: of("CONVERTER").map((e) =>

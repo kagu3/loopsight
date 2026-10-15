@@ -52,6 +52,30 @@ describe("実行と要約", () => {
     expect(() => runModel(growth(), { simulation: { time_step: -1 } })).toThrow(ModelError);
   });
 
+  test("存在しない要素を参照していると、実行前に似た名前つきで止める", () => {
+    const m = growth();
+    upsertElements(m, [{ name: "Growth", behavior: { value: "[Pop]*[Rat]" } }]);
+    try {
+      runModel(m);
+      expect.unreachable();
+    } catch (e) {
+      const issue = (e as ModelError).issues[0]!;
+      expect(issue.message).toMatch(/\[Rat\] を参照していますが、その名前の要素がありません/);
+      expect(issue.hint).toMatch(/もしかして "Rate"/);
+    }
+  });
+
+  test("見つからないパラメータや要素は候補を示す", () => {
+    try {
+      sweepParameter(growth(), "Rat", [1, 2]);
+      expect.unreachable();
+    } catch (e) {
+      const issue = (e as ModelError).issues[0]!;
+      expect(issue.message).toMatch(/Pop, Rate, Growth/);
+      expect(issue.hint).toMatch(/もしかして "Rate"/);
+    }
+  });
+
   test("実行時のエラーは要素名つきの ModelError になる", () => {
     const m = growth();
     upsertElements(m, [{ name: "Rate", behavior: { value: "1 +* 2" } }]);
