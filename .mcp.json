@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "insight-maker": {
+    "sd-modeler": {
       "command": "node",
       "args": ["dist/mcp/index.js", "--models-dir", "models"]
     }

@@ -312,7 +312,7 @@ export function App() {
     <div className="app">
       <aside className="sidebar">
         <header className="brand">
-          <h1>Insight Maker ビューア</h1>
+          <h1>SD Modeler ビューア</h1>
           <span className={`live ${connected ? "on" : ""}`} title={connected ? "ファイルの変更を見ています" : "サーバーにつながっていません"}>
             <span className="dot" />
             {connected ? "ライブ" : "未接続"}

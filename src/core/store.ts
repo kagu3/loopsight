@@ -7,9 +7,12 @@ export class StoreError extends Error {
   override name = "StoreError";
 }
 
-/** 作業フォルダの決め方：引数 > 環境変数 INSIGHT_MAKER_MODELS_DIR > ./models */
+/**
+ * 作業フォルダの決め方：引数 > 環境変数 SD_MODELER_MODELS_DIR > ./models
+ * 前の名前（insight-maker-mcp）のころの INSIGHT_MAKER_MODELS_DIR も、設定を書き換えなくて済むように読む。
+ */
 export function resolveModelsDir(explicit?: string): string {
-  const dir = explicit || process.env.INSIGHT_MAKER_MODELS_DIR || "models";
+  const dir = explicit || process.env.SD_MODELER_MODELS_DIR || process.env.INSIGHT_MAKER_MODELS_DIR || "models";
   return path.resolve(dir);
 }
 

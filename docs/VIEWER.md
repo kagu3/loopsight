@@ -40,8 +40,8 @@ npm run viewer
 次のように表示されたら、ブラウザで http://localhost:5180/ を開きます。
 
 ```
-Insight Maker ビューア: http://localhost:5180/
-作業フォルダ: C:\...\insight-maker-mcp\models
+SD Modeler ビューア: http://localhost:5180/
+作業フォルダ: C:\...\sd-modeler\models
 ```
 
 止めるときは、起動したターミナルで Ctrl+C を押します。
@@ -58,8 +58,8 @@ Insight Maker ビューア: http://localhost:5180/
 
 | 設定 | 決め方 | 既定 |
 |---|---|---|
-| 作業フォルダ | `--models-dir <フォルダ>`、環境変数 `INSIGHT_MAKER_MODELS_DIR` の順 | 起動したフォルダの `models/` |
-| ポート | `--port <番号>`、環境変数 `INSIGHT_MAKER_VIEWER_PORT` の順 | 5180 |
+| 作業フォルダ | `--models-dir <フォルダ>`、環境変数 `SD_MODELER_MODELS_DIR` の順 | 起動したフォルダの `models/` |
+| ポート | `--port <番号>`、環境変数 `SD_MODELER_VIEWER_PORT` の順 | 5180 |
 
 作業フォルダの決め方は MCP サーバーと同じです。MCP サーバーと違うフォルダを見ていると、AI の変更が画面に出ません。
 

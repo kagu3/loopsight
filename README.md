@@ -1,6 +1,8 @@
-# insight-maker-mcp
+# sd-modeler
 
-[Insight Maker](https://insightmaker.com/) のシステムダイナミクス（SD）モデルを、AI アシスタントから作成・実行・分析するための MCP サーバー。
+AI アシスタントと一緒にシステムダイナミクス（SD）のモデルを作り、動かし、確かめるための道具。AI が使う MCP サーバーと、人が図とグラフで見て手直しするビューア（Web 画面）からなる。
+
+モデルは [Insight Maker](https://insightmaker.com/) の ModelJSON 形式で保存するので、Insight Maker の Web 版ともファイルでやりとりできる。（以前の名前は insight-maker-mcp）
 
 - Claude Code などから、言葉でモデルを作り、実行し、パラメータを振って比較できる
 - Insight Maker の Web 版で作ったモデル（`.InsightMaker` / ModelJSON）を取り込んで分析できる
@@ -16,8 +18,8 @@
 ## セットアップ
 
 ```bash
-git clone https://github.com/suda0033/insight-maker-mcp.git
-cd insight-maker-mcp
+git clone https://github.com/suda0033/sd-modeler.git
+cd sd-modeler
 npm install
 npm run build
 ```
@@ -33,18 +35,18 @@ npm run build
 `claude mcp add` で登録する。パスは自分の環境に合わせて絶対パスで書く。
 
 ```bash
-claude mcp add --scope user insight-maker -- node /absolute/path/to/insight-maker-mcp/dist/mcp/index.js --models-dir /absolute/path/to/models
+claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist/mcp/index.js --models-dir /absolute/path/to/models
 ```
 
-そのプロジェクトの `.mcp.json` に書いてもよい。作業フォルダは環境変数 `INSIGHT_MAKER_MODELS_DIR` でも指定できる。
+そのプロジェクトの `.mcp.json` に書いてもよい。作業フォルダは環境変数 `SD_MODELER_MODELS_DIR` でも指定できる。
 
 ```json
 {
   "mcpServers": {
-    "insight-maker": {
+    "sd-modeler": {
       "command": "node",
-      "args": ["/absolute/path/to/insight-maker-mcp/dist/mcp/index.js"],
-      "env": { "INSIGHT_MAKER_MODELS_DIR": "/absolute/path/to/models" }
+      "args": ["/absolute/path/to/sd-modeler/dist/mcp/index.js"],
+      "env": { "SD_MODELER_MODELS_DIR": "/absolute/path/to/models" }
     }
   }
 }
@@ -55,8 +57,10 @@ claude mcp add --scope user insight-maker -- node /absolute/path/to/insight-make
 モデルは作業フォルダに `<モデル名>.json`（ModelJSON）として保存する。人がファイルを直接開いて確かめられる。場所は次の順で決まる。
 
 1. 起動引数 `--models-dir <フォルダ>`
-2. 環境変数 `INSIGHT_MAKER_MODELS_DIR`
+2. 環境変数 `SD_MODELER_MODELS_DIR`
 3. どちらもなければ、起動したフォルダの `models/`
+
+以前の名前のころの環境変数 `INSIGHT_MAKER_MODELS_DIR` と `INSIGHT_MAKER_VIEWER_PORT` も、そのまま使える。
 
 作業フォルダの中には、ほかに次のものが作られる。
 
@@ -121,7 +125,7 @@ Claude Code に次のように頼む。
 npm run viewer
 ```
 
-ブラウザで http://localhost:5180/ を開く。作業フォルダは MCP サーバーと同じ決め方（`--models-dir`、`INSIGHT_MAKER_MODELS_DIR`、`./models`）で、ポートは `--port` か環境変数 `INSIGHT_MAKER_VIEWER_PORT` で変えられる。`127.0.0.1` だけで待ち受けるので、ほかの機械からは見えない。
+ブラウザで http://localhost:5180/ を開く。作業フォルダは MCP サーバーと同じ決め方（`--models-dir`、`SD_MODELER_MODELS_DIR`、`./models`）で、ポートは `--port` か環境変数 `SD_MODELER_VIEWER_PORT` で変えられる。`127.0.0.1` だけで待ち受けるので、ほかの機械からは見えない。
 
 - **図：** ストック、フロー、変数、コンバーター、リンク、モデルの外（雲）を描く。ストックには最終値を出す。座標のない要素は仮に並べる。配置は、ドラッグで直すか、AI に頼む（AI は `view_diagram` で図を見ながら直す）
 - **グラフと表：** 実行結果の時系列。最初はモデルのグラフ設定の要素（なければストック）を出し、要素を選んで切り替えられる（同時に 8 本まで）

@@ -146,7 +146,7 @@ function timestamp(): string {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
-const SERVER_INSTRUCTIONS = `Insight Maker のシステムダイナミクス（SD）モデルを作り、実行し、分析するためのツールです。
+const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデルを作り、実行し、分析するためのツールです（SD Modeler）。モデルの形式は Insight Maker の ModelJSON です。
 モデルは作業フォルダに ModelJSON ファイル（<モデル名>.json）として保存されます。
 
 進め方:

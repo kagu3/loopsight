@@ -1,12 +1,12 @@
 {
-  "name": "insight-maker-mcp",
+  "name": "sd-modeler",
   "version": "0.1.0",
   "description": "Insight Maker のモデルを AI アシスタントから作成・実行・分析するための MCP サーバー",
   "private": true,
   "type": "module",
   "bin": {
-    "insight-maker-mcp": "dist/mcp/index.js",
-    "insight-maker-viewer": "dist/viewer/index.js"
+    "sd-modeler": "dist/mcp/index.js",
+    "sd-modeler-viewer": "dist/viewer/index.js"
   },
   "engines": {
     "node": ">=20"
@@ -25,12 +25,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/suda0033/insight-maker-mcp.git"
+    "url": "git+https://github.com/suda0033/sd-modeler.git"
   },
   "bugs": {
-    "url": "https://github.com/suda0033/insight-maker-mcp/issues"
+    "url": "https://github.com/suda0033/sd-modeler/issues"
   },
-  "homepage": "https://github.com/suda0033/insight-maker-mcp#readme",
+  "homepage": "https://github.com/suda0033/sd-modeler#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "simulation": "^9.0.0",
