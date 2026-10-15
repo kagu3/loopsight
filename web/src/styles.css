@@ -663,11 +663,13 @@ button:disabled {
   flex-direction: column;
   height: 100%;
 }
+/* 下の余白は凡例の横スクロールバーの場所と兼ねる */
 .chart-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px;
-  padding: 8px 16px;
+  padding: 8px 16px 2px;
 }
 .segmented {
   display: inline-flex;
@@ -689,33 +691,153 @@ button:disabled {
   color: var(--text-primary);
   font-weight: 600;
 }
+/* 要素を選ぶボタンと、開いた一覧 */
 .series-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  position: relative;
+  flex: none;
 }
-.series-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px 2px 6px;
+button.picker-button {
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+button.picker-button[aria-expanded="true"] {
+  background: var(--surface-2);
+}
+.series-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  /* 幅、ずらす量、高さは開くときに Chart.tsx の fit() で決める */
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.16);
+}
+.series-popover:focus {
+  outline: none;
+}
+.series-filter {
+  flex: none;
+  margin: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.series-filter:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.series-note {
+  margin: 0 12px 6px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+.series-groups {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 4px 6px;
+}
+.series-group {
+  border: none;
+  margin: 0;
+  padding: 0 0 6px;
+}
+.series-group legend {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.series-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-primary);
   cursor: pointer;
   user-select: none;
 }
-.series-chip.on {
-  color: var(--text-primary);
+.series-option:hover {
   background: var(--surface-2);
 }
-.series-chip.full {
+.series-option.full {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.series-chip input {
+.series-option input {
   margin: 0;
+  flex: none;
+}
+.series-option-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/*
+ * 上の帯の凡例。ボタンの横の残りの幅に 1 行で並べる。
+ * 入りきらないときは名前を省略して縮め、それでも入らないぶんは横にスクロールする。
+ * スクロールバーが出ても帯の高さが変わらないよう、その場所を下に取っておく（名札 26px ＋ スクロールバー 10px）
+ */
+.series-legend {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 38px;
+  margin: 0;
+  padding: 2px 0 0;
+  list-style: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 84px;
+  max-width: 220px;
+  padding: 2px 2px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.legend-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.legend-remove {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+button.legend-remove:hover {
+  background: var(--border);
+  color: var(--text-primary);
 }
 .swatch {
   display: inline-block;

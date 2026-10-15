@@ -111,8 +111,14 @@ try {
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("chart", ".results");
 
-  // 要素を 1 つ足して、表にしたところ
-  await b.clickText(".series-chip", "Prey Births");
+  // 要素を選ぶ一覧を開いて、要素を 1 つ足したところ
+  await b.click(".picker-button");
+  await b.waitFor("document.querySelector('.series-popover')");
+  await b.clickText(".series-option", "Prey Births");
+  await shot("picker", ".results");
+
+  // 一覧を閉じて、表にしたところ
+  await b.click(".picker-button");
   await b.clickText(".segmented button", "表");
   await b.waitFor("document.querySelector('.table-area table')");
   await b.evaluate("document.activeElement?.blur()");

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import type { ModelJSON, RunResult } from "../../src/viewer/api.js";
 import { normalize } from "./normalize.js";
+import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
 // 実行結果の時系列グラフと表。
 // 色は検証済みの 8 色を順に使う。色は要素ごとに決め、ほかの要素を出し入れしても変えない。
@@ -34,7 +35,7 @@ function formatTime(t: number | null | undefined): string {
 }
 
 /** グラフに出せる要素（数値の結果があるもの）を、モデルの並び順で */
-function candidatesOf(model: ModelJSON, run: RunResult): { name: string; type: string }[] {
+function candidatesOf(model: ModelJSON, run: RunResult): SeriesCandidate[] {
   return model.elements
     .filter((e) => e.name && e.type !== "LINK" && run.series[e.name]?.some((v) => v !== null))
     .map((e) => ({ name: e.name!, type: e.type }));
@@ -135,6 +136,18 @@ export function Chart({ modelName, model, run }: ChartProps) {
     setSlots((s) => assignSlots(ordered, s));
   };
 
+  // 凡例の × で外す。キーボードで押したときは、消える × の代わりに隣の × か「要素を選ぶ」にフォーカスを移す
+  const removeFromLegend = (button: HTMLButtonElement, name: string) => {
+    if (document.activeElement === button) {
+      const li = button.closest("li");
+      const next =
+        (li?.nextElementSibling ?? li?.previousElementSibling)?.querySelector<HTMLButtonElement>("button") ??
+        button.closest(".chart-toolbar")?.querySelector<HTMLButtonElement>(".picker-button");
+      next?.focus();
+    }
+    toggle(name);
+  };
+
   // Recharts の dataKey は「.」を入れ子のパスとして読むので、要素名ではなく番号で持つ
   const keyOf = (name: string) => `s${names.indexOf(name)}`;
   // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
@@ -182,19 +195,19 @@ export function Chart({ modelName, model, run }: ChartProps) {
             </button>
           </div>
         )}
-        <div className="series-picker" aria-label="表示する要素">
-          {candidates.map((c) => {
-            const on = visible.includes(c.name);
-            const full = !on && visible.length >= MAX_SERIES;
-            return (
-              <label key={c.name} className={`series-chip ${on ? "on" : ""} ${full ? "full" : ""}`} title={full ? `同時に出せるのは ${MAX_SERIES} 本までです` : c.type}>
-                <input type="checkbox" checked={on} disabled={full} onChange={() => toggle(c.name)} />
-                {on && <span className="swatch" style={{ background: colorOf(c.name) }} />}
-                {c.name}
-              </label>
-            );
-          })}
-        </div>
+        <SeriesPicker candidates={candidates} visible={visible} colorOf={colorOf} onToggle={toggle} />
+        {/* 凡例を兼ねる。出している要素だけを色つきで出し、× で外せる */}
+        <ul className="series-legend" aria-label="表示している要素">
+          {visible.map((n) => (
+            <li key={n} className="legend-chip" title={n}>
+              <span className="swatch" style={{ background: colorOf(n) }} />
+              <span className="legend-name">{n}</span>
+              <button className="legend-remove" onClick={(e) => removeFromLegend(e.currentTarget, n)} aria-label={`${n} を外す`} title="グラフから外す">
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
 
       {visible.length === 0 ? (
@@ -270,6 +283,142 @@ export function Chart({ modelName, model, run }: ChartProps) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 要素を選ぶ一覧。ボタンで開け閉めする。
+ * 種類ごとにまとめ、上の欄で名前を絞り込める。Esc か一覧の外を押すと閉じる
+ */
+function SeriesPicker({
+  candidates,
+  visible,
+  colorOf,
+  onToggle,
+}: {
+  candidates: SeriesCandidate[];
+  visible: string[];
+  colorOf(n: string): string;
+  onToggle(n: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+  const popoverId = useId();
+  const groups = useMemo(() => groupCandidates(candidates, query), [candidates, query]);
+  const full = visible.length >= MAX_SERIES;
+
+  const close = (focusButton: boolean) => {
+    setOpen(false);
+    setQuery("");
+    if (focusButton) buttonRef.current?.focus();
+  };
+
+  // 一覧の外を押したら閉じる
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) close(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  // 一覧はグラフの欄の中に収める。
+  // 横：ふだんはボタンの左端から開き、欄（と画面）の右端からはみ出すぶんだけ左へずらす。欄が狭ければ幅も縮める
+  // 縦：欄の下の端まで（はみ出すぶんは一覧の中でスクロールする）
+  // 絞り込み欄へのフォーカスは位置を決めてから移す。先に移すと、はみ出した一覧に合わせてブラウザが横にスクロールしてしまう
+  useLayoutEffect(() => {
+    if (!open) return;
+    const fit = () => {
+      const panel = rootRef.current?.closest(".chart-panel");
+      const button = buttonRef.current;
+      const popover = popoverRef.current;
+      if (!panel || !button || !popover) return;
+      const p = panel.getBoundingClientRect();
+      const b = button.getBoundingClientRect();
+      const left = p.left + 16;
+      const right = Math.min(p.right, document.documentElement.clientWidth) - 16;
+      const width = Math.min(320, right - left);
+      const x = Math.max(left, Math.min(b.left, right - width));
+      popover.style.width = `${width}px`;
+      popover.style.left = `${x - b.left}px`;
+      popover.style.maxHeight = `${Math.min(360, Math.max(160, p.bottom - b.bottom - 12))}px`;
+    };
+    fit();
+    filterRef.current?.focus({ preventScroll: true });
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [open]);
+
+  return (
+    <div
+      className="series-picker"
+      ref={rootRef}
+      onKeyDown={(e) => {
+        // 日本語の変換中の Esc は変換の取り消しなので、閉じない
+        if (e.key === "Escape" && open && !e.nativeEvent.isComposing) {
+          e.stopPropagation();
+          close(true);
+        }
+      }}
+      onBlur={(e) => {
+        // Tab で一覧の外へ移ったら閉じる。
+        // 移り先がない（一覧の中の文字や余白を押した）ときは閉じない。外を押したときは pointerdown のほうで閉じる
+        if (open && e.relatedTarget && !rootRef.current?.contains(e.relatedTarget as Node)) close(false);
+      }}
+    >
+      <button
+        ref={buttonRef}
+        className="toolbar-button picker-button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls={open ? popoverId : undefined}
+        onClick={() => (open ? close(false) : setOpen(true))}
+      >
+        要素を選ぶ（{visible.length}/{MAX_SERIES}）
+      </button>
+      {open && (
+        // tabIndex：見出しや余白を押したときもフォーカスを一覧の中に置き、Esc と Tab で閉じられるようにする
+        <div id={popoverId} className="series-popover" role="dialog" aria-label="グラフに出す要素" tabIndex={-1} ref={popoverRef}>
+          <input
+            ref={filterRef}
+            className="series-filter"
+            type="search"
+            placeholder="名前で絞り込む"
+            aria-label="名前で絞り込む"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {full && <p className="series-note">同時に出せるのは {MAX_SERIES} 本までです。1 本外すと選べます</p>}
+          <div className="series-groups">
+            {groups.length === 0 && <p className="series-note">合う名前がありません</p>}
+            {groups.map((g) => (
+              <fieldset key={g.type} className="series-group">
+                <legend>
+                  {g.label}
+                  <span className="muted">（{g.items.length}）</span>
+                </legend>
+                {g.items.map((c) => {
+                  const on = visible.includes(c.name);
+                  const disabled = !on && full;
+                  return (
+                    <label key={c.name} className={`series-option ${disabled ? "full" : ""}`} title={disabled ? `同時に出せるのは ${MAX_SERIES} 本までです` : c.name}>
+                      <input type="checkbox" checked={on} disabled={disabled} onChange={() => onToggle(c.name)} />
+                      <span className="swatch" style={{ background: on ? colorOf(c.name) : "transparent" }} />
+                      <span className="series-option-name">{c.name}</span>
+                    </label>
+                  );
+                })}
+              </fieldset>
+            ))}
+          </div>
         </div>
       )}
     </div>
