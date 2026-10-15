@@ -158,6 +158,7 @@ npm run screenshots # docs/VIEWER.md のスクリーンショットを撮り直�
 ## ドキュメント
 
 - [ビューアの使い方](docs/VIEWER.md)：画面の見方と操作（スクリーンショットつき）
+- [人の確認が必要なこと](docs/HUMAN_CHECKS.md)：AI では確かめられないことと、人が決めること
 - [構想と前提](docs/VISION.md)：目指すもの、3 段階の構想、調査でわかった前提と制約
 - [ロードマップ](docs/ROADMAP.md)：段階 1（中核部分＋MCP）と段階 2（ビューア）の設計方針とマイルストーン
 
