@@ -35,6 +35,23 @@ const SKIPPED_MESSAGE = "画面の変更を送る前に、ほかのところ（A
 /** 入力欄で打っているときは、元に戻すのショートカットを横取りしない */
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
+/** モデル一覧を開いているか。ブラウザに覚えておく（使えなければ毎回開いた状態） */
+const MODELS_OPEN_KEY = "viewer.modelsOpen";
+function loadModelsOpen(): boolean {
+  try {
+    return localStorage.getItem(MODELS_OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function saveModelsOpen(open: boolean) {
+  try {
+    localStorage.setItem(MODELS_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
 export function App() {
   const [list, setList] = useState<ModelListResponse>();
   const [current, setCurrent] = useState(nameFromHash());
@@ -46,6 +63,12 @@ export function App() {
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [updatedAt, setUpdatedAt] = useState<Date>();
   const [busy, setBusy] = useState(false);
+  const [modelsOpen, setModelsOpen] = useState(loadModelsOpen);
+  const toggleModels = () =>
+    setModelsOpen((open) => {
+      saveModelsOpen(!open);
+      return !open;
+    });
   const dataRef = useRef<ModelResponse>(undefined);
   const currentRef = useRef(current);
   currentRef.current = current;
@@ -297,23 +320,6 @@ export function App() {
         </header>
 
         <section className="panel">
-          <h2>モデル</h2>
-          {list && list.models.length === 0 && <p className="muted">作業フォルダ（{list.dir}）にモデルがありません。</p>}
-          <ul className="model-list">
-            {list?.models.map((m) => (
-              <li key={m.name}>
-                <a href={`#${encodeURIComponent(m.name)}`} className={m.name === current ? "on" : ""}>
-                  <span className="model-name">{m.name}</span>
-                  {m.title && m.title !== m.name && <span className="model-title">{m.title}</span>}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        {data && <Problems data={data} onSelect={setSelected} />}
-
-        <section className="panel">
           <h2>選んだ要素</h2>
           {selectedEl ? (
             <Details el={selectedEl} value={finalValues[selectedEl.name!]} onSave={(patch) => edit([patch])} />
@@ -321,6 +327,33 @@ export function App() {
             <p className="muted">選んでいた「{selected}」が見つかりません。名前が変わったか、消された可能性があります。図で選び直してください。</p>
           ) : (
             <p className="muted">図の要素を押すと、式などをここに出します。「編集」で直せます。</p>
+          )}
+        </section>
+
+        {data && <Problems data={data} onSelect={setSelected} />}
+
+        <section className="panel models-panel">
+          <h2>
+            <button className="panel-toggle" onClick={toggleModels} aria-expanded={modelsOpen}>
+              <span className="chevron">{modelsOpen ? "▾" : "▸"}</span>
+              モデル
+              {!modelsOpen && list && <span className="count">{list.models.length}</span>}
+            </button>
+          </h2>
+          {modelsOpen && (
+            <>
+              {list && list.models.length === 0 && <p className="muted">作業フォルダ（{list.dir}）にモデルがありません。</p>}
+              <ul className="model-list">
+                {list?.models.map((m) => (
+                  <li key={m.name}>
+                    <a href={`#${encodeURIComponent(m.name)}`} className={m.name === current ? "on" : ""}>
+                      <span className="model-name">{m.name}</span>
+                      {m.title && m.title !== m.name && <span className="model-title">{m.title}</span>}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </section>
       </aside>
