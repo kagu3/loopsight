@@ -6,6 +6,11 @@ declare module "simulation" {
     name: string;
   }
 
+  export class Link implements Primitive {
+    readonly id: string;
+    name: string;
+  }
+
   export class Results {
     timeUnits: string | undefined;
     times(): number[];
