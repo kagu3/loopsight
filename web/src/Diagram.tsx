@@ -146,7 +146,12 @@ export function Diagram(props: DiagramProps) {
         source: g.source,
         target: g.target,
         data: { g, selected: !!g.element && g.element === selected, changed: !!g.element && changed.has(g.element.toLowerCase()) },
-        markerEnd: g.arrow ? { type: MarkerType.ArrowClosed, width: g.kind === "link" ? 14 : 12, height: g.kind === "link" ? 14 : 12 } : undefined,
+        // 矢印の色は線と同じトークンにする（React Flow は色を style に入れるので CSS 変数が効く）
+        markerEnd: g.arrow
+          ? g.kind === "link"
+            ? { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "var(--link)" }
+            : { type: MarkerType.ArrowClosed, width: 12, height: 12, color: "var(--flow)" }
+          : undefined,
         selectable: false,
       })),
     [graph, selected, changed],

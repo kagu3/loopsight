@@ -450,10 +450,6 @@ button.link {
   font-weight: 700;
   fill: var(--text-secondary);
 }
-.react-flow__arrowhead polyline {
-  fill: var(--flow);
-  stroke: var(--flow);
-}
 
 /* グラフと表 */
 .results {
