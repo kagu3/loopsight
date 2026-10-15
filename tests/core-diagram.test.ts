@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { emptyModel, layoutModel, upsertElements, type ModelJSON } from "../src/core/index.js";
-import { borderPoint, positionPatches, shiftIntoView, toGraph, type GraphNode } from "../web/src/graph.js";
+import { borderPoint, emptyModel, layoutModel, positionPatches, shiftIntoView, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
 import { loadSample, sampleNames } from "./helpers.js";
 
 function population(): ModelJSON {
@@ -32,34 +31,35 @@ describe("図への変換", () => {
     expect(link.target).toBe("valve:births");
   });
 
-  test("座標がなければ自動配置にし、重ならないように並べる", () => {
-    const g = toGraph(population());
-    expect(g.autoLayout).toBe(true);
+  test("座標がなければ、書き出しと同じ簡易レイアウトで仮に並べ、重ならないようにする", () => {
+    const m = population();
+    const g = toGraph(m);
     expect(g.missingCoordinates).toBe(true);
+    // モデルそのものには座標を書かない
+    expect(m.elements.some((e) => e.display?.coordinates)).toBe(false);
     for (let i = 0; i < g.nodes.length; i++) {
       for (let j = i + 1; j < g.nodes.length; j++) {
         expect(overlap(g.nodes[i]!, g.nodes[j]!), `${g.nodes[i]!.id} と ${g.nodes[j]!.id}`).toBe(false);
       }
     }
-    // フローの流れは左から右
-    const x = (id: string) => g.nodes.find((n) => n.id === id)!.x;
-    expect(x("cloud:births:from")).toBeLessThan(x("el:population"));
-    expect(x("el:population")).toBeLessThan(x("cloud:deaths:to"));
+    // 書き出し（export_model）で付く座標と同じ
+    const exported = structuredClone(m);
+    layoutModel(exported);
+    const stock = g.nodes.find((n) => n.id === "el:population")!;
+    expect([stock.x, stock.y]).toEqual(exported.elements.find((e) => e.name === "Population")!.display!.coordinates);
   });
 
   test("座標がそろっていればモデルの座標を使い、弁は両端の真ん中に置く", () => {
     const m = population();
     layoutModel(m);
     const g = toGraph(m);
-    expect(g.autoLayout).toBe(false);
+    expect(g.missingCoordinates).toBe(false);
     const stock = g.nodes.find((n) => n.id === "el:population")!;
     expect([stock.x, stock.y]).toEqual(m.elements.find((e) => e.name === "Population")!.display!.coordinates);
     const cloud = g.nodes.find((n) => n.id === "cloud:births:from")!;
     const valve = g.nodes.find((n) => n.id === "valve:births")!;
     const c = (n: GraphNode) => [n.x + n.width / 2, n.y + n.height / 2];
     expect(c(valve)).toEqual([(c(cloud)[0]! + c(stock)[0]!) / 2, (c(cloud)[1]! + c(stock)[1]!) / 2]);
-    // 指定すれば座標があっても自動配置にする
-    expect(toGraph(m, { forceAutoLayout: true }).autoLayout).toBe(true);
   });
 
   test("同梱のサンプルもすべて変換できる", () => {
@@ -72,13 +72,13 @@ describe("図への変換", () => {
     }
   });
 
-  test("自動配置の位置をモデルに保存すると、その位置のまま座標つきで描ける", () => {
+  test("仮に並べた位置をモデルに保存すると、その位置のまま座標つきで描ける", () => {
     const m = population();
     const auto = toGraph(m);
-    expect(auto.autoLayout).toBe(true);
+    expect(auto.missingCoordinates).toBe(true);
     upsertElements(m, positionPatches(auto.nodes));
     const saved = toGraph(m);
-    expect(saved.autoLayout).toBe(false);
+    expect(saved.missingCoordinates).toBe(false);
     const pos = (g: typeof auto, id: string) => {
       const n = g.nodes.find((x) => x.id === id)!;
       return [Math.round(n.x), Math.round(n.y)];

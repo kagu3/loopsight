@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addDefaultVisualization, emptyModel, layoutModel, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
+import { addDefaultVisualization, emptyModel, layoutModel, linkControlPoint, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
 import { loadSample } from "./helpers.js";
 
 type Box = { name: string; x: number; y: number; w: number; h: number };
@@ -58,6 +58,18 @@ function crosses(a: Point, b: Point, r: { x: number; y: number; w: number; h: nu
   return false;
 }
 
+/** リンクの曲線（画面と同じ形）の上の点を細かく取り、長方形の内側に入るか見る */
+function curveCrosses(a: Point, b: Point, r: { x: number; y: number; w: number; h: number }): boolean {
+  const c = linkControlPoint(a, b);
+  for (let i = 1; i < 100; i++) {
+    const t = i / 100;
+    const x = (1 - t) ** 2 * a[0] + 2 * (1 - t) * t * c[0] + t * t * b[0];
+    const y = (1 - t) ** 2 * a[1] + 2 * (1 - t) * t * c[1] + t * t * b[1];
+    if (x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h) return true;
+  }
+  return false;
+}
+
 /** リンクの線が、つながる両端以外の要素や雲を横切らない。変数の箱がフローの線に乗らない */
 function expectClearLines(m: ModelJSON) {
   const b = boxes(m);
@@ -67,7 +79,7 @@ function expectClearLines(m: ModelJSON) {
     const c = pointOf(m, l.to!);
     for (const r of [...b, ...cloudBoxes]) {
       if (r.name === l.from || r.name === l.to) continue;
-      expect(crosses(a, c, r), `リンク ${l.from} → ${l.to} が ${r.name} を横切っている`).toBe(false);
+      expect(curveCrosses(a, c, r), `リンク ${l.from} → ${l.to} が ${r.name} を横切っている`).toBe(false);
     }
   }
   for (const f of m.elements.filter((e) => e.type === "FLOW")) {

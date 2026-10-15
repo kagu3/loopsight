@@ -1,5 +1,6 @@
 import type { ModelElement, ModelJSON, Point, Visualization } from "./modeljson.js";
 import { nameKey, sameName } from "./modeljson.js";
+import { flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
 
 // 簡易レイアウト：Web 版に読み込んだとき要素が重ならない程度に座標を付ける。
 // ストックを横一列に並べ（フローの流れ順）、変数はつながる要素の近くに、
@@ -16,13 +17,6 @@ const STOCK_GAP = 300;
 const MARGIN = 20;
 // 変数の箱とフローやリンクの線とのすき間
 const LINE_GAP = 30;
-
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 
 function hasCoordinates(el: ModelElement): boolean {
   const c = el.display?.coordinates;
@@ -156,7 +150,10 @@ export function layoutModel(model: ModelJSON): string[] {
   for (const f of flows) {
     const a = endOf(f, "from");
     const b = endOf(f, "to");
-    if (a && b) segments.push([a, b]);
+    if (!a || !b) continue;
+    segments.push([a, b]);
+    // フローの名前（弁の横か下に出る）にも重ならないようにする
+    if (f.name) occupied.push(flowLabelRect(f.name, a, b));
   }
 
   // 3. 変数とコンバーター：リンクでつながる、位置の決まった要素の近くに置く
@@ -182,7 +179,7 @@ export function layoutModel(model: ModelJSON): string[] {
       const r = findSpot(targets, w, h, { occupied, segments, stockTop });
       place(el, r);
       // 引いたリンクの線も、あとで置く変数の邪魔にならないように覚えておく
-      for (const t of targets) segments.push([center(r), t.point]);
+      for (const t of targets) segments.push(...linkSegments(center(r), t.point));
       progressed = true;
     }
     if (!progressed) {
@@ -245,16 +242,26 @@ function findSpot(
   const ys = [ay - h / 2, stockTop - 150 - h, stockTop - 260 - h, stockTop + 200, stockTop + 310, stockTop - 370 - h, stockTop + 420]
     .map(Math.round)
     .filter((y) => y >= MARGIN);
-  const ok = (r: Rect) => {
+  /** ほかの要素や線と重ならないか */
+  const free = (r: Rect) => {
     if (occupied.some((o) => overlaps(o, r))) return false;
     const padded = { x: r.x - LINE_GAP, y: r.y - LINE_GAP, w: r.w + 2 * LINE_GAP, h: r.h + 2 * LINE_GAP };
-    if (segments.some(([a, b]) => segmentHitsRect(a, b, padded))) return false;
+    return !segments.some(([a, b]) => segmentHitsRect(a, b, padded));
+  };
+  /** ここに置いたとき、リンクの線がほかの要素の上を通る数（リンクは画面と同じく少し曲げて描くので、その曲線で数える） */
+  const hits = (r: Rect) => {
     const c = center(r);
-    return targets.every((t) => !occupied.some((o) => o !== t.rect && segmentHitsRect(c, t.point, o)));
+    let n = 0;
+    for (const t of targets) {
+      const segs = linkSegments(c, t.point);
+      n += occupied.filter((o) => o !== t.rect && segs.some(([p, q]) => segmentHitsRect(p, q, o))).length;
+    }
+    return n;
   };
 
+  // 線がどこも通らない場所のうち、いちばん近いところ。なければ、線が通る数がいちばん少ないところ
   let best: Rect | undefined;
-  let bestScore = Infinity;
+  let bestKey: [number, number] = [Infinity, Infinity];
   for (let i = 0; i < 40; i++) {
     const dx = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * (w / 2 + 30);
     for (const y of ys) {
@@ -262,9 +269,12 @@ function findSpot(
       const [cx, cy] = center(r);
       // 近さで選ぶ。同じくらいなら上を少し優先する
       const score = Math.hypot(cx - ax, cy - ay) + (cy > ay ? 10 : 0);
-      if (score < bestScore && ok(r)) {
+      if (score >= bestKey[1] && bestKey[0] === 0) continue;
+      if (!free(r)) continue;
+      const n = hits(r);
+      if (n < bestKey[0] || (n === bestKey[0] && score < bestKey[1])) {
         best = r;
-        bestScore = score;
+        bestKey = [n, score];
       }
     }
   }
@@ -273,31 +283,6 @@ function findSpot(
 
 type Segment = [Point, Point];
 
-/** 線分が長方形（の内側）を通るか。Liang–Barsky のクリッピングで調べる */
-function segmentHitsRect(a: Point, b: Point, r: Rect): boolean {
-  const [x0, y0] = a;
-  const dx = b[0] - x0;
-  const dy = b[1] - y0;
-  let t0 = 0;
-  let t1 = 1;
-  const edges: [number, number][] = [
-    [-dx, x0 - r.x],
-    [dx, r.x + r.w - x0],
-    [-dy, y0 - r.y],
-    [dy, r.y + r.h - y0],
-  ];
-  for (const [p, q] of edges) {
-    if (p === 0) {
-      if (q <= 0) return false;
-      continue;
-    }
-    const t = q / p;
-    if (p < 0) t0 = Math.max(t0, t);
-    else t1 = Math.min(t1, t);
-    if (t0 >= t1) return false;
-  }
-  return true;
-}
 
 /**
  * グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す。

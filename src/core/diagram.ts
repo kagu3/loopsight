@@ -1,11 +1,13 @@
-// ModelJSON を図のノードと線にする。React に依存しない（テストから直接使う）。
+// ModelJSON を図のノードと線にする。ビューアの画面と、MCP の view_diagram（図の確認）の両方で使う。
+// React にも Node にも依存しない。
 //
 // - ストック、変数、コンバーター、状態は箱のノード
 // - フローは真ん中に「弁」のノードを置き、出元 → 弁 → 行き先の 2 本の線にする（リンクが弁につながれるように）
 // - モデルの外の端は雲のノード
-// - 座標はモデルにあればそれを使う。ない要素があれば dagre で自動配置する
-import dagre from "@dagrejs/dagre";
-import type { ModelElement, ModelJSON } from "../../src/core/modeljson.js";
+// - 座標はモデルにあればそれを使う。ない要素があれば、書き出しと同じ簡易レイアウト（layoutModel）で並べる
+import { layoutModel } from "./layout.js";
+export { LINK_BEND, linkControlPoint } from "./geometry.js";
+import type { ModelElement, ModelJSON } from "./modeljson.js";
 
 export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "STATE" | "VALVE" | "CLOUD";
 export type Shape = "rect" | "ellipse";
@@ -46,9 +48,7 @@ export interface GraphEdge {
 export interface Graph {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  /** 自動配置にしたか */
-  autoLayout: boolean;
-  /** モデルの座標が足りないため自動配置にしたか */
+  /** モデルに座標のない要素があり、簡易レイアウトで並べたか（ファイルには保存していない） */
   missingCoordinates: boolean;
 }
 
@@ -74,18 +74,38 @@ function hasCoordinates(el: ModelElement): boolean {
 
 const center = (n: GraphNode): [number, number] => [n.x + n.width / 2, n.y + n.height / 2];
 
-export function toGraph(model: ModelJSON, options: { forceAutoLayout?: boolean } = {}): Graph {
+/** 座標のない要素（箱か、モデルの外の端）があるか */
+export function needsLayout(model: ModelJSON): boolean {
+  for (const el of model.elements) {
+    if (BOX_KINDS.has(el.type) && el.name && !hasCoordinates(el)) return true;
+    if ((el.type === "FLOW" || el.type === "TRANSITION") && el.name) {
+      if (!el.from && !el.display?.from_coordinates) return true;
+      if (!el.to && !el.display?.to_coordinates) return true;
+    }
+  }
+  return false;
+}
+
+export function toGraph(model: ModelJSON): Graph {
+  if (needsLayout(model)) {
+    // 座標のない要素だけを並べたコピーで描く（あるものは動かさない）
+    const copy = structuredClone(model);
+    layoutModel(copy);
+    return { ...build(copy), missingCoordinates: true };
+  }
+  return { ...build(model), missingCoordinates: false };
+}
+
+function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const byName = new Map<string, GraphNode>();
-  let missing = false;
 
   for (const el of model.elements) {
     if (!BOX_KINDS.has(el.type) || !el.name) continue;
     const kind = el.type as NodeKind;
     const [w, h] = el.display?.size ?? SIZE[kind];
     const [x, y] = hasCoordinates(el) ? el.display!.coordinates! : [0, 0];
-    if (!hasCoordinates(el)) missing = true;
     const node: GraphNode = {
       id: elementId(el.name),
       kind,
@@ -112,7 +132,6 @@ export function toGraph(model: ModelJSON, options: { forceAutoLayout?: boolean }
       if (found) return found;
       const p = f.display?.[which === "from" ? "from_coordinates" : "to_coordinates"];
       const [w, h] = SIZE.CLOUD;
-      if (!p) missing = true;
       const cloud: GraphNode = {
         id: cloudId(f.name!, which),
         kind: "CLOUD",
@@ -155,18 +174,13 @@ export function toGraph(model: ModelJSON, options: { forceAutoLayout?: boolean }
     });
   }
 
-  const autoLayout = !!options.forceAutoLayout || missing;
-  if (autoLayout) {
-    layoutWithDagre(nodes, edges);
-  } else {
-    placeValves(valves);
-  }
+  placeValves(valves);
   for (const { node, a, b } of valves) {
     const [ax, ay] = center(a);
     const [bx, by] = center(b);
     node.labelSide = Math.abs(by - ay) > Math.abs(bx - ax) ? "right" : "below";
   }
-  return { nodes, edges, autoLayout, missingCoordinates: missing };
+  return { nodes, edges };
 }
 
 /** 弁は両端の中心を結ぶ線の真ん中に置く */
@@ -176,28 +190,6 @@ function placeValves(valves: { node: GraphNode; a: GraphNode; b: GraphNode }[]):
     const [bx, by] = center(b);
     node.x = (ax + bx) / 2 - node.width / 2;
     node.y = (ay + by) / 2 - node.height / 2;
-  }
-}
-
-/** dagre で左から右に並べる。フローの線を強く、リンクを弱く効かせる */
-function layoutWithDagre(nodes: GraphNode[], edges: GraphEdge[]): void {
-  const g = new dagre.graphlib.Graph({ multigraph: true });
-  g.setGraph({ rankdir: "LR", nodesep: 50, ranksep: 70, marginx: 20, marginy: 20 });
-  g.setDefaultEdgeLabel(() => ({}));
-  for (const n of nodes) {
-    // 弁はフローの名前を下に出すので、その分だけ場所をとる
-    const width = n.kind === "VALVE" ? Math.max(60, n.label.length * 7) : n.width;
-    const height = n.kind === "VALVE" ? n.height + 28 : n.height;
-    g.setNode(n.id, { width, height });
-  }
-  for (const e of edges) {
-    g.setEdge(e.source, e.target, { weight: e.kind === "link" ? 1 : 4, minlen: 1 }, e.id);
-  }
-  dagre.layout(g);
-  for (const n of nodes) {
-    const p = g.node(n.id);
-    n.x = Math.round(p.x - n.width / 2);
-    n.y = Math.round(p.y - (n.kind === "VALVE" ? (n.height + 28) / 2 : n.height / 2));
   }
 }
 

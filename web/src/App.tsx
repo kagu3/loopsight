@@ -5,7 +5,7 @@ import { fetchList, fetchModel, postEdit, postUndo, type WriteResult } from "./a
 import { Chart, formatValue } from "./Chart.js";
 import { Details } from "./Details.js";
 import { Diagram } from "./Diagram.js";
-import { toGraph } from "./graph.js";
+import { toGraph } from "../../src/core/diagram.js";
 import { Problems } from "./Problems.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
@@ -13,6 +13,9 @@ import { Problems } from "./Problems.js";
 // 画面からの編集（式などの変更、位置の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
+
+/** ?view=diagram なら図だけを出す（MCP の view_diagram がヘッドレスのブラウザで画像にする） */
+const EMBED = new URLSearchParams(location.search).get("view") === "diagram";
 
 /** 前の版と比べて、変わった（または増えた）要素の名前（小文字） */
 function changedElements(prev: ModelResponse | undefined, next: ModelResponse): Set<string> {
@@ -39,7 +42,6 @@ export function App() {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [connected, setConnected] = useState(false);
-  const [autoLayout, setAutoLayout] = useState(false);
   const [selected, setSelected] = useState<string>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [updatedAt, setUpdatedAt] = useState<Date>();
@@ -160,7 +162,6 @@ export function App() {
     setData(undefined);
     setSelected(undefined);
     setNotice(undefined);
-    setAutoLayout(false);
     void loadModel(current);
   }, [current, loadModel]);
 
@@ -250,18 +251,17 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo]);
 
-  /** 図で動かした位置を保存する。自動配置で見ていたなら、保存後はモデルの座標で見る */
+  /** 図で動かした位置を保存する */
   const move = useCallback(
     async (patches: ElementPatch[]) => {
       const err = await edit(patches);
       if (err) setNotice(err);
-      else setAutoLayout(false);
       return err;
     },
     [edit],
   );
 
-  const graph = useMemo(() => (data ? toGraph(data.model, { forceAutoLayout: autoLayout }) : undefined), [data, autoLayout]);
+  const graph = useMemo(() => (data ? toGraph(data.model) : undefined), [data]);
   const finalValues = useMemo(() => {
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(data?.run?.series ?? {})) out[k] = formatValue(v.at(-1));
@@ -270,6 +270,20 @@ export function App() {
   // 名前は大文字と小文字を区別しない（AI が表記だけ変えても選んだままにする）
   const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
   const title = data?.model.name || current;
+
+  if (EMBED) {
+    return (
+      <div className="embed-diagram">
+        {graph && data ? (
+          <ReactFlowProvider>
+            <Diagram graph={graph} modelName={data.name} changed={changed} values={finalValues} onSelect={() => undefined} onMove={move} embed />
+          </ReactFlowProvider>
+        ) : (
+          <p className="muted pad">{error ?? "読み込んでいます…"}</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -323,15 +337,7 @@ export function App() {
           </div>
           {graph && data && (
             <div className="toolbar-right">
-              {graph.autoLayout && (
-                <span className="note">
-                  {graph.missingCoordinates ? "座標のない要素があるので自動配置にしています。" : "自動配置で表示しています。"}動かすと、この配置を保存します
-                </span>
-              )}
-              <label className="toggle">
-                <input type="checkbox" checked={graph.autoLayout} disabled={graph.missingCoordinates} onChange={(e) => setAutoLayout(e.target.checked)} />
-                自動配置
-              </label>
+              {graph.missingCoordinates && <span className="note">座標のない要素を仮に並べています。動かすと、この配置を保存します</span>}
               <button
                 className="toolbar-button"
                 onClick={() => void undo()}

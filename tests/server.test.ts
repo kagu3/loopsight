@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、11 個のツールが見える", async () => {
+  test("クライアントから接続でき、13 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     const { tools } = await client.listTools();
@@ -59,6 +59,7 @@ describe("MCP server", () => {
         "export_model",
         "get_model",
         "import_model",
+        "layout_model",
         "list_models",
         "remove_elements",
         "run_simulation",
@@ -66,6 +67,7 @@ describe("MCP server", () => {
         "sweep_parameter",
         "upsert_elements",
         "validate_model",
+        "view_diagram",
       ].sort(),
     );
   });
@@ -214,4 +216,48 @@ describe("MCP server", () => {
     const run = await call("run_simulation", { model: "cld", samples: 0 });
     expect(run.warnings[0].message).toMatch(/因果ループ図/);
   });
+
+  test("layout_model で座標を付けて保存し、view_diagram で図の確認の一覧を返す", async () => {
+    await call("create_model", { model: "sir" });
+    await call("upsert_elements", { model: "sir", elements: SIR });
+    const before = await call("view_diagram", { model: "sir", image: false });
+    expect(before.missing_coordinates).toBe(true);
+
+    const laid = await call("layout_model", { model: "sir" });
+    expect(laid.placed_elements.length).toBeGreaterThan(0);
+    expect(laid.diagram.missing_coordinates).toBe(false);
+    expect(laid.diagram.overlaps).toEqual([]);
+
+    const check = await call("view_diagram", { model: "sir", image: false });
+    expect(check.missing_coordinates).toBe(false);
+    const s = check.positions.find((p: { name: string }) => p.name === "Susceptible");
+    expect(s.coordinates).toHaveLength(2);
+    expect(check.how_to_move).toMatch(/upsert_elements/);
+
+    // 動かすと一覧に出る
+    await call("upsert_elements", { model: "sir", elements: [{ name: "Infected", display: { coordinates: s.coordinates } }] });
+    const moved = await call("view_diagram", { model: "sir", image: false });
+    expect(moved.overlaps.join()).toMatch(/Susceptible と Infected|Infected と Susceptible/);
+
+    // reset で並べ直すと重なりはなくなる
+    const reset = await call("layout_model", { model: "sir", reset: true });
+    expect(reset.diagram.overlaps).toEqual([]);
+  });
+
+  test("view_diagram は図を PNG で返す（ブラウザと画面のビルドがあるとき）", async () => {
+    await call("create_model", { model: "p" });
+    await call("upsert_elements", { model: "p", elements: SIR });
+    const res = await client.callTool({ name: "view_diagram", arguments: { model: "p", width: 800, height: 500 } });
+    expect(res.isError).toBeFalsy();
+    const content = res.content as { type: string; text?: string; data?: string; mimeType?: string }[];
+    const info = JSON.parse(content[0]!.text!);
+    if (info.image_error) {
+      // ブラウザか画面のビルドがない環境では、一覧だけを返す
+      expect(info.image_error).toMatch(/Edge か Chrome|ビルド/);
+      return;
+    }
+    expect(content[1]).toMatchObject({ type: "image", mimeType: "image/png" });
+    const png = Buffer.from(content[1]!.data!, "base64");
+    expect(png.subarray(1, 4).toString()).toBe("PNG");
+  }, 30_000);
 });

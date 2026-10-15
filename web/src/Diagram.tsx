@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
-import { borderPoint, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "./graph.js";
+import { borderPoint, linkControlPoint, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
@@ -80,12 +80,7 @@ function FloatingEdge({ id, source, target, markerEnd, data }: EdgeProps<ModelEd
     return <BaseEdge id={id} path={`M${p1[0]},${p1[1]} L${p2[0]},${p2[1]}`} markerEnd={markerEnd} className={cls} />;
   }
   // リンクは少し曲げる（フローの線と見分けやすく）
-  const mx = (ca[0] + cb[0]) / 2;
-  const my = (ca[1] + cb[1]) / 2;
-  const dx = cb[0] - ca[0];
-  const dy = cb[1] - ca[1];
-  const k = 0.18;
-  const ctrl: [number, number] = [mx - dy * k, my + dx * k];
+  const ctrl = linkControlPoint(ca, cb);
   const p1 = endAt(a, ca, ctrl);
   const p2 = endAt(b, cb, ctrl);
   const path = `M${p1[0]},${p1[1]} Q${ctrl[0]},${ctrl[1]} ${p2[0]},${p2[1]}`;
@@ -118,6 +113,8 @@ export interface DiagramProps {
   onSelect(element: string | undefined): void;
   /** 動かした位置を保存する。失敗したらその文を返す */
   onMove(patches: ElementPatch[]): Promise<string | undefined>;
+  /** 図だけを見せる表示（MCP の view_diagram が画像にする）。操作の道具を出さない */
+  embed?: boolean;
 }
 
 type Pos = { x: number; y: number };
@@ -196,10 +193,10 @@ export function Diagram(props: DiagramProps) {
   placedRef.current = placed;
   const onNodeDragStop = useCallback(
     async (_: unknown, _node: ModelNodeT, dragged: ModelNodeT[]) => {
-      // 自動配置で見ているときは、見えている配置をまとめて保存する（座標のない要素を残さない）。
+      // 座標のない要素を仮に並べているときは、見えている配置をまとめて保存する（座標のない要素を残さない）。
       // 左や上にはみ出したときも、全体をずらしてまとめて保存する
       const shifted = shiftIntoView(placedRef.current);
-      const ids = graph.autoLayout || shifted ? undefined : new Set(dragged.map((n) => n.id));
+      const ids = graph.missingCoordinates || shifted ? undefined : new Set(dragged.map((n) => n.id));
       const patches = positionPatches(shifted ?? placedRef.current, ids);
       if (!patches.length) return;
       pendingSaves.current++;
@@ -245,15 +242,15 @@ export function Diagram(props: DiagramProps) {
       nodesConnectable={false}
       elementsSelectable
       fitView
-      fitViewOptions={{ padding: 0.15, maxZoom: 1.5 }}
+      fitViewOptions={{ padding: props.embed ? 0.04 : 0.15, maxZoom: 1.5 }}
       minZoom={0.1}
       proOptions={{ hideAttribution: true }}
       onNodeClick={(_, n) => props.onSelect(n.data.g.element)}
       onPaneClick={() => props.onSelect(undefined)}
     >
-      <FitOnChange modelName={props.modelName} layoutKey={`${graph.autoLayout ? "auto" : "model"}:${nodeIds}`} />
+      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} />
       <Background gap={20} size={1} />
-      <Controls showInteractive={false} />
+      {!props.embed && <Controls showInteractive={false} />}
     </ReactFlow>
   );
 }

@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -13,6 +15,7 @@ import {
   StoreError,
   TIME_UNITS,
   addDefaultVisualization,
+  checkDiagram,
   compareScenarios,
   emptyModel,
   importModelText,
@@ -33,6 +36,8 @@ import {
   type ElementPatch,
   type ModelJSON,
 } from "../core/index.js";
+import { BrowserNotFoundError, launchBrowser } from "../viewer/browser.js";
+import { startViewer } from "../viewer/server.js";
 
 // ---- 入力の形 ----
 
@@ -149,7 +154,8 @@ const SERVER_INSTRUCTIONS = `Insight Maker のシステムダイナミクス（S
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする
-5. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
+5. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素の上を通るところ・線の交差の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
+6. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -278,6 +284,76 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         validation,
         next_step: "Insight Maker の Web 版でモデルを開き、Import/Export メニューの「Import ModelJSON」からこのファイルを読み込んでください。",
       };
+    }),
+  );
+
+  server.registerTool(
+    "layout_model",
+    {
+      title: "図の配置を付ける",
+      description:
+        "座標のない要素に、重ならないように座標を付けて保存する（書き出しと同じ簡易レイアウト）。reset: true ですべて並べ直す。" +
+        "結果に図の確認（重なり、線が要素の上を通るところ、線の交差）を付ける。直すときは view_diagram で図を見ながら upsert_elements の display で位置を変える。",
+      inputSchema: {
+        model: modelName,
+        reset: z.boolean().optional().describe("いまの座標を捨てて、すべて並べ直す（既定は false）"),
+      },
+    },
+    handle(async (a: { model: string; reset?: boolean }) => {
+      const m = await store.read(a.model);
+      if (a.reset) {
+        for (const el of m.elements) {
+          if (!el.display) continue;
+          delete el.display.coordinates;
+          delete el.display.from_coordinates;
+          delete el.display.to_coordinates;
+          if (!Object.keys(el.display).length) delete el.display;
+        }
+      }
+      const placed = layoutModel(m);
+      const file = await store.write(a.model, m);
+      const { positions: _positions, ...check } = checkDiagram(m);
+      return { model: a.model, file, placed_elements: placed, diagram: check };
+    }),
+  );
+
+  server.registerTool(
+    "view_diagram",
+    {
+      title: "図を見る",
+      description:
+        "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、各要素の位置を返す。" +
+        "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
+        "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。",
+      inputSchema: {
+        model: modelName,
+        image: z.boolean().optional().describe("画像を付ける（既定は true）。一覧だけでよければ false"),
+        width: z.number().int().min(400).max(4000).optional().describe("画像の幅（既定 1600）"),
+        height: z.number().int().min(300).max(4000).optional().describe("画像の高さ（既定 1000）"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    handle(async (a: { model: string; image?: boolean; width?: number; height?: number }) => {
+      const m = await store.read(a.model);
+      const check = {
+        model: a.model,
+        how_to_move:
+          "upsert_elements で [{name:'要素名', display:{coordinates:[x, y]}}]（左上）。雲は [{name:'フロー名', display:{from_coordinates:[x, y]}}]（中心、行き先なら to_coordinates）。y は下向き",
+        ...checkDiagram(m),
+      };
+      if (a.image === false) return check;
+      let png: Buffer;
+      try {
+        png = await renderDiagram(store, a.model, a.width ?? 1600, a.height ?? 1000);
+      } catch (e) {
+        return { ...check, image_error: e instanceof BrowserNotFoundError ? e.message : `図を画像にできませんでした: ${(e as Error).message}` };
+      }
+      return {
+        content: [
+          { type: "text", text: formatJSON(check) },
+          { type: "image", data: png.toString("base64"), mimeType: "image/png" },
+        ],
+      } satisfies CallToolResult;
     }),
   );
 
@@ -476,3 +552,26 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     ),
   );
 }
+
+/** ビルドした画面（dist/web）。ビルドしたものは dist/mcp/tools.js、テストではソースの src/mcp/tools.ts から探す */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const WEB_DIR = [path.resolve(HERE, "../web"), path.resolve(HERE, "../../dist/web")].find((d) => existsSync(path.join(d, "index.html"))) ?? path.resolve(HERE, "../web");
+
+/** ビューアを一時的に起動し、ヘッドレスのブラウザで図だけを描いて PNG にする */
+async function renderDiagram(store: ModelStore, name: string, width: number, height: number): Promise<Buffer> {
+  if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
+  const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
+  try {
+    const browser = await launchBrowser();
+    try {
+      await browser.setViewport(width, height);
+      await browser.open(`${viewer.url}?view=diagram#${encodeURIComponent(name)}`);
+      return await browser.screenshot();
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await viewer.close();
+  }
+}
+
