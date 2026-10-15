@@ -315,7 +315,11 @@ export function App() {
         <div className="toolbar">
           <div className="title">
             <h2>{title || "モデルを選んでください"}</h2>
-            {data?.model.description && <p className="muted">{data.model.description}</p>}
+            {data?.model.description && (
+              <p className="muted" title={data.model.description}>
+                {data.model.description}
+              </p>
+            )}
           </div>
           {graph && data && (
             <div className="toolbar-right">

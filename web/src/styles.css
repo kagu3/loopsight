@@ -281,17 +281,31 @@ button.link {
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
 }
+.toolbar .title {
+  min-width: 0;
+}
 .toolbar .title h2 {
   font-size: 16px;
 }
+/* 長い説明は 2 行まで（全文はカーソルを乗せると出る） */
 .toolbar .title p {
   margin: 0;
   font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .toolbar-right {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex: none;
+  white-space: nowrap;
+}
+.toolbar-right .note {
+  white-space: normal;
+  max-width: 260px;
 }
 .note {
   font-size: 12px;
