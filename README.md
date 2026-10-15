@@ -74,7 +74,7 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 | `list_models` | 作業フォルダのモデル一覧 |
 | `create_model` | 空のモデルを作る（名前、シミュレーション設定） |
 | `import_model` | `.InsightMaker` または ModelJSON ファイルを取り込む |
-| `export_model` | Web 版に読み込める ModelJSON を書き出す。座標のない要素には座標を付ける |
+| `export_model` | Web 版に読み込める ModelJSON を書き出す。座標のない要素には座標を付け、大きさのない箱にはビューアと同じ大きさを入れる |
 | `layout_model` | 座標のない要素に座標を付けて保存する。`reset: true` ですべて並べ直す |
 | `view_diagram` | 図を PNG の画像にし、箱の重なり、線が要素や名前の上を通るところ、線の交差、1 か所に集まる線、各要素の位置を返す。AI が図を見ながら配置を直すのに使う（画像には Edge か Chrome が必要） |
 | `get_model` | モデルの要約（要素、式、つながり）、または ModelJSON 全体を返す |

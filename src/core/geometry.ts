@@ -72,3 +72,107 @@ export function flowLabelRect(name: string, a: Point, b: Point): Rect {
     ? { x: mx + valveHalf + 6, y: my - h / 2, w, h }
     : { x: mx - w / 2, y: my + valveHalf + 3, w, h };
 }
+
+/** 文字列の幅のおおよそ。全角は文字の大きさと同じ、半角はその 7/12 ほど */
+export function textWidth(text: string, fontSize: number): number {
+  return [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 0xff ? fontSize : (fontSize * 7) / 12), 0);
+}
+
+// 箱の名前の文字（画面の .node と同じ 13px。行の高さは 1.2 倍）
+const LABEL_FONT = 13;
+const LABEL_LINE = LABEL_FONT * 1.2;
+/** 名前の左右のすき間（内側の余白、枠の線、少しのゆとり） */
+const LABEL_PAD = 10;
+/** 名前がこの幅（全角 9 文字ほど）より長ければ 2 行にする */
+const WRAP_WIDTH = 120;
+
+/** 名前が 1 行のときの箱の大きさ。名前が短くても、これより小さくはしない */
+const BOX_SIZE: Record<string, Point> = {
+  STOCK: [100, 40],
+  VARIABLE: [120, 50],
+  CONVERTER: [120, 50],
+  STATE: [100, 40],
+};
+/** 名前が 2 行のときの箱の高さ（ストックは下に値も出すので、そのぶんも入れる） */
+const TWO_LINE_HEIGHT: Record<string, number> = {
+  STOCK: 56,
+  VARIABLE: 60,
+  CONVERTER: 60,
+  STATE: 56,
+};
+
+/** 箱になる要素の種類 */
+export const BOX_TYPES: ReadonlySet<string> = new Set(Object.keys(BOX_SIZE));
+
+const isHiragana = (ch: string) => ch >= "\u3040" && ch <= "\u309f";
+const isSpace = (ch: string) => ch === " " || ch === "\u3000";
+
+/**
+ * 名前を 2 行に分けてよいところ（2 行目の始まりの位置）。言葉の途中では分けない。
+ * - 空白（半角か全角）のあと
+ * - ひらがなから、漢字やカタカナ、英数字に変わるところ（「管理者が|考える|必要な|人数」）
+ */
+function breakPoints(name: string): number[] {
+  const chars = [...name];
+  const out: number[] = [];
+  for (let i = 1; i < chars.length; i++) {
+    const prev = chars[i - 1]!;
+    const ch = chars[i]!;
+    if (isSpace(ch)) continue;
+    if (isSpace(prev) ||(isHiragana(prev) && !isHiragana(ch) && !"ー・、。）」』".includes(ch))) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * 名前の行。maxWidth に収まれば 1 行、収まらなければ言葉の切れ目で 2 行に分ける（長いほうの行がいちばん短くなるところで）。
+ * 分けられるところがなければ 1 行のまま（箱を広げる）。
+ */
+export function labelLines(name: string, maxWidth = WRAP_WIDTH): string[] {
+  if (textWidth(name, LABEL_FONT) <= maxWidth) return [name];
+  const chars = [...name];
+  let best: string[] | undefined;
+  let bestWidth = Infinity;
+  for (const i of breakPoints(name)) {
+    const lines = [chars.slice(0, i).join("").trimEnd(), chars.slice(i).join("").trimStart()];
+    const w = Math.max(...lines.map((l) => textWidth(l, LABEL_FONT)));
+    if (w < bestWidth) {
+      best = lines;
+      bestWidth = w;
+    }
+  }
+  return best ?? [name];
+}
+
+/** 文字の固まりが入る楕円の幅の割合（文字の上下の端で、楕円がどれだけ狭くなるか） */
+const ellipseRatio = (textHeight: number, height: number) => Math.sqrt(Math.max(0.1, 1 - (textHeight / height) ** 2));
+/** ストックの名前の下に出す値の行の高さ（画面の .node-value と同じ 12px） */
+const VALUE_LINE = 12 * 1.2;
+/** 名前の上下のすき間（画面の .node-body の内側の余白） */
+const BODY_PAD_Y = 4;
+
+/**
+ * 箱の大きさと、名前の行。簡易レイアウト（layout.ts）、図への変換（diagram.ts）、図の確認、書き出しで同じものを使う。
+ * - size（モデルの display.size）があればその大きさにし、名前はその幅に収まるように行を分ける。
+ *   それでも入らなければ fits を false にする（画面は前と同じく、箱の中で折り返して描く）
+ * - なければ名前の長さから幅を決める。長い名前は 2 行までにする
+ * 変数は楕円なので、文字の上下の端でも枠からはみ出さない幅にする。
+ */
+export function boxLayout(type: string, name: string, size?: Point): { size: Point; lines: string[]; fits: boolean } {
+  const ellipse = type === "VARIABLE";
+  /** 幅 w、高さ h の箱で、n 行の名前の 1 行に使える幅 */
+  const room = (w: number, h: number, n: number) => (ellipse ? w * ellipseRatio(n * LABEL_LINE, h) : w) - 2 * LABEL_PAD;
+  if (size) {
+    const [w, h] = size;
+    const lines = labelLines(name, room(w, h, 1));
+    const widest = Math.max(...lines.map((l) => textWidth(l, LABEL_FONT)));
+    const tall = lines.length * LABEL_LINE + (type === "STOCK" ? VALUE_LINE : 0) + BODY_PAD_Y;
+    return { size, lines, fits: widest <= room(w, h, lines.length) && tall <= h };
+  }
+  const [minW, oneLineH] = BOX_SIZE[type] ?? [100, 50];
+  const lines = labelLines(name);
+  const h = lines.length > 1 ? (TWO_LINE_HEIGHT[type] ?? oneLineH) : oneLineH;
+  const text = Math.max(...lines.map((l) => textWidth(l, LABEL_FONT))) + 2 * LABEL_PAD;
+  const w = ellipse ? text / ellipseRatio(lines.length * LABEL_LINE, h) : text;
+  return { size: [Math.max(minW, Math.ceil(w)), h], lines, fits: true };
+}

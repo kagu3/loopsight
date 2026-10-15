@@ -54,7 +54,17 @@ function ModelNode({ data }: NodeProps<ModelNodeT>) {
         </svg>
       ) : (
         <div className="node-body">
-          <span className="node-label">{g.label}</span>
+          {/* 名前の行は core（boxLayout）で決めてある。ここでは折り返さずにそのまま描く。
+              ただしモデルで決まった大きさの箱に入りきらないときは、前と同じく箱の中で折り返す */}
+          {g.wrapLabel ? (
+            <span className="node-label is-wrapped">{g.label}</span>
+          ) : (
+            (g.lines ?? [g.label]).map((line, i) => (
+              <span key={i} className="node-label">
+                {line}
+              </span>
+            ))
+          )}
           {data.value !== undefined && <span className="node-value">{data.value}</span>}
         </div>
       )}

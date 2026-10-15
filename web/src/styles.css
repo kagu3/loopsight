@@ -496,8 +496,16 @@ button:disabled {
   padding: 2px 6px;
   text-align: center;
 }
+/* 名前の行は core で分けてあるので、ここでは折り返さない（日本語が言葉の途中で折り返されないように） */
+.node-label {
+  white-space: nowrap;
+}
+/* モデルで決まった大きさの箱に名前が入りきらないときは、箱の中で折り返す */
+.node-label.is-wrapped {
+  white-space: normal;
+}
 .node-value {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 .node-stock {

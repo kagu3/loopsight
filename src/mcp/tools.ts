@@ -14,6 +14,7 @@ import {
   ModelStore,
   StoreError,
   TIME_UNITS,
+  addBoxSizes,
   addDefaultVisualization,
   checkDiagram,
   compareScenarios,
@@ -253,6 +254,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       title: "Web 版向けに書き出す",
       description:
         "Insight Maker の Web 版で「Import ModelJSON」から読み込める JSON ファイルを書き出す。座標のない要素には、重ならないように座標を付ける。" +
+        "大きさのない箱には、図と同じ大きさ（名前の長さから決めたもの）を入れる（モデル本体には保存しない）。" +
         "グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す。" +
         "書き出し先は作業フォルダの中（既定は exports/<モデル名>.json）。",
       inputSchema: {
@@ -275,6 +277,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         if (a.save_layout && placed.length) await store.write(a.model, m);
       }
       const chart = a.chart !== false ? addDefaultVisualization(m) : undefined;
+      // 箱の大きさは書き出すファイルにだけ入れる（Web 版でもビューアと同じ幅にする）
+      addBoxSizes(m);
       const rel = a.path ?? path.join("exports", `${a.model}.json`);
       const file = await store.writeJSONFile(store.resolveInside(rel.endsWith(".json") ? rel : `${rel}.json`), m);
       return {

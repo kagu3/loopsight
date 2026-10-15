@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { borderPoint, bounds, emptyModel, fitTargets, layoutModel, MIN_FIT_ZOOM, positionPatches, shiftIntoView, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
+import { addBoxSizes, borderPoint, bounds, boxLayout, checkDiagram, emptyModel, fitTargets, labelLines, layoutModel, MIN_FIT_ZOOM, positionPatches, shiftIntoView, textWidth, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
 import { loadSample, sampleNames } from "./helpers.js";
 
 function population(): ModelJSON {
@@ -139,5 +139,78 @@ describe("図への変換", () => {
     const [x, y] = borderPoint(ellipse, 60, 200);
     expect(x).toBeCloseTo(60);
     expect(y).toBeCloseTo(50);
+  });
+});
+
+describe("箱の幅と名前の行", () => {
+  test("短い名前は 1 行で、箱はこれまでの大きさのまま", () => {
+    expect(boxLayout("STOCK", "新人")).toEqual({ size: [100, 40], lines: ["新人"], fits: true });
+    expect(boxLayout("VARIABLE", "締め切り")).toEqual({ size: [120, 50], lines: ["締め切り"], fits: true });
+  });
+
+  test("少し長い名前は 1 行のまま、箱を広げて収める", () => {
+    const { size, lines } = boxLayout("STOCK", "プロジェクトの期間");
+    expect(lines).toEqual(["プロジェクトの期間"]);
+    expect(size[0]).toBeGreaterThan(100);
+    expect(size[0]).toBeGreaterThanOrEqual(textWidth("プロジェクトの期間", 13));
+  });
+
+  test("とても長い名前は、言葉の切れ目で 2 行に分ける", () => {
+    expect(labelLines("管理者が考える必要な人数")).toEqual(["管理者が考える", "必要な人数"]);
+    expect(labelLines("1 組あたりの意思疎通の手間")).toEqual(["1 組あたりの", "意思疎通の手間"]);
+    expect(labelLines("Average Number of Daily Contacts")).toEqual(["Average Number", "of Daily Contacts"]);
+    expect(labelLines("プロジェクトマネージャー　サポート担当")).toEqual(["プロジェクトマネージャー", "サポート担当"]);
+    const { size, lines } = boxLayout("VARIABLE", "管理者が考える必要な人数");
+    expect(lines).toHaveLength(2);
+    expect(size[1]).toBeGreaterThan(50);
+  });
+
+  test("分けられるところがない名前は、言葉の途中で分けず 1 行のまま広げる", () => {
+    const name = "プロジェクトマネージャー";
+    expect(labelLines(name)).toEqual([name]);
+    expect(boxLayout("STOCK", name).size[0]).toBeGreaterThanOrEqual(textWidth(name, 13));
+  });
+
+  test("モデルに大きさ（display.size）があれば、その大きさにして名前をその幅で分ける", () => {
+    expect(boxLayout("STOCK", "管理者が考える必要な人数", [200, 40])).toEqual({ size: [200, 40], lines: ["管理者が考える必要な人数"], fits: true });
+    expect(boxLayout("STOCK", "管理者が考える必要な人数", [120, 60])).toEqual({ size: [120, 60], lines: ["管理者が考える", "必要な人数"], fits: true });
+  });
+
+  test("決まった大きさに名前が入りきらなければ、画面で折り返すようにする", () => {
+    // 2 行にしても高さ 40 のストックには入らない
+    expect(boxLayout("STOCK", "管理者が考える必要な人数", [100, 40]).fits).toBe(false);
+    // 分けられるところがなく、幅に入らない
+    expect(boxLayout("VARIABLE", "プロジェクトマネージャー", [120, 50]).fits).toBe(false);
+    expect(boxLayout("STOCK", "新人", [100, 40]).fits).toBe(true);
+    const m = emptyModel("fixed");
+    upsertElements(m, [
+      { type: "STOCK", name: "管理者が考える必要な人数", display: { coordinates: [100, 100], size: [100, 40] } },
+      { type: "STOCK", name: "新人", display: { coordinates: [300, 100], size: [100, 40] } },
+    ]);
+    const nodes = toGraph(m).nodes;
+    expect(nodes.find((n) => n.element === "管理者が考える必要な人数")!.wrapLabel).toBe(true);
+    expect(nodes.find((n) => n.element === "新人")!.wrapLabel).toBeUndefined();
+  });
+
+  test("図、簡易レイアウト、図の確認、書き出しで、箱の大きさが同じ", () => {
+    const m = emptyModel("names");
+    upsertElements(m, [
+      { type: "STOCK", name: "プロジェクトの期間", behavior: { initial_value: 10 } },
+      { type: "VARIABLE", name: "管理者が考える必要な人数", behavior: { value: "[プロジェクトの期間]" } },
+      { type: "VARIABLE", name: "標準の生産性", behavior: { value: 1 } },
+    ]);
+    const sizes = (nodes: GraphNode[]) => Object.fromEntries(nodes.filter((n) => n.element).map((n) => [n.element!, [n.width, n.height]]));
+    // 座標のないモデル（仮に並べて描く）
+    const auto = sizes(toGraph(m).nodes);
+    expect(auto["管理者が考える必要な人数"]).toEqual(boxLayout("VARIABLE", "管理者が考える必要な人数").size);
+    expect(toGraph(m).nodes.find((n) => n.element === "管理者が考える必要な人数")!.lines).toEqual(["管理者が考える", "必要な人数"]);
+    // 簡易レイアウトで座標を付けたあとの図と、図の確認（view_diagram）が使う大きさも同じ
+    layoutModel(m);
+    expect(sizes(toGraph(m).nodes)).toEqual(auto);
+    const check = checkDiagram(m);
+    for (const p of check.positions.filter((p) => p.size)) expect(p.size, p.name).toEqual(auto[p.name]);
+    // 書き出すファイルに入れる大きさも同じ
+    addBoxSizes(m);
+    for (const e of m.elements.filter((e) => e.display?.coordinates)) expect(e.display!.size, e.name).toEqual(auto[e.name!]);
   });
 });

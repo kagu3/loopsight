@@ -1,18 +1,11 @@
 import type { ModelElement, ModelJSON, Point, Visualization } from "./modeljson.js";
 import { nameKey, sameName } from "./modeljson.js";
-import { flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
+import { boxLayout, BOX_TYPES, flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
 
 // 簡易レイアウト：Web 版に読み込んだとき要素が重ならない程度に座標を付ける。
 // ストックを横一列に並べ（フローの流れ順）、変数はつながる要素の近くに、
 // リンクの線が雲やほかの要素を横切らないように置く。
 
-const SIZE: Record<string, Point> = {
-  STOCK: [100, 40],
-  VARIABLE: [120, 50],
-  CONVERTER: [120, 50],
-  STATE: [100, 40],
-};
-const NODE_TYPES = new Set(Object.keys(SIZE));
 const STOCK_GAP = 300;
 const MARGIN = 20;
 // 変数の箱とフローやリンクの線とのすき間
@@ -23,10 +16,15 @@ function hasCoordinates(el: ModelElement): boolean {
   return Array.isArray(c) && c.length === 2 && !(c[0] === 0 && c[1] === 0);
 }
 
+/** 箱の大きさ（モデルになければ名前の長さから決める。図と同じ） */
+function sizeOf(el: ModelElement): Point {
+  return boxLayout(el.type, el.name ?? "", el.display?.size).size;
+}
+
 function rectOf(el: ModelElement): Rect | undefined {
   if (!hasCoordinates(el)) return undefined;
   const [x, y] = el.display!.coordinates!;
-  const [w, h] = el.display?.size ?? SIZE[el.type] ?? [100, 50];
+  const [w, h] = sizeOf(el);
   return { x, y, w, h };
 }
 
@@ -46,7 +44,7 @@ export function layoutModel(model: ModelJSON): string[] {
   const placed: string[] = [];
   const occupied: Rect[] = [];
   const rects = new Map<string, Rect>();
-  const nodes = model.elements.filter((e) => NODE_TYPES.has(e.type) && e.name);
+  const nodes = model.elements.filter((e) => BOX_TYPES.has(e.type) && e.name);
 
   for (const el of nodes) {
     const r = rectOf(el);
@@ -58,7 +56,7 @@ export function layoutModel(model: ModelJSON): string[] {
 
   const isFree = (r: Rect) => !occupied.some((o) => overlaps(o, r));
   const place = (el: ModelElement, r: Rect) => {
-    el.display = { ...(el.display ?? {}), coordinates: [Math.round(r.x), Math.round(r.y)], size: [r.w, r.h] };
+    el.display = { ...(el.display ?? {}), coordinates: [Math.round(r.x), Math.round(r.y)] };
     occupied.push(r);
     rects.set(nameKey(el.name!), r);
     placed.push(el.name!);
@@ -71,7 +69,7 @@ export function layoutModel(model: ModelJSON): string[] {
   const rowY = occupied.length ? bottom() + 260 : 260;
   let x = 100;
   for (const s of newStocks) {
-    const [w, h] = SIZE.STOCK!;
+    const [w, h] = sizeOf(s);
     let r = { x, y: rowY, w, h };
     while (!isFree(r)) r = { ...r, x: r.x + STOCK_GAP };
     place(s, r);
@@ -175,7 +173,7 @@ export function layoutModel(model: ModelJSON): string[] {
         next.push(el);
         continue;
       }
-      const [w, h] = SIZE[el.type]!;
+      const [w, h] = sizeOf(el);
       const r = findSpot(targets, w, h, { occupied, segments, stockTop });
       place(el, r);
       // 引いたリンクの線も、あとで置く変数の邪魔にならないように覚えておく
@@ -187,7 +185,7 @@ export function layoutModel(model: ModelJSON): string[] {
       let y = bottom() + 120;
       let px = 100;
       for (const el of next) {
-        const [w, h] = SIZE[el.type]!;
+        const [w, h] = sizeOf(el);
         let r = { x: px, y, w, h };
         while (!isFree(r)) r = { ...r, x: r.x + w + 40 };
         place(el, r);
@@ -206,7 +204,7 @@ export function layoutModel(model: ModelJSON): string[] {
   let sx = 100;
   const sy = bottom() + 140;
   for (const el of nodes.filter((e) => e.type === "STATE" && !rects.has(nameKey(e.name!)))) {
-    const [w, h] = SIZE.STATE!;
+    const [w, h] = sizeOf(el);
     let r = { x: sx, y: sy, w, h };
     while (!isFree(r)) r = { ...r, x: r.x + 160 };
     place(el, r);
@@ -283,6 +281,22 @@ function findSpot(
 
 type Segment = [Point, Point];
 
+
+/**
+ * 大きさ（display.size）のない箱に、図と同じ大きさ（名前の長さから決めたもの）を入れる。
+ * Web 版に読み込んだときも、ビューアと同じ幅の箱になるようにするため。書き出すコピーに使う
+ * （モデル本体に入れると、あとで名前を変えたときに古い幅のまま残るので、保存はしない）。
+ * @returns 大きさを入れた要素の名前
+ */
+export function addBoxSizes(model: ModelJSON): string[] {
+  const added: string[] = [];
+  for (const el of model.elements) {
+    if (!BOX_TYPES.has(el.type) || !el.name || el.display?.size) continue;
+    el.display = { ...(el.display ?? {}), size: sizeOf(el) };
+    added.push(el.name);
+  }
+  return added;
+}
 
 /**
  * グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す。

@@ -6,6 +6,7 @@
 // - モデルの外の端は雲のノード
 // - 座標はモデルにあればそれを使う。ない要素があれば、書き出しと同じ簡易レイアウト（layoutModel）で並べる
 import { layoutModel } from "./layout.js";
+import { boxLayout, BOX_TYPES } from "./geometry.js";
 export { LINK_BEND, linkControlPoint } from "./geometry.js";
 import type { ModelElement, ModelJSON } from "./modeljson.js";
 
@@ -17,6 +18,10 @@ export interface GraphNode {
   kind: NodeKind;
   /** 表示名。雲は空 */
   label: string;
+  /** 箱に描く名前の行（長い名前は 2 行に分ける）。箱のほかはなし */
+  lines?: string[];
+  /** 名前が、モデルで決まった大きさ（display.size）の箱に入りきらないか。画面は箱の中で折り返して描く */
+  wrapLabel?: boolean;
   /** モデルの要素名（雲はなし）。フローの弁はフローの名前 */
   element?: string;
   x: number;
@@ -52,16 +57,11 @@ export interface Graph {
   missingCoordinates: boolean;
 }
 
-const SIZE: Record<NodeKind, [number, number]> = {
-  STOCK: [100, 40],
-  VARIABLE: [120, 50],
-  CONVERTER: [120, 50],
-  STATE: [100, 40],
+// 箱の大きさは名前の長さで決める（geometry.ts の boxLayout）
+const SIZE = {
   VALVE: [18, 18],
   CLOUD: [36, 26],
-};
-
-const BOX_KINDS = new Set(["STOCK", "VARIABLE", "CONVERTER", "STATE"]);
+} as const;
 
 export const elementId = (name: string) => `el:${name.toLowerCase()}`;
 const valveId = (name: string) => `valve:${name.toLowerCase()}`;
@@ -77,7 +77,7 @@ const center = (n: GraphNode): [number, number] => [n.x + n.width / 2, n.y + n.h
 /** 座標のない要素（箱か、モデルの外の端）があるか */
 export function needsLayout(model: ModelJSON): boolean {
   for (const el of model.elements) {
-    if (BOX_KINDS.has(el.type) && el.name && !hasCoordinates(el)) return true;
+    if (BOX_TYPES.has(el.type) && el.name && !hasCoordinates(el)) return true;
     if ((el.type === "FLOW" || el.type === "TRANSITION") && el.name) {
       if (!el.from && !el.display?.from_coordinates) return true;
       if (!el.to && !el.display?.to_coordinates) return true;
@@ -102,14 +102,16 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
   const byName = new Map<string, GraphNode>();
 
   for (const el of model.elements) {
-    if (!BOX_KINDS.has(el.type) || !el.name) continue;
+    if (!BOX_TYPES.has(el.type) || !el.name) continue;
     const kind = el.type as NodeKind;
-    const [w, h] = el.display?.size ?? SIZE[kind];
+    const { size: [w, h], lines, fits } = boxLayout(kind, el.name, el.display?.size);
     const [x, y] = hasCoordinates(el) ? el.display!.coordinates! : [0, 0];
     const node: GraphNode = {
       id: elementId(el.name),
       kind,
       label: el.name,
+      lines,
+      ...(fits ? {} : { wrapLabel: true }),
       element: el.name,
       x,
       y,

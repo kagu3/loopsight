@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, SERVER_NAME } from "../src/mcp/server.js";
-import { validateModel, type ModelJSON } from "../src/core/index.js";
+import { boxLayout, validateModel, type ModelJSON } from "../src/core/index.js";
 import { FIXTURES_DIR, SAMPLES_DIR, tempDir } from "./helpers.js";
 
 let client: Client;
@@ -127,6 +127,8 @@ describe("MCP server", () => {
     expect(validateModel(exported).ok).toBe(true);
     for (const el of exported.elements.filter((e) => e.type === "STOCK" || e.type === "VARIABLE")) {
       expect(el.display?.coordinates, el.name).toBeDefined();
+      // 箱の大きさは図と同じ（名前の長さから決めたもの）
+      expect(el.display?.size, el.name).toEqual(boxLayout(el.type, el.name!).size);
     }
     // グラフの設定がないので、ストックの時系列グラフが足される
     expect(exp.added_chart).toMatchObject({ type: "TIME_SERIES", elements: ["Susceptible", "Infected", "Recovered"] });
@@ -134,6 +136,7 @@ describe("MCP server", () => {
     // save_layout を付けなければモデル本体には座標を書かない。グラフも書かない
     const after = await call<ModelJSON>("get_model", { model: "sir", format: "full" });
     expect(after.elements.some((e) => e.display?.coordinates)).toBe(false);
+    expect(after.elements.some((e) => e.display?.size)).toBe(false);
     expect(after.visualizations).toBeUndefined();
     const noChart = await call("export_model", { model: "sir", path: "exports/no-chart.json", chart: false });
     expect(noChart.added_chart).toBeUndefined();

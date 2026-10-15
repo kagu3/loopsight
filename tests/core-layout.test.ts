@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addDefaultVisualization, emptyModel, layoutModel, linkControlPoint, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
+import { addBoxSizes, addDefaultVisualization, boxLayout, emptyModel, layoutModel, linkControlPoint, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
 import { loadSample } from "./helpers.js";
 
 type Box = { name: string; x: number; y: number; w: number; h: number };
@@ -9,7 +9,7 @@ function boxes(m: ModelJSON): Box[] {
     .filter((e) => e.display?.coordinates)
     .map((e) => {
       const [x, y] = e.display!.coordinates!;
-      const [w, h] = e.display!.size ?? [100, 50];
+      const [w, h] = boxLayout(e.type, e.name!, e.display!.size).size;
       return { name: e.name!, x, y, w, h };
     });
 }
@@ -43,7 +43,7 @@ function pointOf(m: ModelJSON, name: string): Point {
     return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   }
   const [x, y] = el.display!.coordinates!;
-  const [w, h] = el.display!.size!;
+  const [w, h] = boxLayout(el.type, el.name!, el.display!.size).size;
   return [x + w / 2, y + h / 2];
 }
 
@@ -204,6 +204,23 @@ describe("簡易レイアウト", () => {
     layoutModel(m);
     expectNoOverlap(m);
     expectClearLines(m);
+  });
+
+  test("箱の大きさはモデルに書かない（あとで名前を変えても、図は新しい名前の長さで描ける）", () => {
+    const m = chain();
+    layoutModel(m);
+    expect(m.elements.some((e) => e.display?.size)).toBe(false);
+  });
+
+  test("書き出すときは、大きさのない箱に図と同じ大きさを入れる（決まった大きさはそのまま）", () => {
+    const m = emptyModel("sizes");
+    upsertElements(m, [
+      { type: "STOCK", name: "管理者が考える必要な人数", behavior: { initial_value: 1 } },
+      { type: "VARIABLE", name: "標準の生産性", behavior: { value: 1 }, display: { size: [80, 30] } },
+    ]);
+    expect(addBoxSizes(m)).toEqual(["管理者が考える必要な人数"]);
+    expect(m.elements[0]!.display!.size).toEqual(boxLayout("STOCK", "管理者が考える必要な人数").size);
+    expect(m.elements[1]!.display!.size).toEqual([80, 30]);
   });
 
   test("すでにある座標は動かさない", () => {
