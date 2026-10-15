@@ -1,0 +1,162 @@
+// ModelJSON（https://github.com/scottfr/modeljson）の型と小さな補助関数
+
+export const ELEMENT_TYPES = [
+  "STOCK",
+  "FLOW",
+  "VARIABLE",
+  "CONVERTER",
+  "LINK",
+  "STATE",
+  "TRANSITION",
+] as const;
+export type ElementType = (typeof ELEMENT_TYPES)[number];
+
+/** 段階 1 で追加・変更できる要素。STATE と TRANSITION は読み込み・保存・実行だけ扱う。 */
+export const EDITABLE_TYPES = ["STOCK", "FLOW", "VARIABLE", "CONVERTER", "LINK"] as const;
+
+export const TIME_UNITS = ["SECONDS", "MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS", "YEARS"] as const;
+export type TimeUnits = (typeof TIME_UNITS)[number];
+
+export type Point = [number, number];
+export type Equation = string | number | boolean;
+
+export interface ElementDisplay {
+  coordinates?: Point;
+  size?: Point;
+  from_coordinates?: Point;
+  to_coordinates?: Point;
+  interactive?: boolean;
+  interactive_min?: number;
+  interactive_max?: number;
+  symbol?: string;
+  [key: string]: unknown;
+}
+
+export interface ElementBehavior {
+  initial_value?: Equation;
+  value?: Equation;
+  non_negative?: boolean;
+  units?: string;
+  input?: "TIME" | "ELEMENT";
+  input_element?: string;
+  interpolation?: "NONE" | "LINEAR";
+  data?: Point[];
+  polarity?: "NEUTRAL" | "POSITIVE" | "NEGATIVE";
+  trigger?: "PROBABILITY" | "TIMEOUT" | "CONDITION";
+  [key: string]: unknown;
+}
+
+export interface ModelElement {
+  type: ElementType;
+  name?: string;
+  description?: string;
+  from?: string | null;
+  to?: string | null;
+  behavior?: ElementBehavior;
+  display?: ElementDisplay;
+  [key: string]: unknown;
+}
+
+export interface SimulationSettings {
+  algorithm?: "RK1" | "RK4";
+  time_start?: number;
+  time_length?: number;
+  time_step?: number;
+  time_units?: TimeUnits;
+}
+
+export interface Visualization {
+  type?: "TIME_SERIES" | "TABLE";
+  name?: string;
+  elements: string[];
+}
+
+export interface Scenario {
+  name?: string;
+  description?: string;
+  values: Record<string, Equation>;
+}
+
+export interface ModelJSON {
+  engine?: "SIMULATION_PACKAGE";
+  name?: string;
+  description?: string;
+  file_notes?: string;
+  simulation?: SimulationSettings;
+  elements: ModelElement[];
+  visualizations?: Visualization[];
+  scenarios?: Scenario[];
+  engine_settings?: { units?: { name: string; base?: string; factor?: number }[]; globals?: string };
+  [key: string]: unknown;
+}
+
+export function isConnector(type: ElementType): boolean {
+  return type === "FLOW" || type === "LINK" || type === "TRANSITION";
+}
+
+/** 名前の比較キー。Insight Maker の名前は大文字小文字を区別しない。 */
+export function nameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export function sameName(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a == null || b == null) return false;
+  return nameKey(a) === nameKey(b);
+}
+
+/** LINK 以外の要素を名前で探す */
+export function findElement(model: ModelJSON, name: string): ModelElement | undefined {
+  return model.elements.find((e) => e.type !== "LINK" && sameName(e.name, name));
+}
+
+export function findLink(model: ModelJSON, from: string, to: string): ModelElement | undefined {
+  return model.elements.find((e) => e.type === "LINK" && sameName(e.from, from) && sameName(e.to, to));
+}
+
+/** 要素の式（参照を含みうる値）を返す。型ごとに入っている場所が違う。 */
+export function equationsOf(el: ModelElement): { field: "initial_value" | "value"; text: string }[] {
+  const out: { field: "initial_value" | "value"; text: string }[] = [];
+  const b = el.behavior ?? {};
+  if (el.type === "STOCK" && typeof b.initial_value === "string") out.push({ field: "initial_value", text: b.initial_value });
+  if ((el.type === "VARIABLE" || el.type === "FLOW" || el.type === "TRANSITION") && typeof b.value === "string") {
+    out.push({ field: "value", text: b.value });
+  }
+  return out;
+}
+
+/** 式の中の [名前] 参照を取り出す（重複なし、出現順） */
+export function referencesIn(equation: string): string[] {
+  const seen = new Map<string, string>();
+  for (const m of equation.matchAll(/\[([^[\]\n]+)\]/g)) {
+    const name = m[1]!.trim();
+    if (name && !seen.has(nameKey(name))) seen.set(nameKey(name), name);
+  }
+  return [...seen.values()];
+}
+
+/** 式の中の [旧名] を [新名] に置き換える */
+export function renameInEquation(equation: string, oldName: string, newName: string): string {
+  return equation.replace(/\[([^[\]\n]+)\]/g, (whole, inner: string) =>
+    sameName(inner, oldName) ? `[${newName}]` : whole,
+  );
+}
+
+export function emptyModel(name: string, simulation: SimulationSettings = {}): ModelJSON {
+  return {
+    engine: "SIMULATION_PACKAGE",
+    name,
+    simulation: {
+      algorithm: "RK1",
+      time_start: 0,
+      time_length: 100,
+      time_step: 1,
+      time_units: "YEARS",
+      ...simulation,
+    },
+    elements: [],
+  };
+}
+
+export function clone<T>(value: T): T {
+  return structuredClone(value);
+}
