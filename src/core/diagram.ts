@@ -228,6 +228,31 @@ export function shiftIntoView(nodes: GraphNode[], margin = 20): GraphNode[] | un
   return nodes.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy }));
 }
 
+/** 画面に合わせるときの縮小の下限。13px の名前が 10px ほどで読める */
+export const MIN_FIT_ZOOM = 0.75;
+
+/**
+ * 画面に合わせるときに入れるノードと、拡大の上限。
+ * 全体が下限の倍率で入ればすべて（上限は maxZoom）。入らなければストックだけを下限の倍率で真ん中に置く
+ * （ストックがなければ全体の真ん中）。ストックだけに合わせて拡大すると、欄を狭めたのに図が大きくなってしまうため。
+ * ほかはドラッグやミニマップで動かして見る。padding は React Flow の fitView と同じ意味（幅の割合）。
+ */
+export function fitTargets(
+  nodes: GraphNode[],
+  width: number,
+  height: number,
+  padding: number,
+  minZoom = MIN_FIT_ZOOM,
+  maxZoom = 1.5,
+): { nodes: GraphNode[]; maxZoom: number } {
+  const b = bounds(nodes);
+  if (!b.width || !b.height) return { nodes, maxZoom };
+  const zoom = Math.min(width / (b.width * (1 + padding)), height / (b.height * (1 + padding)));
+  if (zoom >= minZoom) return { nodes, maxZoom };
+  const stocks = nodes.filter((n) => n.kind === "STOCK");
+  return { nodes: stocks.length ? stocks : nodes, maxZoom: minZoom };
+}
+
 /** 図の範囲 */
 export function bounds(nodes: GraphNode[]): { x: number; y: number; width: number; height: number } {
   if (!nodes.length) return { x: 0, y: 0, width: 0, height: 0 };

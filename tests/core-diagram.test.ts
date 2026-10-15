@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { borderPoint, emptyModel, layoutModel, positionPatches, shiftIntoView, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
+import { borderPoint, bounds, emptyModel, fitTargets, layoutModel, MIN_FIT_ZOOM, positionPatches, shiftIntoView, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
 import { loadSample, sampleNames } from "./helpers.js";
 
 function population(): ModelJSON {
@@ -111,6 +111,24 @@ describe("図への変換", () => {
     expect([s.x, s.y]).toEqual([20, 20]);
     expect(Math.min(...shifted.map((n) => n.x))).toBe(20);
     expect(Math.min(...shifted.map((n) => n.y))).toBe(20);
+  });
+
+  test("画面に合わせるとき、下限の倍率で全体が入らなければストックだけを入れる", () => {
+    const m = population();
+    layoutModel(m);
+    const g = toGraph(m);
+    const b = bounds(g.nodes);
+    // 全体が等倍で入る
+    expect(fitTargets(g.nodes, b.width * 2, b.height * 2, 0.15)).toEqual({ nodes: g.nodes, maxZoom: 1.5 });
+    // 下限より縮めないと入らない。ストックだけを下限の倍率で見せる（ストックに合わせて拡大しない）
+    const small = fitTargets(g.nodes, b.width * 0.5, b.height * 0.5, 0.15);
+    expect(small.nodes.map((n) => n.id)).toEqual(["el:population"]);
+    expect(small.maxZoom).toBe(MIN_FIT_ZOOM);
+    // ストックがなければすべて
+    const noStock = g.nodes.filter((n) => n.kind !== "STOCK");
+    expect(fitTargets(noStock, 10, 10, 0.15)).toEqual({ nodes: noStock, maxZoom: MIN_FIT_ZOOM });
+    // 下限の倍率で入れば全体
+    expect(fitTargets(g.nodes, b.width * 1.16 * MIN_FIT_ZOOM, b.height * 1.16 * MIN_FIT_ZOOM, 0.15)).toEqual({ nodes: g.nodes, maxZoom: 1.5 });
   });
 
   test("線は箱の縁から出す（楕円と長方形）", () => {

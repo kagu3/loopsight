@@ -4,6 +4,7 @@ import {
   Controls,
   Handle,
   MarkerType,
+  MiniMap,
   Position,
   ReactFlow,
   useInternalNode,
@@ -17,7 +18,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
-import { borderPoint, linkControlPoint, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
+import { borderPoint, fitTargets, linkControlPoint, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
@@ -242,33 +243,53 @@ export function Diagram(props: DiagramProps) {
       nodesConnectable={false}
       elementsSelectable
       fitView
-      fitViewOptions={{ padding: props.embed ? 0.04 : 0.15, maxZoom: 1.5 }}
+      // 画像にする図は全体を 1 枚に収める。ビューアでは名前が読める大きさより縮めない
+      fitViewOptions={props.embed ? EMBED_FIT : VIEWER_FIT}
       minZoom={0.1}
       proOptions={{ hideAttribution: true }}
       onNodeClick={(_, n) => props.onSelect(n.data.g.element)}
       onPaneClick={() => props.onSelect(undefined)}
     >
-      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} />
+      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} />
       <Background gap={20} size={1} />
-      {!props.embed && <Controls showInteractive={false} />}
+      {!props.embed && <Controls showInteractive={false} fitViewOptions={VIEWER_FIT} />}
+      {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
+      {!props.embed && <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} ariaLabel="図の全体" style={{ width: 150, height: 90 }} />}
     </ReactFlow>
   );
 }
 
+const FIT_PADDING = 0.15;
+// 毎回作り直すと React Flow が合わせ直しの途中の設定を上書きするので、ここで 1 度だけ作る
+const EMBED_FIT = { padding: 0.04, maxZoom: 1.5 };
+const VIEWER_FIT = { padding: FIT_PADDING, maxZoom: 1.5, minZoom: MIN_FIT_ZOOM };
+
+const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stock-border)" : "var(--link)");
+
 /**
  * 表示範囲を合わせ直す。別のモデルを開いたとき、配置を切り替えたとき、要素が増減したとき、図の欄の大きさが変わったとき。
  * 式や値が変わっただけのとき（AI が値を調整したなど）は動かさない。
+ * 全体が名前の読める大きさで入らないときは、ストックが入るように合わせる（ほかはドラッグやミニマップで見る）。
  */
-function FitOnChange({ modelName, layoutKey }: { modelName: string; layoutKey: string }) {
+function FitOnChange({ modelName, layoutKey, nodes, embed }: { modelName: string; layoutKey: string; nodes: GraphNode[]; embed?: boolean }) {
   const flow = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
   const key = `${modelName}:${layoutKey}:${Math.round(width / 40)}:${Math.round(height / 40)}`;
   const last = useRef(key);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
   useEffect(() => {
     if (last.current === key) return;
     last.current = key;
-    requestAnimationFrame(() => flow.fitView({ padding: 0.15, maxZoom: 1.5, duration: 200 }));
-  }, [key, flow]);
+    if (embed) {
+      requestAnimationFrame(() => flow.fitView({ padding: FIT_PADDING, maxZoom: 1.5, duration: 200 }));
+      return;
+    }
+    // 全体が名前の読める大きさで入らなければ、ストックが入るように合わせる
+    const fit = fitTargets(nodesRef.current, width, height, FIT_PADDING);
+    const targets = fit.nodes.map((n) => ({ id: n.id }));
+    requestAnimationFrame(() => flow.fitView({ nodes: targets, padding: FIT_PADDING, maxZoom: fit.maxZoom, minZoom: MIN_FIT_ZOOM, duration: 200 }));
+  }, [key, flow, embed, width, height]);
   return null;
 }
