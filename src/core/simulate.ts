@@ -40,7 +40,6 @@ export interface RunSummary {
   results: Record<string, SeriesSummary>;
 }
 
-/** 上書きを当てたモデルのコピーを作る（元のモデルは変えない） */
 /** 値を変えられる要素（STOCK、VARIABLE、FLOW）の名前 */
 function valueNames(model: ModelJSON): string[] {
   return model.elements.filter((e) => e.type === "STOCK" || e.type === "VARIABLE" || e.type === "FLOW").map((e) => e.name!);
@@ -54,6 +53,7 @@ function notFound(name: string, candidates: string[], what: string): { element: 
   return issue;
 }
 
+/** 上書きを当てたモデルのコピーを作る（元のモデルは変えない） */
 export function applyOverrides(model: ModelJSON, options: RunOptions = {}): ModelJSON {
   const copy = clone(model);
   if (options.simulation) {

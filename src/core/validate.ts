@@ -39,7 +39,7 @@ const CLOSE_OF: Record<string, string> = { "(": ")", "[": "]", "{": "}" };
 
 /**
  * 式の括弧の対応を確かめる。問題があれば説明の文を返す。
- * 文字列（"…" '…'）とコメント（// … と /* … *\/）の中は見ない。[名前] の中も名前として扱う。
+ * 文字列（"…" '…'）とコメント（# …、// …、/* … *\/）の中は見ない。[名前] の中も名前として扱う。
  */
 export function checkBrackets(text: string): string | undefined {
   const stack: { ch: string; pos: number }[] = [];
@@ -49,7 +49,7 @@ export function checkBrackets(text: string): string | undefined {
       const end = text.indexOf(c, i + 1);
       if (end < 0) return ` ${c} で始まる文字列が閉じていません。`;
       i = end;
-    } else if (c === "/" && text[i + 1] === "/") {
+    } else if (c === "#" || (c === "/" && text[i + 1] === "/")) {
       const end = text.indexOf("\n", i);
       i = end < 0 ? text.length : end;
     } else if (c === "/" && text[i + 1] === "*") {

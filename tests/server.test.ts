@@ -200,4 +200,11 @@ describe("MCP server", () => {
     expect(summary).toMatchObject({ model: "g", title: "g" });
     expect(summary.flows[0]).toMatchObject({ name: "F", from: null, to: "P" });
   });
+
+  test("式のないモデルを実行すると、結果に警告を添える", async () => {
+    await call("create_model", { model: "cld" });
+    await call("upsert_elements", { model: "cld", elements: [{ type: "VARIABLE", name: "A" }, { type: "VARIABLE", name: "B" }] });
+    const run = await call("run_simulation", { model: "cld", samples: 0 });
+    expect(run.warnings[0].message).toMatch(/因果ループ図/);
+  });
 });

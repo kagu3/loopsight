@@ -22,6 +22,7 @@ import {
   runModel,
   runToCSV,
   setSimulation,
+  staticCheck,
   summarizeModel,
   summarizeRun,
   sweepParameter,
@@ -397,6 +398,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         const data = runModel(m, { overrides: a.overrides, simulation: a.simulation });
         const summary: Record<string, unknown> = { model: a.model, ...summarizeRun(data, names, a.samples ?? 11) };
         if (a.overrides) summary.overrides = a.overrides;
+        // 因果ループ図のように結果が 0 ばかりになる理由を、実行結果にも添える
+        const { warnings } = staticCheck(m);
+        if (warnings.length) summary.warnings = warnings;
         if (a.csv || a.csv_path) {
           const rel = a.csv_path ?? path.join("output", `${a.model}-${timestamp()}.csv`);
           // BOM を付けて、Excel でも日本語の要素名が文字化けしないようにする

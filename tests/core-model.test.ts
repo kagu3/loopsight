@@ -250,6 +250,7 @@ describe("検証", () => {
     expect(checkBrackets("(1 + 2}")).toMatch(/\} で閉じています/);
     expect(checkBrackets("[Rate (per year)] * {1/(Prey * Years)}")).toBeUndefined();
     expect(checkBrackets('"(" + 1 // )')).toBeUndefined();
+    expect(checkBrackets("1 + 2 # it's (note")).toBeUndefined();
     const m = emptyModel("t");
     upsertElements(m, [{ type: "VARIABLE", name: "y", behavior: { value: "2*(3" } }]);
     expect(validateModel(m).errors[0]!.message).toMatch(/足りません/);
