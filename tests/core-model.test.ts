@@ -97,6 +97,30 @@ describe(".InsightMaker の取り込み", () => {
     expect(warnings.join()).toMatch(/Folder/);
   });
 
+  test("グラフや表（Display）を visualizations として取り込む", () => {
+    const display = (id: number, name: string, type: string, prims: string) =>
+      `<Display name="${name}" Type="${type}" Primitives="${prims}" id="${id}"><mxCell style="display" parent="1" vertex="1" visible="0"><mxGeometry x="10" y="10" width="64" height="64" as="geometry"/></mxCell></Display>`;
+    const xml = `<InsightMakerModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+      <Setting TimeLength="10" TimeStart="0" TimeStep="1" TimeUnits="Years" SolutionAlgorithm="RK1" id="2"><mxCell parent="1" vertex="1" visible="0"><mxGeometry x="20" y="20" width="80" height="40" as="geometry"/></mxCell></Setting>
+      <Stock name="S" InitialValue="1" Units="Unitless" id="3"><mxCell style="stock" parent="1" vertex="1"><mxGeometry x="100" y="100" width="100" height="40" as="geometry"/></mxCell></Stock>
+      <Variable name="V" Equation="2" Units="Unitless" id="4"><mxCell style="variable" parent="1" vertex="1"><mxGeometry x="100" y="10" width="120" height="50" as="geometry"/></mxCell></Variable>
+      ${display(10, "Chart", "Time Series", "3,4")}
+      ${display(11, "Numbers", "Tabular", "3")}
+      ${display(12, "XY", "Scatterplot", "3,4")}
+      ${display(13, "Map", "Map", "3")}
+      ${display(14, "Empty", "Time Series", "")}
+      </root></InsightMakerModel>`;
+    const { model, warnings } = importInsightMakerXML(xml);
+    expect(model.visualizations).toEqual([
+      { type: "TIME_SERIES", name: "Chart", elements: ["S", "V"] },
+      { type: "TABLE", name: "Numbers", elements: ["S"] },
+      { type: "TIME_SERIES", name: "XY", elements: ["S", "V"] },
+    ]);
+    expect(warnings.join("\n")).toMatch(/XY.*散布図/);
+    expect(warnings.join("\n")).toMatch(/Map.*取り込んでいません/);
+    expect(validateModel(model).ok).toBe(true);
+  });
+
   test("Insight Maker の XML でなければわかるエラーにする", () => {
     expect(() => importModelText("hello")).toThrow(/ModelJSON/);
     expect(() => importModelText("<html></html>")).toThrow(/Insight Maker/);

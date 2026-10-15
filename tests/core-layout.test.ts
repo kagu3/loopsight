@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { emptyModel, layoutModel, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
+import { addDefaultVisualization, emptyModel, layoutModel, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
 import { loadSample } from "./helpers.js";
 
 type Box = { name: string; x: number; y: number; w: number; h: number };
@@ -34,6 +34,64 @@ function expectNoOverlap(m: ModelJSON) {
   }
 }
 
+/** 要素の中心。フローなら両端の中点 */
+function pointOf(m: ModelJSON, name: string): Point {
+  const el = m.elements.find((e) => e.name === name)!;
+  if (el.type === "FLOW") {
+    const a = el.from ? pointOf(m, el.from) : el.display!.from_coordinates!;
+    const b = el.to ? pointOf(m, el.to) : el.display!.to_coordinates!;
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  }
+  const [x, y] = el.display!.coordinates!;
+  const [w, h] = el.display!.size!;
+  return [x + w / 2, y + h / 2];
+}
+
+/** 線分の上の点を細かく取り、長方形の内側に入るか見る */
+function crosses(a: Point, b: Point, r: { x: number; y: number; w: number; h: number }): boolean {
+  for (let i = 1; i < 100; i++) {
+    const t = i / 100;
+    const x = a[0] + (b[0] - a[0]) * t;
+    const y = a[1] + (b[1] - a[1]) * t;
+    if (x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h) return true;
+  }
+  return false;
+}
+
+/** リンクの線が、つながる両端以外の要素や雲を横切らない。変数の箱がフローの線に乗らない */
+function expectClearLines(m: ModelJSON) {
+  const b = boxes(m);
+  const cloudBoxes = clouds(m).map(([x, y]) => ({ name: `雲 (${x}, ${y})`, x: x - 15, y: y - 15, w: 30, h: 30 }));
+  for (const l of m.elements.filter((e) => e.type === "LINK")) {
+    const a = pointOf(m, l.from!);
+    const c = pointOf(m, l.to!);
+    for (const r of [...b, ...cloudBoxes]) {
+      if (r.name === l.from || r.name === l.to) continue;
+      expect(crosses(a, c, r), `リンク ${l.from} → ${l.to} が ${r.name} を横切っている`).toBe(false);
+    }
+  }
+  for (const f of m.elements.filter((e) => e.type === "FLOW")) {
+    const a = f.from ? pointOf(m, f.from) : f.display!.from_coordinates!;
+    const c = f.to ? pointOf(m, f.to) : f.display!.to_coordinates!;
+    for (const r of b) {
+      if (r.name === f.from || r.name === f.to) continue;
+      expect(crosses(a, c, r), `フロー ${f.name} の線が ${r.name} に重なっている`).toBe(false);
+    }
+  }
+}
+
+function population(): ModelJSON {
+  const m = emptyModel("population");
+  upsertElements(m, [
+    { type: "STOCK", name: "Population", behavior: { initial_value: 1000 } },
+    { type: "VARIABLE", name: "Birth Rate", behavior: { value: 0.03 } },
+    { type: "VARIABLE", name: "Death Rate", behavior: { value: 0.01 } },
+    { type: "FLOW", name: "Births", from: null, to: "Population", behavior: { value: "[Population]*[Birth Rate]" } },
+    { type: "FLOW", name: "Deaths", from: "Population", to: null, behavior: { value: "[Population]*[Death Rate]" } },
+  ]);
+  return m;
+}
+
 function chain(): ModelJSON {
   const m = emptyModel("chain");
   upsertElements(m, [
@@ -54,6 +112,29 @@ function chain(): ModelJSON {
   ]);
   return m;
 }
+
+describe("書き出し用の既定のグラフ", () => {
+  test("グラフがなければストックの時系列グラフを足す", () => {
+    const m = population();
+    expect(addDefaultVisualization(m)).toEqual({ type: "TIME_SERIES", name: "ストックの推移", elements: ["Population"] });
+    expect(m.visualizations).toHaveLength(1);
+    expect(validateModel(m).ok).toBe(true);
+  });
+
+  test("すでにグラフがあれば足さない", () => {
+    const m = population();
+    m.visualizations = [{ type: "TABLE", name: "表", elements: ["Births"] }];
+    expect(addDefaultVisualization(m)).toBeUndefined();
+    expect(m.visualizations).toEqual([{ type: "TABLE", name: "表", elements: ["Births"] }]);
+  });
+
+  test("ストックがなければ変数などを入れ、要素がなければ足さない", () => {
+    const m = emptyModel("v");
+    expect(addDefaultVisualization(m)).toBeUndefined();
+    upsertElements(m, [{ type: "VARIABLE", name: "x", behavior: { value: "Years()" } }]);
+    expect(addDefaultVisualization(m)?.elements).toEqual(["x"]);
+  });
+});
 
 describe("簡易レイアウト", () => {
   test("座標のない要素すべてに、重ならないように座標を付ける", () => {
@@ -90,6 +171,19 @@ describe("簡易レイアウト", () => {
     expect(pos("k1")[0]).toBeLessThan(pos("k2")[0]);
   });
 
+  test("リンクの線が雲やほかの要素を横切らない（人口モデル）", () => {
+    const m = population();
+    layoutModel(m);
+    expectNoOverlap(m);
+    expectClearLines(m);
+  });
+
+  test("リンクの線が雲やほかの要素を横切らない（つながったストック）", () => {
+    const m = chain();
+    layoutModel(m);
+    expectClearLines(m);
+  });
+
   test("すでにある座標は動かさない", () => {
     const m = loadSample("disease");
     const before = JSON.stringify(m);
@@ -120,5 +214,6 @@ describe("簡易レイアウト", () => {
     upsertElements(m, els);
     layoutModel(m);
     expectNoOverlap(m);
+    expectClearLines(m);
   });
 });

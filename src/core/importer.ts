@@ -1,5 +1,5 @@
 import { loadInsightMaker, toModelJSON } from "simulation";
-import type { ModelElement, ModelJSON, Point } from "./modeljson.js";
+import type { ModelElement, ModelJSON, Point, Visualization } from "./modeljson.js";
 import { nameKey } from "./modeljson.js";
 
 export class ImportError extends Error {
@@ -59,6 +59,12 @@ export function importInsightMakerXML(xml: string, fallbackName?: string): Impor
   warnings.push(...unsupportedContent(renamed));
 
   applyGeometry(json.elements, parseGeometry(renamed));
+  // エンジンの読み込み処理はグラフや表（Display）も読まないので、自前で補う
+  if (!json.visualizations?.length) {
+    const displays = parseDisplays(renamed, json.elements);
+    if (displays.visualizations.length) json.visualizations = displays.visualizations;
+    warnings.push(...displays.warnings);
+  }
   if (!json.name && fallbackName) json.name = fallbackName;
   return { model: json, warnings };
 }
@@ -198,6 +204,43 @@ function applyGeometry(elements: ModelElement[], geometry: Map<string, Geometry>
       if (g.width && g.height) el.display.size = [g.width, g.height];
     }
   }
+}
+
+const DISPLAY_TYPES: Record<string, Visualization["type"]> = {
+  "Time Series": "TIME_SERIES",
+  // ModelJSON には散布図がないので、エンジンの書き出しと同じく時系列にする
+  Scatterplot: "TIME_SERIES",
+  Tabular: "TABLE",
+};
+
+/** <Display> を ModelJSON の visualizations にする。Primitives 属性は要素の id をカンマで区切ったもの */
+function parseDisplays(xml: string, elements: ModelElement[]): { visualizations: Visualization[]; warnings: string[] } {
+  const nameById = new Map<string, string>();
+  for (const m of xml.matchAll(new RegExp(`<(${PRIMITIVE_TAGS.join("|")})\\b([^>]*?)/?>`, "g"))) {
+    const a = attrs(m[2]!);
+    if (a.id && a.name) nameById.set(a.id, a.name);
+  }
+  const known = new Set(elements.filter((e) => e.name).map((e) => nameKey(e.name!)));
+
+  const visualizations: Visualization[] = [];
+  const warnings: string[] = [];
+  for (const m of xml.matchAll(/<Display\b([^>]*?)\/?>/g)) {
+    const a = attrs(m[1]!);
+    const label = a.name ? `グラフ「${a.name}」` : "グラフ";
+    const type = DISPLAY_TYPES[a.Type ?? ""];
+    if (!type) {
+      warnings.push(`${label}（${a.Type ?? "種類不明"}）は ModelJSON では表せないため取り込んでいません。`);
+      continue;
+    }
+    const names = (a.Primitives ?? "")
+      .split(",")
+      .map((id) => nameById.get(id.trim()))
+      .filter((n): n is string => !!n && known.has(nameKey(n)));
+    if (!names.length) continue;
+    if (a.Type === "Scatterplot") warnings.push(`${label}は散布図ですが、ModelJSON にないので時系列グラフとして取り込みました。`);
+    visualizations.push({ type, ...(a.name ? { name: a.name } : {}), elements: names });
+  }
+  return { visualizations, warnings };
 }
 
 /** ModelJSON に入らない内容を数えて警告にする */

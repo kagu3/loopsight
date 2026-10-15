@@ -12,6 +12,7 @@ import {
   ModelStore,
   StoreError,
   TIME_UNITS,
+  addDefaultVisualization,
   compareScenarios,
   emptyModel,
   importModelText,
@@ -246,15 +247,20 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       title: "Web 版向けに書き出す",
       description:
         "Insight Maker の Web 版で「Import ModelJSON」から読み込める JSON ファイルを書き出す。座標のない要素には、重ならないように座標を付ける。" +
+        "グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す。" +
         "書き出し先は作業フォルダの中（既定は exports/<モデル名>.json）。",
       inputSchema: {
         model: modelName,
         path: z.string().optional().describe("作業フォルダからの相対パス（既定は exports/<モデル名>.json）"),
         layout: z.boolean().optional().describe("座標のない要素に座標を付ける（既定は true）"),
         save_layout: z.boolean().optional().describe("付けた座標をモデル本体にも保存する（既定は false）"),
+        chart: z
+          .boolean()
+          .optional()
+          .describe("グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す（既定は true）。モデル本体には保存しない"),
       },
     },
-    handle(async (a: { model: string; path?: string; layout?: boolean; save_layout?: boolean }) => {
+    handle(async (a: { model: string; path?: string; layout?: boolean; save_layout?: boolean; chart?: boolean }) => {
       const m = await store.read(a.model);
       const validation = validateModel(m);
       let placed: string[] = [];
@@ -262,11 +268,13 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         placed = layoutModel(m);
         if (a.save_layout && placed.length) await store.write(a.model, m);
       }
+      const chart = a.chart !== false ? addDefaultVisualization(m) : undefined;
       const rel = a.path ?? path.join("exports", `${a.model}.json`);
       const file = await store.writeJSONFile(store.resolveInside(rel.endsWith(".json") ? rel : `${rel}.json`), m);
       return {
         file,
         placed_elements: placed,
+        ...(chart ? { added_chart: chart } : {}),
         validation,
         next_step: "Insight Maker の Web 版でモデルを開き、Import/Export メニューの「Import ModelJSON」からこのファイルを読み込んでください。",
       };

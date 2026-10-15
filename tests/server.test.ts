@@ -126,9 +126,16 @@ describe("MCP server", () => {
     for (const el of exported.elements.filter((e) => e.type === "STOCK" || e.type === "VARIABLE")) {
       expect(el.display?.coordinates, el.name).toBeDefined();
     }
-    // save_layout を付けなければモデル本体には座標を書かない
+    // グラフの設定がないので、ストックの時系列グラフが足される
+    expect(exp.added_chart).toMatchObject({ type: "TIME_SERIES", elements: ["Susceptible", "Infected", "Recovered"] });
+    expect(exported.visualizations).toEqual([exp.added_chart]);
+    // save_layout を付けなければモデル本体には座標を書かない。グラフも書かない
     const after = await call<ModelJSON>("get_model", { model: "sir", format: "full" });
     expect(after.elements.some((e) => e.display?.coordinates)).toBe(false);
+    expect(after.visualizations).toBeUndefined();
+    const noChart = await call("export_model", { model: "sir", path: "exports/no-chart.json", chart: false });
+    expect(noChart.added_chart).toBeUndefined();
+    expect((JSON.parse(await readFile(noChart.file, "utf8")) as ModelJSON).visualizations).toBeUndefined();
   });
 
   test("名前を変えて、消して、設定を変える", async () => {

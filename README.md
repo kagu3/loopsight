@@ -105,6 +105,8 @@ Claude Code に次のように頼む。
 
 1. AI に「書き出して」と頼む（`export_model`）。作業フォルダの `exports/<モデル名>.json` にできる
 2. Web 版で Import/Export メニューの「Import ModelJSON」から、そのファイルを読み込む
+   - Import/Export は、エディタ右上の共有アイコン（3 つの点を線でつないだ形）を押すと、メニューの下のほうに出てくる。上向きの矢印が読み込み
+   - モデルにグラフや表の設定がなければ、書き出すときにストックの時系列グラフを 1 つ足す（`chart: false` で足さない）。ほかの要素を見たいときは、SIMULATE のあと「ADD DISPLAY」で足す
 
 [examples/population.json](examples/population.json) は、この MCP で作って書き出した例。
 
