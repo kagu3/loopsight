@@ -94,8 +94,18 @@ export function App() {
       try {
         const next = await fetchModel(name);
         if (currentRef.current !== name || seq !== loadSeq.current) return;
-        // 画面から書き込んだ結果の知らせなら、もう表示しているので何もしない
-        if (dataRef.current?.name === next.name && dataRef.current.version === next.version) return;
+        // 読んでいるあいだに画面からの書き込みが始まっていたら、読んだ内容はその書き込みのものかもしれない。
+        // 書き込みの結果を待ってから読み直す（自分の変更を AI の変更と取り違えないように）
+        if (pendingWrites.current > 0) {
+          reloadAfterWrite.current = true;
+          return;
+        }
+        const prev = dataRef.current;
+        if (prev?.name === next.name && prev.version === next.version) {
+          // 中身は同じ（画面から書き込んだ結果の知らせなど）。元に戻せる回数だけ変わることがある（サーバーを起動し直したときなど）
+          if (prev.undo_available !== next.undo_available) show(next, false);
+          return;
+        }
         show(next, true);
       } catch (e) {
         setError(`モデル "${name}" を読めません: ${(e as Error).message}`);
