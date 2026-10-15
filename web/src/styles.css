@@ -609,6 +609,47 @@ button:disabled {
   font-weight: 700;
   fill: var(--text-secondary);
 }
+/* 要素を選んでいるとき、それにつながらない要素と線は薄くする。
+   線は不透明度を下げる。箱は塗りを不透明のまま、色を背景に寄せる（目立たせた線が下を通っても、名前の上に透けないように）。
+   どちらも背景の色に寄せるので、暗い配色でも同じ見え方になる */
+.react-flow__edge-path.is-dimmed,
+.edge-polarity.is-dimmed {
+  opacity: 0.2;
+}
+.react-flow__edge-path,
+.edge-polarity {
+  transition: opacity 0.15s;
+}
+.node {
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+.node.is-dimmed,
+.node.is-dimmed .node-value,
+.node-valve.is-dimmed .valve-label {
+  color: color-mix(in srgb, var(--text-primary) 25%, var(--surface-1));
+}
+.node-stock.is-dimmed {
+  background: color-mix(in srgb, var(--stock-fill) 30%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--stock-border) 25%, var(--surface-1));
+}
+.node-variable.is-dimmed {
+  background: color-mix(in srgb, var(--var-fill) 30%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--var-border) 25%, var(--surface-1));
+}
+.node-converter.is-dimmed {
+  background: color-mix(in srgb, var(--conv-fill) 30%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--conv-border) 25%, var(--surface-1));
+}
+.node-state.is-dimmed {
+  background: color-mix(in srgb, var(--state-fill) 30%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--state-border) 25%, var(--surface-1));
+}
+.node-valve.is-dimmed .valve-shape {
+  stroke: color-mix(in srgb, var(--flow) 25%, var(--surface-1));
+}
+.node-cloud.is-dimmed .cloud-shape {
+  stroke: color-mix(in srgb, var(--text-muted) 25%, var(--surface-1));
+}
 
 /* グラフと表 */
 .results {

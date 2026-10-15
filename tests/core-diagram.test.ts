@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addBoxSizes, borderPoint, bounds, boxLayout, checkDiagram, emptyModel, fitTargets, labelLines, layoutModel, MIN_FIT_ZOOM, positionPatches, shiftIntoView, textWidth, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
+import { addBoxSizes, borderPoint, bounds, boxLayout, checkDiagram, connectedTo, emptyModel, fitTargets, labelLines, layoutModel, MIN_FIT_ZOOM, positionPatches, shiftIntoView, textWidth, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
 import { loadSample, sampleNames } from "./helpers.js";
 
 function population(): ModelJSON {
@@ -139,6 +139,72 @@ describe("図への変換", () => {
     const [x, y] = borderPoint(ellipse, 60, 200);
     expect(x).toBeCloseTo(60);
     expect(y).toBeCloseTo(50);
+  });
+});
+
+describe("選んだ要素につながるもの", () => {
+  const sorted = (s: Set<string>) => [...s].sort();
+
+  test("フローを選ぶと、その 2 本の線と両端、弁につながるリンクとその相手", () => {
+    const g = toGraph(population());
+    const c = connectedTo(g, "Births")!;
+    expect(sorted(c.nodes)).toEqual(["cloud:births:from", "el:birth rate", "el:population", "valve:births"]);
+    expect(sorted(c.edges)).toEqual(["link:el:birth rate->valve:births", "valve:births:in", "valve:births:out"]);
+  });
+
+  test("ストックを選ぶと、出入りするフローを最後までたどる（弁につながるほかのリンクは含めない）", () => {
+    const g = toGraph(population());
+    const c = connectedTo(g, "population")!;
+    expect(sorted(c.nodes)).toEqual(["cloud:births:from", "cloud:deaths:to", "el:population", "valve:births", "valve:deaths"]);
+    // Birth Rate → Births のリンクと Birth Rate は含めない
+    expect(sorted(c.edges)).toEqual(["valve:births:in", "valve:births:out", "valve:deaths:in", "valve:deaths:out"]);
+  });
+
+  test("リンクの先が弁なら、弁だけを含め、そのフローの線までは広げない", () => {
+    const g = toGraph(population());
+    const c = connectedTo(g, "Birth Rate")!;
+    expect(sorted(c.nodes)).toEqual(["el:birth rate", "valve:births"]);
+    expect(sorted(c.edges)).toEqual(["link:el:birth rate->valve:births"]);
+  });
+
+  test("大文字小文字が違う名前でも引ける", () => {
+    const g = toGraph(population());
+    expect(connectedTo(g, "births")).toEqual(connectedTo(g, "Births"));
+  });
+
+  test("弁が出元のリンク（フロー → 変数）は、フローを選べば含め、変数を選べば弁だけにとどめる", () => {
+    const m = population();
+    upsertElements(m, [{ type: "VARIABLE", name: "Birth Count", behavior: { value: "[Births]" } }]);
+    const g = toGraph(m);
+    const link = g.edges.find((e) => e.kind === "link" && e.source === "valve:births")!;
+    expect(link.target).toBe("el:birth count");
+    const flow = connectedTo(g, "Births")!;
+    expect(flow.edges.has(link.id)).toBe(true);
+    expect(flow.nodes.has("el:birth count")).toBe(true);
+    const variable = connectedTo(g, "Birth Count")!;
+    expect(sorted(variable.nodes)).toEqual(["el:birth count", "valve:births"]);
+    expect(sorted(variable.edges)).toEqual([link.id]);
+  });
+
+  test("遷移の線もフローと同じく最後までたどる", () => {
+    // 状態と遷移は upsert_elements でまだ足せないので、ModelJSON を直接書く
+    const m = emptyModel("states");
+    m.elements.push(
+      { type: "STATE", name: "Healthy" },
+      { type: "STATE", name: "Sick" },
+      { type: "STATE", name: "Recovered" },
+      { type: "TRANSITION", name: "Infect", from: "Healthy", to: "Sick" },
+      { type: "TRANSITION", name: "Recover", from: "Sick", to: "Recovered" },
+    );
+    const g = toGraph(m);
+    const c = connectedTo(g, "Healthy")!;
+    expect(sorted(c.nodes)).toEqual(["el:healthy", "el:sick", "valve:infect"]);
+    expect(sorted(c.edges)).toEqual(["valve:infect:in", "valve:infect:out"]);
+    expect(g.edges.filter((e) => c.edges.has(e.id)).every((e) => e.kind === "transition")).toBe(true);
+  });
+
+  test("図にない要素なら何も薄くしない", () => {
+    expect(connectedTo(toGraph(population()), "Nothing")).toBeUndefined();
   });
 });
 

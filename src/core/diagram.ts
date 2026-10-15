@@ -196,6 +196,44 @@ function placeValves(valves: { node: GraphNode; a: GraphNode; b: GraphNode }[]):
 }
 
 /**
+ * 選んだ要素と、それにつながる線とノード（図で目立たせるもの）。ほかは薄くする。
+ * 要素が図になければ undefined（何も薄くしない）。
+ *
+ * - 選んだ要素のノード（フローなら弁）と、そこに出入りする線、線の先のノード
+ * - フローを選んだときは、その 2 本の線と両端、弁につながるリンクとその相手
+ * - フローの線をたどって弁に着いたら（ストックを選んだときなど）、そのフローの残りの線と先の端も含める。
+ *   フローを途中で切らずに、どこからどこへ流れるかが見えるように
+ * - リンクの先が弁のときは、弁（フローの名前）だけを含める。そのフローの線までは広げない
+ */
+export function connectedTo(graph: Graph, element: string): { nodes: Set<string>; edges: Set<string> } | undefined {
+  const key = element.toLowerCase();
+  const focus = graph.nodes.filter((n) => n.element?.toLowerCase() === key);
+  if (!focus.length) return undefined;
+  const focusIds = new Set(focus.map((n) => n.id));
+  const nodes = new Set(focusIds);
+  const edges = new Set<string>();
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const flowEdges = (valve: string) => graph.edges.filter((e) => e.kind !== "link" && (e.source === valve || e.target === valve));
+  for (const e of graph.edges) {
+    const fromFocus = focusIds.has(e.source);
+    const toFocus = focusIds.has(e.target);
+    if (!fromFocus && !toFocus) continue;
+    edges.add(e.id);
+    const other = fromFocus ? e.target : e.source;
+    nodes.add(other);
+    // フローの線の先が弁なら、そのフローを最後までたどる
+    if (e.kind !== "link" && byId.get(other)?.kind === "VALVE") {
+      for (const f of flowEdges(other)) {
+        edges.add(f.id);
+        nodes.add(f.source);
+        nodes.add(f.target);
+      }
+    }
+  }
+  return { nodes, edges };
+}
+
+/**
  * 表示している位置を、モデルに保存する形（upsert_elements の要素の変更）にする。
  * ids を渡すとそのノードだけ、渡さなければ弁以外のすべて（自動配置をまとめて保存するとき）。
  */

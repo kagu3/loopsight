@@ -18,14 +18,15 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
-import { borderPoint, fitTargets, linkControlPoint, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
+import { borderPoint, connectedTo, fitTargets, linkControlPoint, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
 // 箱と雲はドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
 
-type NodeData = { g: GraphNode; selected: boolean; changed: boolean; value?: string };
-type EdgeData = { g: GraphEdge; selected: boolean; changed: boolean };
+// dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）
+type NodeData = { g: GraphNode; selected: boolean; changed: boolean; dimmed: boolean; value?: string };
+type EdgeData = { g: GraphEdge; selected: boolean; changed: boolean; dimmed: boolean };
 type ModelNodeT = Node<NodeData, "model">;
 type ModelEdgeT = Edge<EdgeData, "floating">;
 
@@ -33,7 +34,7 @@ const hidden = { opacity: 0, pointerEvents: "none" as const };
 
 function ModelNode({ data }: NodeProps<ModelNodeT>) {
   const { g } = data;
-  const cls = ["node", `node-${g.kind.toLowerCase()}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : ""].join(" ");
+  const cls = ["node", `node-${g.kind.toLowerCase()}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : "", data.dimmed ? "is-dimmed" : ""].join(" ");
   return (
     <div className={cls} style={{ width: g.width, height: g.height }} title={g.element}>
       <Handle type="target" position={Position.Top} style={hidden} isConnectable={false} />
@@ -84,7 +85,7 @@ function FloatingEdge({ id, source, target, markerEnd, data }: EdgeProps<ModelEd
   // 弁には縁ではなく中心でつなぐ
   const endAt = (n: typeof a, c: [number, number], toward: [number, number]) => (n.kind === "VALVE" ? c : borderPoint(n, toward[0], toward[1]));
 
-  const cls = ["edge", `edge-${data.g.kind}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : ""].join(" ");
+  const cls = ["edge", `edge-${data.g.kind}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : "", data.dimmed ? "is-dimmed" : ""].join(" ");
   if (data.g.kind !== "link") {
     const p1 = endAt(a, ca, cb);
     const p2 = endAt(b, cb, ca);
@@ -103,7 +104,7 @@ function FloatingEdge({ id, source, target, markerEnd, data }: EdgeProps<ModelEd
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} className={cls} />
       {data.g.polarity && (
-        <text x={lx + 6} y={ly - 6} className="edge-polarity">
+        <text x={lx + 6} y={ly - 6} className={data.dimmed ? "edge-polarity is-dimmed" : "edge-polarity"}>
           {data.g.polarity}
         </text>
       )}
@@ -169,6 +170,9 @@ export function Diagram(props: DiagramProps) {
     return graph.nodes.map((n) => byId.get(n.id)!);
   }, [graph, moved, valveEnds]);
 
+  // 選んだ要素につながる線とノード。ほかは薄くする（配置を変えずに、見たいところを読めるように）
+  const focus = useMemo(() => (selected ? connectedTo(graph, selected) : undefined), [graph, selected]);
+
   const nodes = useMemo<ModelNodeT[]>(
     () =>
       placed.map((g) => ({
@@ -181,12 +185,13 @@ export function Diagram(props: DiagramProps) {
           g,
           selected: !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(),
           changed: !!g.element && changed.has(g.element.toLowerCase()),
+          dimmed: !!focus && !focus.nodes.has(g.id),
           value: g.kind === "STOCK" && g.element ? values[g.element] : undefined,
         },
         draggable: g.kind !== "VALVE",
         connectable: false,
       })),
-    [placed, selected, changed, values],
+    [placed, selected, changed, values, focus],
   );
 
   const onNodesChange = useCallback((changes: NodeChange<ModelNodeT>[]) => {
@@ -228,7 +233,12 @@ export function Diagram(props: DiagramProps) {
         type: "floating",
         source: g.source,
         target: g.target,
-        data: { g, selected: !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(), changed: !!g.element && changed.has(g.element.toLowerCase()) },
+        data: {
+          g,
+          selected: !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(),
+          changed: !!g.element && changed.has(g.element.toLowerCase()),
+          dimmed: !!focus && !focus.edges.has(g.id),
+        },
         // 矢印の色は線と同じトークンにする（React Flow は色を style に入れるので CSS 変数が効く）
         markerEnd: g.arrow
           ? g.kind === "link"
@@ -237,7 +247,7 @@ export function Diagram(props: DiagramProps) {
           : undefined,
         selectable: false,
       })),
-    [graph, selected, changed],
+    [graph, selected, changed, focus],
   );
 
   return (
