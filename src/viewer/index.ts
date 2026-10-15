@@ -11,7 +11,17 @@ const port = typeof values.port === "string" ? Number(values.port) : Number(proc
 
 // ビルドした画面は dist/web にある（このファイルは dist/viewer/index.js）
 const staticDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../web");
-const viewer = await startViewer({ modelsDir, staticDir, port });
+let viewer: Awaited<ReturnType<typeof startViewer>>;
+try {
+  viewer = await startViewer({ modelsDir, staticDir, port });
+} catch (e) {
+  if ((e as NodeJS.ErrnoException).code === "EADDRINUSE") {
+    console.error(`ポート ${port} はほかのプログラムが使っています。ビューアがもう起動しているなら、http://localhost:${port}/ を開いてください。`);
+    console.error(`別のポートで起動するには: npm run viewer -- --port ${port + 1}`);
+    process.exit(1);
+  }
+  throw e;
+}
 console.log(`Insight Maker ビューア: ${viewer.url}`);
 console.log(`作業フォルダ: ${modelsDir}`);
 
