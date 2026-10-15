@@ -5,6 +5,7 @@
 - Claude Code などから、言葉でモデルを作り、実行し、パラメータを振って比較できる
 - Insight Maker の Web 版で作ったモデル（`.InsightMaker` / ModelJSON）を取り込んで分析できる
 - 作ったモデルを、Web 版に読み込める ModelJSON として書き出せる
+- ビューア（Web 画面）で図とグラフを見られる。AI がモデルを変えると、画面がその場で変わる
 
 シミュレーションには Insight Maker 公式のエンジン [`simulation`](https://github.com/scottfr/simulation) を使う。insightmaker.com には自動でアクセスしない（利用規約で禁止されているため）。Web 版とのやりとりは、人がファイルを読み込んだり書き出したりして行う。
 
@@ -110,6 +111,23 @@ Claude Code に次のように頼む。
 
 [examples/population.json](examples/population.json) は、この MCP で作って書き出した例。
 
+## ビューア（見るための Web 画面）
+
+作業フォルダのモデルを、図とグラフで見るための画面。MCP サーバーとは別に起動する。ファイルの変更を監視しているので、AI が MCP でモデルを変えると、画面がその場で変わる（変わった要素は色の枠で示す）。
+
+```bash
+npm run viewer
+```
+
+ブラウザで http://localhost:5180/ を開く。作業フォルダは MCP サーバーと同じ決め方（`--models-dir`、`INSIGHT_MAKER_MODELS_DIR`、`./models`）で、ポートは `--port` か環境変数 `INSIGHT_MAKER_VIEWER_PORT` で変えられる。`127.0.0.1` だけで待ち受けるので、ほかの機械からは見えない。
+
+- **図：** ストック、フロー、変数、コンバーター、リンク、モデルの外（雲）を描く。ストックには最終値を出す。座標のない要素があれば自動配置にする。座標があっても「自動配置」で切り替えられる
+- **グラフと表：** 実行結果の時系列。最初はモデルのグラフ設定の要素（なければストック）を出し、要素を選んで切り替えられる（同時に 8 本まで）
+- **詳しい情報：** 図の要素を押すと、式、初期値、単位、最終値を出す
+- **問題：** 検証のエラーと警告を出す。エラーがあるときは実行しない
+
+画面は見るだけで、編集はできない。図の配置もファイルには書き戻さない。
+
 ## できないこと（段階 1）
 
 - **エージェントベースのモデル**（Agent、Population）は ModelJSON で表せないので、取り込まない
@@ -122,16 +140,19 @@ Claude Code に次のように頼む。
 ```bash
 npm test          # テスト（vitest）
 npm run typecheck # 型チェック
-npm run build     # dist/ にビルド
+npm run build     # dist/ にビルド（サーバーと画面）
+npm run dev:web   # 画面の開発用サーバー（/api は npm run viewer に回す）
 ```
 
 - `src/core`：モデルの保持、変換、編集、検証、実行。MCP に依存しない（段階 2 の Web 画面でも使う）
 - `src/mcp`：中核部分を MCP ツールとして公開する薄い層
+- `src/viewer`：ビューアのサーバー（API、ファイルの監視、画面の配信）
+- `web`：ビューアの画面（React、React Flow、Recharts。Vite で `dist/web` にビルド）
 
 ## ドキュメント
 
 - [構想と前提](docs/VISION.md)：目指すもの、3 段階の構想、調査でわかった前提と制約
-- [ロードマップ](docs/ROADMAP.md)：段階 1（中核部分＋MCP）の設計方針とマイルストーン
+- [ロードマップ](docs/ROADMAP.md)：段階 1（中核部分＋MCP）と段階 2（ビューア）の設計方針とマイルストーン
 
 ## ライセンス
 
