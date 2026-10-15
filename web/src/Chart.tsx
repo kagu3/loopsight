@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import type { ModelJSON, RunResult } from "../../src/viewer/api.js";
+import { normalize } from "./normalize.js";
 
 // 実行結果の時系列グラフと表。
 // 色は検証済みの 8 色を順に使う。色は要素ごとに決め、ほかの要素を出し入れしても変えない。
@@ -65,6 +66,30 @@ function assignSlots(visible: string[], prev: Map<string, number>): Map<string, 
   return next;
 }
 
+/**
+ * 縦軸の決め方。
+ * - value: 値そのまま
+ * - normalized: 要素ごとに、最小を 0%、最大を 100% にそろえる。大きさの違う要素の、増え方や減り方の形を比べるため
+ */
+type Scale = "value" | "normalized";
+const SCALE_KEY = "viewer.chartScale";
+function loadScale(): Scale {
+  try {
+    return localStorage.getItem(SCALE_KEY) === "normalized" ? "normalized" : "value";
+  } catch {
+    return "value";
+  }
+}
+function saveScale(scale: Scale) {
+  try {
+    localStorage.setItem(SCALE_KEY, scale);
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
+const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
+
 export interface ChartProps {
   modelName: string;
   model: ModelJSON;
@@ -77,6 +102,11 @@ export function Chart({ modelName, model, run }: ChartProps) {
   const [visible, setVisible] = useState<string[]>(() => defaultVisible(model, names));
   const [slots, setSlots] = useState<Map<string, number>>(() => assignSlots(visible, new Map()));
   const [view, setView] = useState<"chart" | "table">("chart");
+  const [scale, setScaleState] = useState<Scale>(loadScale);
+  const setScale = (s: Scale) => {
+    setScaleState(s);
+    saveScale(s);
+  };
 
   // 別のモデルを開いたら選び直す。同じモデルの更新では、消えた要素だけ外す
   const [shownModel, setShownModel] = useState(modelName);
@@ -107,15 +137,15 @@ export function Chart({ modelName, model, run }: ChartProps) {
 
   // Recharts の dataKey は「.」を入れ子のパスとして読むので、要素名ではなく番号で持つ
   const keyOf = (name: string) => `s${names.indexOf(name)}`;
-  const data = useMemo(
-    () =>
-      run.times.map((t, i) => {
-        const row: Record<string, number | null> = { t };
-        for (const n of visible) row[keyOf(n)] = run.series[n]?.[i] ?? null;
-        return row;
-      }),
-    [run, visible, names], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
+  const data = useMemo(() => {
+    const series = new Map(visible.map((n) => [n, scale === "normalized" ? normalize(run.series[n] ?? []) : (run.series[n] ?? [])]));
+    return run.times.map((t, i) => {
+      const row: Record<string, number | null> = { t, i };
+      for (const n of visible) row[keyOf(n)] = series.get(n)?.[i] ?? null;
+      return row;
+    });
+  }, [run, visible, names, scale]); // eslint-disable-line react-hooks/exhaustive-deps
   const unit = TIME_UNIT_LABEL[run.time_units.toLowerCase()] ?? run.time_units;
   const colorOf = (name: string) => `var(${SLOTS[slots.get(name) ?? 0]})`;
 
@@ -130,6 +160,28 @@ export function Chart({ modelName, model, run }: ChartProps) {
             表
           </button>
         </div>
+        {view === "chart" && (
+          <div className="segmented" role="radiogroup" aria-label="縦軸">
+            <button
+              role="radio"
+              aria-checked={scale === "value"}
+              className={scale === "value" ? "on" : ""}
+              onClick={() => setScale("value")}
+              title="値をそのまま出します"
+            >
+              実際の値
+            </button>
+            <button
+              role="radio"
+              aria-checked={scale === "normalized"}
+              className={scale === "normalized" ? "on" : ""}
+              onClick={() => setScale("normalized")}
+              title="要素ごとに、最小を 0%、最大を 100% にそろえます。大きさの違う要素の、変わり方の形を比べられます"
+            >
+              正規化
+            </button>
+          </div>
+        )}
         <div className="series-picker" aria-label="表示する要素">
           {candidates.map((c) => {
             const on = visible.includes(c.name);
@@ -162,10 +214,21 @@ export function Chart({ modelName, model, run }: ChartProps) {
                 label={{ value: `時間（${unit}）`, position: "insideBottomRight", offset: -4, fill: "var(--text-secondary)", fontSize: 12 }}
                 height={36}
               />
-              <YAxis tick={{ fill: "var(--text-secondary)", fontSize: 12 }} stroke="var(--axis)" tickFormatter={(v: number) => formatValue(v)} width={72} />
+              {scale === "normalized" ? (
+                <YAxis
+                  domain={[0, 1]}
+                  ticks={[0, 0.25, 0.5, 0.75, 1]}
+                  tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+                  stroke="var(--axis)"
+                  tickFormatter={formatPercent}
+                  width={72}
+                />
+              ) : (
+                <YAxis tick={{ fill: "var(--text-secondary)", fontSize: 12 }} stroke="var(--axis)" tickFormatter={(v: number) => formatValue(v)} width={72} />
+              )}
               <Tooltip
                 cursor={{ stroke: "var(--text-muted)", strokeWidth: 1 }}
-                content={(p: TooltipContentProps) => <ChartTooltip {...p} unit={unit} visible={visible} keyOf={keyOf} colorOf={colorOf} />}
+                content={(p: TooltipContentProps) => <ChartTooltip {...p} unit={unit} visible={visible} run={run} colorOf={colorOf} />}
                 isAnimationActive={false}
               />
               {visible.map((n) => (
@@ -214,7 +277,7 @@ export function Chart({ modelName, model, run }: ChartProps) {
 }
 
 function ChartTooltip(
-  p: TooltipContentProps & { unit: string; visible: string[]; keyOf(n: string): string; colorOf(n: string): string },
+  p: TooltipContentProps & { unit: string; visible: string[]; run: RunResult; colorOf(n: string): string },
 ) {
   if (!p.active || !p.payload?.length) return null;
   const row = p.payload[0]!.payload as Record<string, number | null>;
@@ -227,7 +290,7 @@ function ChartTooltip(
         <div key={n} className="tooltip-row">
           <span className="swatch" style={{ background: p.colorOf(n) }} />
           <span className="tooltip-name">{n}</span>
-          <span className="tooltip-value">{formatValue(row[p.keyOf(n)])}</span>
+          <span className="tooltip-value">{formatValue(p.run.series[n]?.[row.i!])}</span>
         </div>
       ))}
     </div>

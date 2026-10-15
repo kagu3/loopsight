@@ -118,6 +118,15 @@ try {
   await b.evaluate("document.activeElement?.blur()");
   await shot("table", ".results");
 
+  // 大きさの違う要素を正規化して並べたところ（あとの場面のために、実際の値に戻しておく）
+  await b.clickText(".segmented button", "グラフ");
+  await b.clickText(".segmented button", "正規化");
+  const normalized = await b.rectOf(".chart-area");
+  await b.hover(normalized.x + normalized.width * 0.3, normalized.y + normalized.height * 0.5);
+  await b.waitFor("document.querySelector('.tooltip')");
+  await shot("normalized", ".results");
+  await b.clickText(".segmented button", "実際の値");
+
   // エラーのあるモデル
   await b.open(url("population_error"));
   await shot("errors");
