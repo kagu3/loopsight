@@ -195,4 +195,51 @@ describe("ビューアからの編集", () => {
     expect((await get("/api/models/pop/edit")).status).toBe(405);
     expect((await new ModelStore(dir).readVersioned("pop")).version).toBe(v0);
   });
+
+  test("要素の変更でないものや、大きすぎる本文は断る", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    expect((await post("/api/models/pop/edit", { version: v0, elements: [null] })).status).toBe(400);
+    const big = { version: v0, elements: [{ name: "Rate", description: "x".repeat(1024 * 1024 + 10) }] };
+    expect((await post("/api/models/pop/edit", big)).status).toBe(413);
+    expect((await new ModelStore(dir).readVersioned("pop")).version).toBe(v0);
+  });
+
+  test("foo と foo.json は同じモデルとして元に戻せる", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Rate", behavior: { value: 0.2 } }] });
+    const u = await post<EditResponse>("/api/models/pop.json/undo", { version: e1.body.model.version });
+    expect(u.status).toBe(200);
+    expect(u.body.model.version).toBe(v0);
+  });
 });
+
+describe("作業フォルダがまだないとき", () => {
+  test("作ってから見張るので、あとからできたモデルにも気づく", async () => {
+    const parent = await tempDir();
+    const missing = path.join(parent, "not-yet");
+    const v = await startViewer({ modelsDir: missing, port: 0 });
+    try {
+      const controller = new AbortController();
+      const res = await fetch(new URL("/api/events", v.url), { signal: controller.signal });
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      const received = (async () => {
+        let text = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) throw new Error("イベントが届く前に切れた");
+          text += decoder.decode(value);
+          const m = text.match(/data: (.*)\n\n/);
+          if (m) return JSON.parse(m[1]!) as ChangeEvent;
+        }
+      })();
+      await new Promise((r) => setTimeout(r, 100));
+      await new ModelStore(missing).write("later", population());
+      expect(await received).toEqual({ type: "changed", name: "later" });
+      controller.abort();
+    } finally {
+      await v.close();
+    }
+  });
+});
+

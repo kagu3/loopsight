@@ -41,8 +41,13 @@ function candidatesOf(model: ModelJSON, run: RunResult): { name: string; type: s
 
 /** 最初に出す要素：モデルのグラフ設定の最初のもの。なければストック */
 function defaultVisible(model: ModelJSON, names: string[]): string[] {
-  const has = new Set(names.map((n) => n.toLowerCase()));
-  const fromViz = (model.visualizations?.[0]?.elements ?? []).filter((n) => has.has(n.toLowerCase()));
+  // グラフ設定の名前は大文字と小文字が要素と違うことがあるので、要素の表記にそろえる
+  const canonical = new Map(names.map((n) => [n.toLowerCase(), n]));
+  const has = new Set(canonical.keys());
+  const fromViz = (model.visualizations?.[0]?.elements ?? []).flatMap((n) => {
+    const c = canonical.get(n.toLowerCase());
+    return c ? [c] : [];
+  });
   const pick = fromViz.length ? fromViz : model.elements.filter((e) => e.type === "STOCK" && e.name && has.has(e.name.toLowerCase())).map((e) => e.name!);
   return (pick.length ? pick : names).slice(0, MAX_SERIES);
 }

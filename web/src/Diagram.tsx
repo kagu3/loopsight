@@ -127,9 +127,13 @@ export function Diagram(props: DiagramProps) {
   // 要素が増えたり減ったりしたときも表示範囲を合わせ直す
   const nodeIds = useMemo(() => graph.nodes.map((n) => n.id).sort().join("|"), [graph]);
 
-  // ドラッグ中（と保存が終わるまで）の位置。新しい図が来たら捨てる
+  // ドラッグ中（と保存が終わるまで）の位置。新しい図が来たら捨てる。
+  // ただし保存を待っているあいだは捨てない（先の保存の結果で、あとから動かした要素が戻らないように）
   const [moved, setMoved] = useState<Map<string, Pos>>(new Map());
-  useEffect(() => setMoved(new Map()), [graph]);
+  const pendingSaves = useRef(0);
+  useEffect(() => {
+    if (pendingSaves.current === 0) setMoved(new Map());
+  }, [graph]);
 
   // 弁 → 両端のノード
   const valveEnds = useMemo(() => {
@@ -198,8 +202,14 @@ export function Diagram(props: DiagramProps) {
       const ids = graph.autoLayout || shifted ? undefined : new Set(dragged.map((n) => n.id));
       const patches = positionPatches(shifted ?? placedRef.current, ids);
       if (!patches.length) return;
-      const err = await onMove(patches);
-      if (err) setMoved(new Map());
+      pendingSaves.current++;
+      try {
+        await onMove(patches);
+      } finally {
+        pendingSaves.current--;
+        // 保存がすべて終わったら、図の位置（保存した位置か、失敗なら元の位置）に任せる
+        if (pendingSaves.current === 0) setMoved(new Map());
+      }
     },
     [graph, onMove],
   );

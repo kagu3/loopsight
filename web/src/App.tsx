@@ -44,6 +44,13 @@ export function App() {
   const dataRef = useRef<ModelResponse>(undefined);
   const currentRef = useRef(current);
   currentRef.current = current;
+  // 読み込みの番号。古い読み込みの結果が、あとから来ても使わない
+  const loadSeq = useRef(0);
+  // 画面からの書き込みは 1 つずつ順に送る（前の書き込みの新しい版を使うため）
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingWrites = useRef(0);
+  // 書き込み中に変更の知らせが来たら、書き込みが終わってから読み直す
+  const reloadAfterWrite = useRef(false);
 
   const loadList = useCallback(async () => {
     try {
@@ -55,6 +62,8 @@ export function App() {
 
   /** 新しい内容を表示する。highlight なら、変わった要素に枠を付ける（ほかで変わったとき） */
   const show = useCallback((next: ModelResponse, highlight: boolean) => {
+    // これより前に始めた読み込みの結果は捨てる
+    loadSeq.current++;
     const diff = highlight ? changedElements(dataRef.current, next) : new Set<string>();
     dataRef.current = next;
     setData(next);
@@ -69,9 +78,15 @@ export function App() {
   const loadModel = useCallback(
     async (name: string) => {
       if (!name) return;
+      if (pendingWrites.current > 0) {
+        // 自分の書き込みの知らせかもしれない。書き込みの結果を待ってから確かめる
+        reloadAfterWrite.current = true;
+        return;
+      }
+      const seq = ++loadSeq.current;
       try {
         const next = await fetchModel(name);
-        if (currentRef.current !== name) return;
+        if (currentRef.current !== name || seq !== loadSeq.current) return;
         // 画面から書き込んだ結果の知らせなら、もう表示しているので何もしない
         if (dataRef.current?.name === next.name && dataRef.current.version === next.version) return;
         show(next, true);
@@ -138,31 +153,46 @@ export function App() {
     [show],
   );
 
-  const edit = useCallback(
-    async (elements: ElementPatch[]): Promise<string | undefined> => {
-      const d = dataRef.current;
-      if (!d) return "モデルを読み込んでいません。";
+  /** 書き込みを順番待ちに入れる。版は、順番が来たときに表示している最新のものを使う */
+  const enqueueWrite = useCallback(
+    <T,>(task: () => Promise<T>): Promise<T> => {
+      pendingWrites.current++;
       setBusy(true);
-      try {
-        return applyWrite(await postEdit(d.name, d.version, elements));
-      } finally {
+      const run = writeQueue.current.then(task, task);
+      writeQueue.current = run.catch(() => undefined);
+      return run.finally(() => {
+        pendingWrites.current--;
+        if (pendingWrites.current > 0) return;
         setBusy(false);
-      }
+        if (reloadAfterWrite.current) {
+          reloadAfterWrite.current = false;
+          void loadModel(currentRef.current);
+        }
+      });
     },
-    [applyWrite],
+    [loadModel],
   );
 
-  const undo = useCallback(async () => {
-    const d = dataRef.current;
-    if (!d || !d.undo_available) return;
-    setBusy(true);
-    try {
-      const err = applyWrite(await postUndo(d.name, d.version));
-      if (err) setNotice(err);
-    } finally {
-      setBusy(false);
-    }
-  }, [applyWrite]);
+  const edit = useCallback(
+    (elements: ElementPatch[]): Promise<string | undefined> =>
+      enqueueWrite(async () => {
+        const d = dataRef.current;
+        if (!d) return "モデルを読み込んでいません。";
+        return applyWrite(await postEdit(d.name, d.version, elements));
+      }),
+    [applyWrite, enqueueWrite],
+  );
+
+  const undo = useCallback(
+    () =>
+      enqueueWrite(async () => {
+        const d = dataRef.current;
+        if (!d || !d.undo_available) return;
+        const err = applyWrite(await postUndo(d.name, d.version));
+        if (err) setNotice(err);
+      }),
+    [applyWrite, enqueueWrite],
+  );
 
   // Ctrl+Z（Mac は ⌘Z）で元に戻す
   useEffect(() => {
@@ -193,7 +223,8 @@ export function App() {
     for (const [k, v] of Object.entries(data?.run?.series ?? {})) out[k] = formatValue(v.at(-1));
     return out;
   }, [data]);
-  const selectedEl = data?.model.elements.find((e) => e.name && e.name === selected);
+  // 名前は大文字と小文字を区別しない（AI が表記だけ変えても選んだままにする）
+  const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
   const title = data?.model.name || current;
 
   return (
@@ -228,6 +259,8 @@ export function App() {
           <h2>選んだ要素</h2>
           {selectedEl ? (
             <Details el={selectedEl} value={finalValues[selectedEl.name!]} onSave={(patch) => edit([patch])} />
+          ) : selected && data ? (
+            <p className="muted">選んでいた「{selected}」が見つかりません。名前が変わったか、消された可能性があります。図で選び直してください。</p>
           ) : (
             <p className="muted">図の要素を押すと、式などをここに出します。「編集」で直せます。</p>
           )}
@@ -254,7 +287,7 @@ export function App() {
               <button
                 className="toolbar-button"
                 onClick={() => void undo()}
-                disabled={!data.undo_available || busy}
+                disabled={!data.undo_available}
                 title={data.undo_available ? `画面で変えたことを元に戻します（あと ${data.undo_available} 回、Ctrl+Z）` : "元に戻せる変更はありません"}
               >
                 ↶ 元に戻す

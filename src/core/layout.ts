@@ -90,7 +90,13 @@ export function layoutModel(model: ModelJSON): string[] {
     for (const end of ["from", "to"] as const) {
       const other = end === "from" ? f.to : f.from;
       const key = end === "from" ? "from_coordinates" : "to_coordinates";
-      if (f[end] || f.display?.[key]) continue;
+      if (f[end]) continue;
+      const existing = f.display?.[key] as Point | undefined;
+      if (existing) {
+        // すでに位置のある雲も、変数やリンクの線がよける対象にする
+        occupied.push({ x: existing[0] - 15, y: existing[1] - 15, w: 30, h: 30 });
+        continue;
+      }
       const r = other ? rects.get(nameKey(other)) : undefined;
       if (!r) continue;
       const k = `${nameKey(other!)}:${end}`;
@@ -296,14 +302,15 @@ function segmentHitsRect(a: Point, b: Point, r: Rect): boolean {
 /**
  * グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す。
  * Web 版に読み込んだあと、すぐ SIMULATE で結果が見られるようにするため。
- * ストックがなければ、フロー、変数、コンバーターを最大 8 個まで入れる。
+ * ストックがなければ、フロー、変数、コンバーターを入れる。どちらも最初の 8 個まで。
  * @returns 足したグラフ（足さなかったときは undefined）
  */
 export function addDefaultVisualization(model: ModelJSON): Visualization | undefined {
   if (model.visualizations?.length) return undefined;
   const named = (types: string[]) => model.elements.filter((e) => types.includes(e.type) && e.name).map((e) => e.name!);
   const stocks = named(["STOCK"]);
-  const elements = stocks.length ? stocks : named(["FLOW", "VARIABLE", "CONVERTER"]).slice(0, 8);
+  // 線は 8 本まで（ビューアのグラフも 8 本まで。それより多いと色で見分けられない）
+  const elements = (stocks.length ? stocks : named(["FLOW", "VARIABLE", "CONVERTER"])).slice(0, 8);
   if (!elements.length) return undefined;
   const viz: Visualization = { type: "TIME_SERIES", name: stocks.length ? "ストックの推移" : "時系列", elements };
   model.visualizations = [viz];

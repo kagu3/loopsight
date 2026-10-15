@@ -184,6 +184,16 @@ describe("簡易レイアウト", () => {
     expectClearLines(m);
   });
 
+  test("すでに位置のある雲も、新しい変数のリンクの線がよける", () => {
+    const m = population();
+    layoutModel(m);
+    // 雲の位置はそのまま、変数だけ座標を消して置き直させる
+    for (const e of m.elements) if (e.type === "VARIABLE") delete e.display;
+    layoutModel(m);
+    expectNoOverlap(m);
+    expectClearLines(m);
+  });
+
   test("すでにある座標は動かさない", () => {
     const m = loadSample("disease");
     const before = JSON.stringify(m);

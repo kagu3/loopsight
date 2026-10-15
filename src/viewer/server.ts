@@ -1,8 +1,8 @@
 import { watch, type FSWatcher } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
-import { EditError, ModelError, ModelStore, StoreError, runModel, upsertElements, validateModel, type ModelJSON } from "../core/index.js";
+import { EditError, ModelError, ModelStore, StoreError, checkModelName, runModel, upsertElements, validateModel, type ModelJSON } from "../core/index.js";
 import { VIEWER_HEADER, type ChangeEvent, type EditErrorResponse, type EditRequest, type EditResponse, type ModelListResponse, type ModelResponse, type RunResult, type UndoRequest } from "./api.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
@@ -122,8 +122,14 @@ async function readBody<T>(req: IncomingMessage): Promise<T> {
 }
 
 function sendJSON(res: ServerResponse, status: number, body: unknown): void {
+  // 先に文字列にする（失敗したときにヘッダーだけ送った状態にしない）
+  const text = JSON.stringify(body);
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(body));
+  res.end(text);
 }
 
 export async function startViewer(options: ViewerOptions): Promise<Viewer> {
@@ -150,23 +156,31 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
       }, 150),
     );
   };
-  try {
-    watcher = watch(store.dir, (_event, file) => file && notify(file.toString()));
-  } catch {
-    // 作業フォルダがまだないときは監視しない（一覧は空になる）
-  }
+  // 作業フォルダがまだなければ作っておく（あとから AI がモデルを作っても気づけるように）
+  await mkdir(store.dir, { recursive: true });
+  watcher = watch(store.dir, (_event, file) => file && notify(file.toString()));
+  // Windows では監視中のフォルダが消されると error が出る。拾わないとプロセスごと止まる
+  watcher.on("error", (e) => console.error(`作業フォルダを監視できなくなりました: ${(e as Error).message}`));
 
   // 画面からの書き込みの記録（モデル名 → 古い順）。メモリの中だけに持つ
   const history = new Map<string, HistoryEntry[]>();
+  // 同じファイルを指す名前（"foo" と "foo.json"、大文字と小文字）は同じ記録にする
+  const keyOf = (name: string) => {
+    try {
+      return checkModelName(name).toLowerCase();
+    } catch {
+      return name.toLowerCase();
+    }
+  };
   const historyOf = (name: string) => {
-    const key = name.toLowerCase();
+    const key = keyOf(name);
     if (!history.has(key)) history.set(key, []);
     return history.get(key)!;
   };
   // 同じモデルへの書き込みは 1 つずつ（読んで、確かめて、書くあいだに割り込ませない）
   const locks = new Map<string, Promise<unknown>>();
   const serial = <T>(name: string, task: () => Promise<T>): Promise<T> => {
-    const key = name.toLowerCase();
+    const key = keyOf(name);
     const run = (locks.get(key) ?? Promise.resolve()).then(task, task);
     locks.set(
       key,
@@ -194,6 +208,7 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         }
         if (action === "edit") {
           if (!Array.isArray(body.elements) || body.elements.length === 0) throw new HttpError(400, "elements がありません。");
+          if (!body.elements.every((e) => e && typeof e === "object" && !Array.isArray(e))) throw new HttpError(400, "elements の中身は要素の変更（オブジェクト）にしてください。");
           const report = upsertElements(current.model, body.elements);
           const version = await store.writeVersioned(name, current.model);
           hist.push({ before: current.text, after: version });
