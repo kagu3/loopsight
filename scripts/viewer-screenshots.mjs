@@ -170,6 +170,7 @@ try {
   core.setScenarios(m, [
     { name: "移民を増やす", description: "受け入れを毎年 50 人にする", values: { Immigrants: 50 } },
     { name: "死亡率を下げる", description: "医療を充実させて死亡率を 0.5% にする", values: { "Death Rate": 0.005 } },
+    { name: "組み合わせる", description: "受け入れを少し増やし、出生率を少し上げ、死亡率を少し下げる", values: { Immigrants: 30, "Birth Rate": 0.045, "Death Rate": 0.008 } },
   ]);
   await store.write("population", m);
   await b.waitFor("document.querySelector('.compare-grid .recharts-line')");
@@ -181,13 +182,25 @@ try {
 
   // 施策の凡例を押して、左の欄で施策を直しているところ（保存せずに閉じる）
   await b.hover(W - 4, H - 4);
-  await b.clickText(".scenario-chip-button", "移民を増やす");
+  // 施策名の横に変えた値の数も出るので、名前の部分で探す
+  await b.evaluate("[...document.querySelectorAll('.scenario-chip-button')].find((e) => e.querySelector('.legend-name')?.textContent === '移民を増やす').click()");
   await b.waitFor("document.querySelector('.scenario-table input')");
   await b.evaluate("(() => { const t = document.querySelector('.scenario-table input'); t.focus(); t.select(); })()");
   await b.send("Input.insertText", { text: "80" });
   await sleep(200);
   await shot("scenario-edit");
   await b.clickText(".form-buttons button", "やめる");
+
+  // 施策の凡例を開いて、施策の中身（変えた値と結果）の表にしたところ。グラフにカーソルを乗せ、その時点の結果を出す（撮ったら閉じておく）
+  await b.clickText(".scenario-toggle", "▸ 中身を見る");
+  await b.waitFor("document.querySelector('.scenario-matrix')");
+  await sleep(300);
+  const matrixCell = await b.rectOf(".compare-chart");
+  await b.hover(matrixCell.x + matrixCell.width * 0.7, matrixCell.y + matrixCell.height * 0.5);
+  await b.waitFor("document.querySelector('.tooltip')");
+  await shot("scenario-matrix", ".results");
+  await b.hover(W - 4, H - 4);
+  await b.clickText(".scenario-toggle", "▾ 中身を閉じる");
 
   // 発表モード（MCP の set_slides で保存した筋書きを ?view=present で見せる）。比較のスライドを 16:9 で撮る
   await store.writeSlides(

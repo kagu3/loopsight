@@ -1021,7 +1021,30 @@ button.legend-remove:hover {
 }
 /* 施策を重ねるときの凡例。「何もしない場合」は灰色の点線 */
 .scenario-bar {
+  flex: none;
   padding: 0 16px 4px;
+}
+/* 凡例（か、開いたときの表）と、右端の「中身を見る」 */
+.scenario-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.scenario-head > .scenario-legend {
+  flex: 1;
+  min-width: 0;
+}
+.scenario-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.scenario-tools button.link {
+  margin-right: 0;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .scenario-legend {
   display: flex;
@@ -1046,6 +1069,129 @@ button.legend-remove:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 施策名の横の、変えた値の数 */
+.scenario-count {
+  flex: none;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* 読み上げにだけ出す文字 */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.scenario-chip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* 凡例を開いたときの、施策の中身の表。幅が足りなければ横に流し、高さはグラフの欄の半分まで */
+.scenario-bar.open {
+  display: flex;
+  flex-direction: column;
+  max-height: 55%;
+  min-height: 0;
+}
+.scenario-bar.open > .scenario-head {
+  flex: 0 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+.scenario-bar.open > .scenario-note {
+  flex: none;
+}
+.scenario-bar.open .scenario-tools {
+  align-self: flex-start;
+}
+.scenario-matrix-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+.scenario-matrix {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.scenario-matrix th,
+.scenario-matrix td {
+  padding: 2px 10px;
+  border-bottom: 1px solid var(--grid);
+  white-space: nowrap;
+  text-align: right;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scenario-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-1);
+  font-weight: 400;
+  text-align: left;
+  max-width: 260px;
+}
+.scenario-matrix thead .scenario-chip {
+  display: flex;
+}
+.scenario-matrix .matrix-corner {
+  color: var(--text-muted);
+}
+.scenario-matrix tbody th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.scenario-matrix .matrix-sub {
+  margin-left: 4px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.scenario-matrix .matrix-base {
+  color: var(--text-secondary);
+}
+/* 施策で変えた値。施策の線の色の帯を左に付ける（文字の色は読みやすさのため変えない） */
+.scenario-matrix .matrix-changed {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--run-color) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--run-color);
+}
+.scenario-matrix .matrix-same {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+.scenario-matrix .matrix-change {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.scenario-matrix .matrix-empty,
+.scenario-matrix .matrix-fold {
+  text-align: left;
+  color: var(--text-muted);
+}
+.scenario-matrix .matrix-fold button.link {
+  margin-right: 0;
+  font-size: 12px;
+}
+/* 結果の行は、変えた値の行と線で分ける */
+.scenario-matrix tr.matrix-result.first > * {
+  border-top: 2px solid var(--border);
 }
 .scenario-note.error-text {
   color: var(--error);

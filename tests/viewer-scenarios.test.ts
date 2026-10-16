@@ -2,12 +2,16 @@ import { describe, expect, test } from "vitest";
 import type { ModelJSON, RunResult, ScenarioRunResult } from "../src/viewer/api.js";
 import {
   BASELINE_NAME,
+  changeLabel,
   compareRuns,
   currentValueOf,
   describeRun,
   findScenario,
+  numberOf,
+  resultRows,
   scenarioFormOf,
   scenarioPatchOf,
+  valueRows,
   valueTargets,
   type ScenarioForm,
 } from "../web/src/scenarios.js";
@@ -50,6 +54,114 @@ describe("施策を重ねるグラフ", () => {
     const [base, a] = compareRuns(run, [scenario("a", { description: "速く増やす" })], 8).runs;
     expect(describeRun(base!)).toMatch(/何も変えず/);
     expect(describeRun(a!)).toBe("速く増やす\n変える値：Rate = 0.2");
+  });
+});
+
+describe("施策の中身の表", () => {
+  const model: ModelJSON = {
+    elements: [
+      { type: "STOCK", name: "Pop", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } },
+      { type: "VARIABLE", name: "Zero", behavior: { value: 0 } },
+      { type: "FLOW", name: "Births", to: "Pop", behavior: { value: "[Pop]*[Rate]" } },
+      { type: "VARIABLE", name: "Unused", behavior: { value: 5 } },
+      { type: "LINK", from: "Rate", to: "Births" },
+    ],
+  };
+  const times = [0, 1, 2];
+  const base: RunResult = { time_units: "years", times, series: { Pop: [100, 110, 120] } };
+  const runs = compareRuns(
+    base,
+    [
+      // 1 つの施策で 3 つの値を変える。要素名の大文字と小文字は区別しない
+      { name: "a", values: { births: "[Pop]*0.2", Rate: 0.15, pop: 50 }, series: { Pop: [50, 60, 180] } },
+      { name: "b", values: { Zero: 2, Rate: "0.05" }, series: { Pop: [100, 105, 90] } },
+    ],
+    8,
+  ).runs;
+
+  test("数として読める値だけを数にする。式は数にしない", () => {
+    expect(numberOf(0.5)).toBe(0.5);
+    expect(numberOf(" 12 ")).toBe(12);
+    expect(numberOf("[Pop]*2")).toBeUndefined();
+    expect(numberOf("")).toBeUndefined();
+    expect(numberOf(true)).toBeUndefined();
+    expect(numberOf(undefined)).toBeUndefined();
+  });
+
+  test("変化は率で出す。10% 未満は小数 1 桁、それ以上は整数に丸める", () => {
+    expect(changeLabel(100, 150)).toBe("+50%");
+    expect(changeLabel(100, 75)).toBe("−25%");
+    expect(changeLabel(-100, -50)).toBe("+50%");
+    expect(changeLabel(100, 103.24)).toBe("+3.2%");
+    expect(changeLabel(100, 112.6)).toBe("+13%");
+    expect(changeLabel(100, 100.01)).toBe("±0%");
+    expect(changeLabel(1, 30)).toBe("+2,900%");
+  });
+
+  test("0 からの変化など率にできないときは差。数でなければ添えない", () => {
+    expect(changeLabel(0, 2)).toBe("+2");
+    expect(changeLabel(0, -0.5)).toBe("−0.5");
+    expect(changeLabel(0, 0)).toBe("±0");
+    expect(changeLabel(null, 2)).toBe("");
+    expect(changeLabel(1, undefined)).toBe("");
+    expect(changeLabel(1, Number.NaN)).toBe("");
+  });
+
+  test("行はどれかの施策で変えた要素だけ、モデルの並び順。「何もしない場合」はいまの値（ストックは初期値、変数とフローは式）", () => {
+    const rows = valueRows(model, runs);
+    expect(rows.map((r) => [r.element, r.initial])).toEqual([
+      ["Pop", true],
+      ["Rate", false],
+      ["Zero", false],
+      ["Births", false],
+    ]);
+    expect(rows[0]!.cells).toEqual([
+      { value: "100", changed: false, change: "" },
+      { value: "50", changed: true, change: "−50%" },
+      { changed: false, change: "" },
+    ]);
+    expect(rows[1]!.cells.map((c) => [c.value, c.change])).toEqual([
+      ["0.1", ""],
+      ["0.15", "+50%"],
+      ["0.05", "−50%"],
+    ]);
+    // 0 からの変化は差
+    expect(rows[2]!.cells[2]).toEqual({ value: "2", changed: true, change: "+2" });
+    // 式のときは変化を添えない
+    expect(rows[3]!.cells.map((c) => [c.value, c.change])).toEqual([
+      ["[Pop]*[Rate]", ""],
+      ["[Pop]*0.2", ""],
+      [undefined, ""],
+    ]);
+  });
+
+  test("モデルにない要素の行は最後。施策がなければ行もない", () => {
+    const [b0, a] = compareRuns(base, [{ name: "a", values: { Nope: 1, Rate: 0.2 }, series: base.series }], 8).runs;
+    expect(valueRows(model, [b0!, a!]).map((r) => r.element)).toEqual(["Rate", "Nope"]);
+    expect(valueRows(model, [b0!, a!])[1]!.cells[0]).toEqual({ value: undefined, changed: false, change: "" });
+    expect(valueRows(model, [b0!])).toEqual([]);
+  });
+
+  test("結果は選んでいる要素ごとに、最後の時点の値と「何もしない場合」からの変化", () => {
+    expect(resultRows(runs, times, ["Pop"])).toEqual([
+      {
+        element: "Pop",
+        time: 2,
+        cells: [
+          { value: 120, change: "" },
+          { value: 180, change: "+50%" },
+          { value: 90, change: "−25%" },
+        ],
+      },
+    ]);
+    expect(resultRows(runs, times, ["Pop", "Missing"])[1]!.cells.map((c) => c.value)).toEqual([null, null, null]);
+    expect(resultRows(runs, [], ["Pop"])).toEqual([]);
+  });
+
+  test("カーソルを乗せた時点の値に変わる。刻みにない時刻なら、いちばん近い刻み", () => {
+    expect(resultRows(runs, times, ["Pop"], 1)[0]!.cells.map((c) => c.value)).toEqual([110, 60, 105]);
+    expect(resultRows(runs, times, ["Pop"], 0.2)[0]!.time).toBe(0);
   });
 });
 

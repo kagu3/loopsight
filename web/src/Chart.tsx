@@ -1,9 +1,9 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import type { ActualDataResult, ModelJSON, RunResult, ScenarioRunResult } from "../../src/viewer/api.js";
 import { sameTime, withActualPoints } from "./actualPoints.js";
 import { normalize, normalizeLike, normalizeTogether } from "./normalize.js";
-import { BASELINE_NAME, compareRuns, describeRun, type CompareRun, type CompareRuns } from "./scenarios.js";
+import { BASELINE_NAME, compareRuns, describeRun, resultRows, valueRows, type CompareRun, type CompareRuns } from "./scenarios.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
 // 実行結果の時系列グラフと表。
@@ -97,6 +97,23 @@ function saveScale(scale: Scale) {
 
 const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 
+/** 施策の凡例を開いて、施策の中身の表にしているか（縦軸と同じく、ブラウザに覚えておく） */
+const MATRIX_KEY = "viewer.scenarioMatrix";
+function loadMatrixOpen(): boolean {
+  try {
+    return localStorage.getItem(MATRIX_KEY) === "open";
+  } catch {
+    return false;
+  }
+}
+function saveMatrixOpen(open: boolean) {
+  try {
+    localStorage.setItem(MATRIX_KEY, open ? "open" : "closed");
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
 export interface ChartProps {
   modelName: string;
   model: ModelJSON;
@@ -130,6 +147,10 @@ export function Chart({ modelName, model, run, scenarios, actual, editingScenari
   const compare = useMemo(() => compareRuns(run, scenarios ?? [], MAX_SERIES), [run, scenarios]);
   const hasScenarios = (scenarios?.length ?? 0) > 0;
   const comparing = overlay && hasScenarios;
+  // 施策を重ねたグラフにカーソルを乗せている時点（施策の中身の表の、結果の行に出す）
+  const [hoverTime, setHoverTime] = useState<number | undefined>();
+  // マウスが出ないままグラフが消えたり（要素を外す・表にする）、別のモデルを開いたりしたら、時点を忘れる
+  useEffect(() => setHoverTime(undefined), [modelName, view, visible]);
   const setScale = (s: Scale) => {
     setScaleState(s);
     saveScale(s);
@@ -281,14 +302,25 @@ export function Chart({ modelName, model, run, scenarios, actual, editingScenari
         </ul>
       </div>
 
-      {comparing && <ScenarioLegend compare={compare} editing={editingScenario} onEdit={onEditScenario} />}
+      {comparing && (
+        <ScenarioLegend
+          compare={compare}
+          model={model}
+          times={run.times}
+          visible={visible}
+          at={view === "chart" ? hoverTime : undefined}
+          unit={unit}
+          editing={editingScenario}
+          onEdit={onEditScenario}
+        />
+      )}
 
       {visible.length === 0 ? (
         <p className="muted pad">表示する要素を選んでください。</p>
       ) : comparing && view === "chart" ? (
         <div className="compare-grid">
           {visible.map((n) => (
-            <CompareChart key={n} name={n} times={run.times} runs={compare.runs} unit={unit} scale={scale} actual={actual} />
+            <CompareChart key={n} name={n} times={run.times} runs={compare.runs} unit={unit} scale={scale} actual={actual} onHover={setHoverTime} />
           ))}
         </div>
       ) : comparing ? (
@@ -413,11 +445,44 @@ function yAxis(scale: Scale) {
   );
 }
 
+/** 施策の中身の表で、はじめから出す「変えた値」の行の数。超えたぶんは畳んで「ほか N 件」で開く */
+const MATRIX_ROWS = 6;
+
 /**
  * 施策の凡例。「何もしない場合」は灰色の点線。実行できなかった施策と、色が足りずに出さない施策も知らせる。
- * onEdit があれば、施策の名前を押すと左の欄で直せる。最後に「＋ 施策を足す」を置く
+ * onEdit があれば、施策の名前を押すと左の欄で直せる。最後に「＋ 施策を足す」を置く。
+ * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、施策ごとに変えた値と結果（グラフで選んでいる要素の値）を並べる
  */
-function ScenarioLegend({ compare, editing, onEdit }: { compare: CompareRuns; editing?: string; onEdit?(name?: string): void }) {
+function ScenarioLegend({
+  compare,
+  model,
+  times,
+  visible,
+  at,
+  unit,
+  editing,
+  onEdit,
+}: {
+  compare: CompareRuns;
+  model: ModelJSON;
+  times: number[];
+  /** グラフで選んでいる要素（結果の行） */
+  visible: string[];
+  /** グラフにカーソルを乗せている時点。なければ最後の時点 */
+  at?: number;
+  unit: string;
+  editing?: string;
+  onEdit?(name?: string): void;
+}) {
+  const [open, setOpenState] = useState(loadMatrixOpen);
+  const [showAll, setShowAll] = useState(false);
+  const setOpen = (o: boolean) => {
+    setOpenState(o);
+    saveMatrixOpen(o);
+  };
+  // 重ねている施策がない（どれも実行できなかった・出していない）ときは、表にしても空なので開かない
+  const canOpen = compare.runs.length > 1;
+  const isOpen = open && canOpen;
   const isEditing = (n: string) => editing !== undefined && editing.toLowerCase() === n.toLowerCase();
   // 実行できなかった施策と、出していない施策の名前も、押すと直せる
   const nameButton = (n: string) =>
@@ -428,32 +493,58 @@ function ScenarioLegend({ compare, editing, onEdit }: { compare: CompareRuns; ed
     ) : (
       n
     );
-  return (
-    <div className="scenario-bar">
-      <ul className="scenario-legend" aria-label="重ねている施策">
-        {compare.runs.map((r, k) => (
-          <li key={k} className="scenario-chip" title={`${r.name}\n${describeRun(r)}`}>
-            {r.baseline || !onEdit ? (
-              <>
-                <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
-                <span className="legend-name">{r.name}</span>
-              </>
-            ) : (
-              <button className={`scenario-chip-button ${isEditing(r.name) ? "on" : ""}`} onClick={() => onEdit(r.name)} aria-pressed={isEditing(r.name)}>
-                <LineSwatch color={runColor(r, k)} />
-                <span className="legend-name">{r.name}</span>
-              </button>
-            )}
-          </li>
-        ))}
-        {onEdit && (
-          <li className="scenario-chip">
-            <button className="link" onClick={() => onEdit()} title={`値を変えた施策を足し、「${BASELINE_NAME}」と重ねて比べます`}>
-              ＋ 施策を足す
-            </button>
-          </li>
+  // 凡例の 1 つ分。閉じているときは帯に並べ、開いているときは表の列の見出しにする（見出しにイベントを足すときは、ここに足す）
+  const chip = (r: CompareRun, k: number) => {
+    const label = (
+      <>
+        <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
+        <span className="legend-name">{r.name}</span>
+        {!r.baseline && (
+          <span className="scenario-count" title="この施策で変えた値の数">
+            <span aria-hidden="true">{Object.keys(r.values).length}</span>
+            <span className="visually-hidden">（変えた値 {Object.keys(r.values).length} 件）</span>
+          </span>
         )}
-      </ul>
+      </>
+    );
+    return r.baseline || !onEdit ? (
+      <span className="scenario-chip-label">{label}</span>
+    ) : (
+      <button className={`scenario-chip-button ${isEditing(r.name) ? "on" : ""}`} onClick={() => onEdit(r.name)} aria-pressed={isEditing(r.name)}>
+        {label}
+      </button>
+    );
+  };
+  const addButton = onEdit && (
+    <button className="link" onClick={() => onEdit()} title={`値を変えた施策を足し、「${BASELINE_NAME}」と重ねて比べます`}>
+      ＋ 施策を足す
+    </button>
+  );
+  const toggle = (
+    <button className="link scenario-toggle" aria-expanded={open} onClick={() => setOpen(!open)} title="施策ごとに、変えた値と結果を表で比べます">
+      {open ? "▾ 中身を閉じる" : "▸ 中身を見る"}
+    </button>
+  );
+  return (
+    <div className={`scenario-bar ${isOpen ? "open" : ""}`}>
+      <div className="scenario-head">
+        {isOpen ? (
+          <ScenarioMatrix compare={compare} model={model} times={times} visible={visible} at={at} unit={unit} chip={chip} showAll={showAll} onShowAll={setShowAll} />
+        ) : (
+          <ul className="scenario-legend" aria-label="重ねている施策">
+            {compare.runs.map((r, k) => (
+              <li key={k} className="scenario-chip" title={`${r.name}\n${describeRun(r)}`}>
+                {chip(r, k)}
+              </li>
+            ))}
+            {addButton && <li className="scenario-chip">{addButton}</li>}
+          </ul>
+        )}
+        <div className="scenario-tools">
+          {isOpen && addButton}
+          {canOpen && toggle}
+        </div>
+      </div>
       {compare.failed.map((f) => (
         <p key={f.name} className="scenario-note error-text" title={f.error}>
           施策「{nameButton(f.name)}」は実行できませんでした: {f.error}
@@ -472,6 +563,115 @@ function ScenarioLegend({ compare, editing, onEdit }: { compare: CompareRuns; ed
   );
 }
 
+/**
+ * 施策の中身の表。列は凡例と同じ並び（「何もしない場合」と、重ねている施策）。
+ * 行は、どれかの施策で変えた値と、結果（グラフで選んでいる要素の、ある時点の値）
+ */
+function ScenarioMatrix({
+  compare,
+  model,
+  times,
+  visible,
+  at,
+  unit,
+  chip,
+  showAll,
+  onShowAll,
+}: {
+  compare: CompareRuns;
+  model: ModelJSON;
+  times: number[];
+  visible: string[];
+  at?: number;
+  unit: string;
+  chip(r: CompareRun, k: number): React.ReactNode;
+  showAll: boolean;
+  onShowAll(all: boolean): void;
+}) {
+  const runs = compare.runs;
+  const rows = useMemo(() => valueRows(model, runs), [model, runs]);
+  const results = resultRows(runs, times, visible, at);
+  const folding = rows.length > MATRIX_ROWS;
+  const shown = folding && !showAll ? rows.slice(0, MATRIX_ROWS) : rows;
+  const colSpan = runs.length + 1;
+  return (
+    <div className="scenario-matrix-scroll">
+      <table className="scenario-matrix" aria-label="施策の中身">
+        <thead>
+          <tr>
+            <th scope="col" className="matrix-corner">
+              変えた値
+            </th>
+            {runs.map((r, k) => (
+              <th key={k} scope="col" title={`${r.name}\n${describeRun(r)}`}>
+                <div className="scenario-chip">{chip(r, k)}</div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && runs.length > 1 && (
+            <tr>
+              <td colSpan={colSpan} className="matrix-empty">
+                どの施策も値を変えていません
+              </td>
+            </tr>
+          )}
+          {shown.map((row) => (
+            <tr key={row.element}>
+              <th scope="row" title={row.element}>
+                <span className="matrix-element">{row.element}</span>
+                {row.initial && <small className="matrix-sub">初期値</small>}
+              </th>
+              {row.cells.map((c, k) =>
+                k === 0 ? (
+                  <td key={k} className="matrix-base" title={c.value}>
+                    {c.value ?? "—"}
+                  </td>
+                ) : c.changed ? (
+                  <td key={k} className="matrix-changed" style={{ "--run-color": runColor(runs[k]!, k) } as React.CSSProperties} title={c.value}>
+                    {c.value}
+                    {c.change && <small className="matrix-change">{c.change}</small>}
+                  </td>
+                ) : (
+                  <td key={k} className="matrix-same" title="この施策では変えていません">
+                    —
+                  </td>
+                ),
+              )}
+            </tr>
+          ))}
+          {folding && (
+            <tr>
+              <td colSpan={colSpan} className="matrix-fold">
+                <button className="link" onClick={() => onShowAll(!showAll)}>
+                  {showAll ? "畳む" : `ほか ${rows.length - MATRIX_ROWS} 件`}
+                </button>
+              </td>
+            </tr>
+          )}
+          {results.map((row, j) => (
+            <tr key={row.element} className={`matrix-result ${j === 0 ? "first" : ""}`}>
+              <th scope="row" title={`${row.element}（${formatTime(row.time)} ${unit}）の結果`}>
+                <span className="matrix-element">{row.element}</span>
+                <small className="matrix-sub">
+                  （{formatTime(row.time)} {unit}）
+                </small>
+              </th>
+              {row.cells.map((c, k) => (
+                <td key={k}>
+                  {formatValue(c.value)}
+                  {c.change && <small className="matrix-change">{c.change}</small>}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** 凡例の線の見本。点線も見分けられるように、四角ではなく線で描く */
 function LineSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
   return (
@@ -481,14 +681,18 @@ function LineSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
   );
 }
 
-/** 1 つの要素について、「何もしない場合」と施策を重ねた小さなグラフ */
-function CompareChart({
+/**
+ * 1 つの要素について、「何もしない場合」と施策を重ねた小さなグラフ。
+ * カーソルを乗せている時点を onHover で知らせる（施策の中身の表に出す）。知らせるたびにほかのグラフを描き直さないよう memo にする
+ */
+const CompareChart = memo(function CompareChart({
   name,
   times,
   runs,
   unit,
   scale,
   actual,
+  onHover,
 }: {
   name: string;
   times: number[];
@@ -496,6 +700,7 @@ function CompareChart({
   unit: string;
   scale: Scale;
   actual?: ActualDataResult;
+  onHover(t: number | undefined): void;
 }) {
   // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
   // 実際のデータの点も同じ行に入れる（キーは a）。正規化するときは、どの施策も通した最小と最大を目盛りにする
@@ -518,7 +723,12 @@ function CompareChart({
       <figcaption title={name}>{name}</figcaption>
       <div className="compare-chart">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
+          <LineChart
+            data={data}
+            margin={{ top: 4, right: 16, bottom: 4, left: 0 }}
+            onMouseMove={(s) => onHover(s.isTooltipActive && s.activeTooltipIndex != null ? (data[Number(s.activeTooltipIndex)]?.t ?? undefined) : undefined)}
+            onMouseLeave={() => onHover(undefined)}
+          >
             <CartesianGrid stroke="var(--grid)" vertical={false} />
             <XAxis
               dataKey="t"
@@ -568,7 +778,7 @@ function CompareChart({
       </div>
     </figure>
   );
-}
+});
 
 /** 施策を重ねたグラフのツールチップ。正規化していても実際の値を出す */
 function CompareTooltip(p: TooltipContentProps & { unit: string; name: string; runs: CompareRun[]; actual?: ActualDataResult }) {

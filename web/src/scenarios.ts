@@ -55,6 +55,115 @@ export function describeRun(r: CompareRun): string {
   return [r.description, values.length ? `変える値：${values.join("、")}` : "値を変えていません"].filter(Boolean).join("\n");
 }
 
+// ここから、施策の凡例を開いたときの表（施策の中身）の計算。列は compareRuns の runs と同じ並び
+
+/** 数として読める値なら数。式（数でない文字）なら undefined */
+export function numberOf(v: Equation | undefined): number | undefined {
+  if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
+  if (typeof v !== "string" || !v.trim()) return undefined;
+  const n = Number(v.trim());
+  return Number.isFinite(n) ? n : undefined;
+}
+
+const MINUS = "−";
+
+/**
+ * 「何もしない場合」の値から、施策の値への変化の添え書き。
+ * 率にできれば +50% / −25%（10% 未満は小数 1 桁まで、それ以上は整数に丸める）。
+ * 0 からの変化など率にできなければ差（+0.5）。どちらかが数でなければ空文字
+ */
+export function changeLabel(base: number | null | undefined, value: number | null | undefined): string {
+  if (base == null || value == null || !Number.isFinite(base) || !Number.isFinite(value)) return "";
+  if (base === 0) {
+    const d = value - base;
+    return d === 0 ? "±0" : `${d > 0 ? "+" : MINUS}${Math.abs(d).toLocaleString("ja-JP", { maximumSignificantDigits: 4 })}`;
+  }
+  const p = ((value - base) / Math.abs(base)) * 100;
+  const abs = Math.abs(p);
+  const text = abs.toLocaleString("ja-JP", { maximumFractionDigits: abs < 10 ? 1 : 0 });
+  if (Number(text.replace(/,/g, "")) === 0) return "±0%";
+  return `${p > 0 ? "+" : MINUS}${text}%`;
+}
+
+/** 表のマス 1 つ。value は値の書き方のまま（変えていなければ undefined） */
+export interface MatrixCell {
+  value?: string;
+  /** 施策で値を変えたか（「何もしない場合」の列はいつも false） */
+  changed: boolean;
+  /** 「何もしない場合」からの変化（+50% など）。式のときや変えていないときは空文字 */
+  change: string;
+}
+
+/** 変えた値の行。cells は runs と同じ並び（先頭が「何もしない場合」） */
+export interface MatrixRow {
+  element: string;
+  /** ストックの行（「何もしない場合」の値は初期値） */
+  initial: boolean;
+  cells: MatrixCell[];
+}
+
+/**
+ * 変えた値の行。どれかの施策で変えた要素だけを、モデルの並び順で（モデルにない要素は最後に）。
+ * 「何もしない場合」の列はいまの値（ストックは初期値、変数とフローは式）
+ */
+export function valueRows(model: ModelJSON, runs: CompareRun[]): MatrixRow[] {
+  const scenarios = runs.filter((r) => !r.baseline);
+  // 施策の値は、要素名の大文字と小文字を区別せずに引く
+  const lookup = scenarios.map((r) => new Map(Object.entries(r.values).map(([k, v]) => [nameKey(k), v])));
+  const changed = new Map<string, string>();
+  for (const e of model.elements) {
+    if (e.type === "LINK" || !e.name || changed.has(nameKey(e.name))) continue;
+    if (lookup.some((m) => m.has(nameKey(e.name!)))) changed.set(nameKey(e.name), e.name);
+  }
+  for (const r of scenarios) for (const k of Object.keys(r.values)) if (!changed.has(nameKey(k))) changed.set(nameKey(k), k);
+
+  return [...changed].map(([key, element]) => {
+    const current = currentValueOf(model, element);
+    const base = numberOf(current);
+    const el = model.elements.find((e) => e.type !== "LINK" && e.name && nameKey(e.name) === key);
+    let i = 0;
+    const cells = runs.map((r): MatrixCell => {
+      if (r.baseline) return { value: current, changed: false, change: "" };
+      const v = lookup[i++]!.get(key);
+      if (v === undefined) return { changed: false, change: "" };
+      return { value: String(v), changed: true, change: changeLabel(base, numberOf(v)) };
+    });
+    return { element, initial: el?.type === "STOCK", cells };
+  });
+}
+
+/** 結果の行。cells は runs と同じ並び。施策の列の change は「何もしない場合」からの変化 */
+export interface ResultRow {
+  element: string;
+  /** 値を読んだ時点 */
+  time: number;
+  cells: { value: number | null; change: string }[];
+}
+
+/**
+ * 結果の行。グラフで選んでいる要素ごとに、時点 at の値（at がなければ最後の時点）。
+ * at は刻みの時刻（グラフにカーソルを乗せた時点）。刻みにない時刻なら、いちばん近い刻みの値を出す
+ */
+export function resultRows(runs: CompareRun[], times: number[], elements: string[], at?: number): ResultRow[] {
+  if (times.length === 0) return [];
+  let i = times.length - 1;
+  if (at !== undefined) {
+    i = 0;
+    for (const [j, t] of times.entries()) if (Math.abs(t - at) < Math.abs(times[i]! - at)) i = j;
+  }
+  return elements.map((element) => {
+    const base = runs[0]?.series[element]?.[i] ?? null;
+    return {
+      element,
+      time: times[i]!,
+      cells: runs.map((r) => {
+        const value = r.series[element]?.[i] ?? null;
+        return { value, change: r.baseline ? "" : changeLabel(base, value) };
+      }),
+    };
+  });
+}
+
 // ここから、施策の編集欄（ScenarioEditor）の計算。送る変更は MCP の set_scenarios と同じ形にする
 
 /** 名前は大文字と小文字、前後の空白を区別しない（サーバーの sameName と同じ） */
