@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、18 個のツールが見える", async () => {
+  test("クライアントから接続でき、19 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     expect(client.getInstructions()).toMatch(/「会議資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
@@ -58,6 +58,7 @@ describe("MCP server", () => {
       [
         "create_model",
         "export_model",
+        "export_slides",
         "find_loops",
         "get_model",
         "import_data",
@@ -286,6 +287,7 @@ describe("MCP server", () => {
     expect(bad.issues[0].hint).toMatch(/もしかして "外出を控える"/);
     expect(await callError("set_slides", { model: "sir", slides: [{ kind: "chart", title: "a", message: "b" }] })).toMatch(/kind/);
     expect(await callError("view_slides", { model: "sir", image: false })).toMatch(/筋書きがありません/);
+    expect(await callError("export_slides", { model: "sir" })).toMatch(/筋書きがありません/);
 
     const saved = await call("set_slides", { model: "sir", title: "感染症の対策", slides });
     expect(path.basename(saved.file)).toBe("sir.slides.json");
@@ -321,6 +323,10 @@ describe("MCP server", () => {
     // 筋書きが使っている施策を消すと、そのことを知らせる
     const removed = await call("set_scenarios", { model: "sir", remove: ["外出の自粛"] });
     expect(removed.slides_issues.map((i: any) => i.slide)).toEqual([3, 4]);
+    // 合わないところがあれば、PDF に書き出さない
+    const notExported = JSON.parse(await callError("export_slides", { model: "sir" }));
+    expect(notExported.error).toMatch(/書き出しませんでした/);
+    expect(notExported.issues.map((i: any) => i.slide)).toEqual([3, 4]);
 
     // 版が違えば保存しない
     expect(await callError("set_slides", { model: "sir", slides: [slides[4]], version: "0000" })).toMatch(/ほかのところで変わって/);
@@ -339,6 +345,8 @@ describe("MCP server", () => {
     const err = JSON.parse(await callError("run_simulation", { model: "e" }));
     expect(err.issues[0].element).toBe("x");
     expect(await callError("export_model", { model: "e", path: "../../outside.json" })).toMatch(/外を指して/);
+    await call("set_slides", { model: "e", slides: [{ kind: "conclusion", title: "結論", message: "まとめ" }] });
+    expect(await callError("export_slides", { model: "e", path: "../../outside.pdf" })).toMatch(/外を指して/);
     // どのエラーも { error } の JSON で返る
     expect(JSON.parse(await callError("get_model", { model: "none" })).error).toMatch(/見つかりません/);
     expect(JSON.parse(await callError("upsert_elements", { model: "e", elements: [{ name: "z" }] })).error).toMatch(/type が必要/);
@@ -469,5 +477,36 @@ describe("MCP server", () => {
     expect(png.subarray(1, 4).toString()).toBe("PNG");
     // 16:9 の高さ（PNG の IHDR の幅と高さ）
     expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([800, 450]);
+  }, 60_000);
+
+  test("export_slides は 1 スライド 1 ページの PDF を書き出す（ブラウザと画面のビルドがあるとき）", async () => {
+    await call("create_model", { model: "p" });
+    await call("upsert_elements", { model: "p", elements: SIR });
+    await call("set_slides", {
+      model: "p",
+      slides: [
+        { kind: "problem", title: "感染が広がる", message: "山ができる", elements: ["Infected"] },
+        { kind: "cause", title: "うつす人が増える", message: "感染者が増えるほど広がる", loop: { elements: ["Infected", "Infection"], polarity: "R" } },
+        { kind: "conclusion", title: "結論", message: "対策が要る" },
+      ],
+    });
+    const res = await client.callTool({ name: "export_slides", arguments: { model: "p", path: "out/会議" } });
+    const text = (res.content as { text: string }[])[0]!.text;
+    if (res.isError) {
+      // ブラウザか画面のビルドがない環境では、書き出せないことを知らせる
+      expect(JSON.parse(text).error).toMatch(/Edge か Chrome|ビルド/);
+      return;
+    }
+    const out = JSON.parse(text);
+    expect(out.file).toBe(path.join(dir, "out", "会議.pdf"));
+    expect(out.pages).toBe(3);
+    const pdf = (await readFile(out.file)).toString("latin1");
+    expect(pdf.startsWith("%PDF-")).toBe(true);
+    // 1 スライド 1 ページで、どのページも 16:9（13.33 × 7.5 インチ = 960 × 540 ポイント）
+    expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(3);
+    expect(pdf.match(/\/MediaBox \[[^\]]*\]/g)).toEqual(Array(3).fill("/MediaBox [0 0 960 540]"));
+    // フォントを埋め込み、ビューア（127.0.0.1）へのリンクを残さない
+    expect(pdf).toMatch(/\/FontFile2?\b/);
+    expect(pdf).not.toMatch(/127\.0\.0\.1|\/URI/);
   }, 60_000);
 });

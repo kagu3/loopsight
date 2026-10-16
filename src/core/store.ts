@@ -244,10 +244,20 @@ export class ModelStore {
   }
 
   async writeTextFile(file: string, text: string): Promise<string> {
+    return this.writeBinaryFile(file, Buffer.from(text, "utf8"));
+  }
+
+  /** 一時ファイルに書いてから置き換える。書けなかったら一時ファイルを消す */
+  async writeBinaryFile(file: string, data: Uint8Array): Promise<string> {
     await mkdir(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmp, text, "utf8");
-    await rename(tmp, file);
+    try {
+      await writeFile(tmp, data);
+      await rename(tmp, file);
+    } catch (e) {
+      await unlink(tmp).catch(() => undefined);
+      throw e;
+    }
     return file;
   }
 }

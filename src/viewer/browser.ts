@@ -1,8 +1,9 @@
 // ヘッドレスの Edge か Chrome を DevTools プロトコルで操作する小さな道具。
-// MCP の view_diagram（図を画像で返す）と、マニュアルのスクリーンショットを撮るスクリプトで使う。
+// MCP の view_diagram（図を画像で返す）、view_slides と export_slides（発表モードを画像や PDF にする）と、マニュアルのスクリーンショットを撮るスクリプトで使う。
 // Node 22 以降の組み込みの WebSocket を使うので、追加の依存はない。
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -55,21 +56,43 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-/** ヘッドレスのブラウザを起動する。使い終わったら close() する（一時的なプロフィールも消す） */
+/**
+ * ヘッドレスのブラウザを起動する。使い終わったら close() する（ブラウザを終わらせ、一時的なプロフィールも消す）。
+ * ポートはブラウザに選ばせ（--remote-debugging-port=0）、プロフィールの DevToolsActivePort から読む。
+ * 決めたポートを使うと、前に残ったほかのブラウザにつながることがあるため
+ */
 export async function launchBrowser(): Promise<Browser> {
   const profile = mkdtempSync(path.join(tmpdir(), "im-browser-"));
-  const port = 9300 + Math.floor(Math.random() * 600);
   const proc: ChildProcess = spawn(
     findBrowser(),
-    ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--disable-extensions", "about:blank"],
+    ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--disable-extensions", "about:blank"],
     { stdio: "ignore" },
   );
+  let port: string | undefined;
+  /** ブラウザ全体を終わらせる。Edge は起動し直すことがあり、proc.kill() だけでは本体が残るので、先に Browser.close を送る */
+  const closeBrowser = async () => {
+    if (!port) return;
+    try {
+      const { webSocketDebuggerUrl } = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string };
+      const ws = new WebSocket(webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => {
+        ws.addEventListener("open", resolve);
+        ws.addEventListener("error", reject);
+      });
+      const closed = new Promise((resolve) => ws.addEventListener("close", resolve));
+      ws.send(JSON.stringify({ id: 1, method: "Browser.close" }));
+      await Promise.race([closed, sleep(3000)]);
+    } catch {
+      // もう終わっている
+    }
+  };
   const cleanup = async () => {
+    await closeBrowser();
     proc.kill();
-    // ブラウザがファイルを離すまで少し待ってから消す
+    // ブラウザがファイルを離すまで少し待ってから消す（離していなければ、間をおいて何度か試す）
     await sleep(300);
     try {
-      rmSync(profile, { recursive: true, force: true });
+      await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       // 消せなくても困らない（一時フォルダ）
     }
@@ -78,8 +101,12 @@ export async function launchBrowser(): Promise<Browser> {
   let page: { webSocketDebuggerUrl: string } | undefined;
   for (let i = 0; i < 100 && !page; i++) {
     try {
-      const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { type: string; webSocketDebuggerUrl: string }[];
-      page = targets.find((t) => t.type === "page");
+      port ??= readFileSync(path.join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]!.trim() || undefined;
+      if (port) {
+        const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { type: string; url: string; webSocketDebuggerUrl: string }[];
+        // 起動時に開いた about:blank を選ぶ（Edge はほかのページを開いていることがある）
+        page = targets.find((t) => t.type === "page" && t.url === "about:blank");
+      }
     } catch {
       // まだ起動していない
     }

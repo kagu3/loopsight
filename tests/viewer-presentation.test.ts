@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { SLIDE_KIND_LABEL, emptyModel, upsertElements } from "../src/core/index.js";
-import { KIND_LABEL, changeFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "../web/src/presentation.js";
+import { KIND_LABEL, changeFrom, isPrintFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "../web/src/presentation.js";
 
 describe("発表モード", () => {
   test("スライドの種類の呼び名はサーバーと同じ", () => {
@@ -12,6 +12,12 @@ describe("発表モード", () => {
     expect(slideIndexFrom("?view=present&slide=9", 5)).toBe(4);
     expect(slideIndexFrom("?view=present", 5)).toBe(0);
     expect(slideIndexFrom("?slide=abc", 5)).toBe(0);
+  });
+
+  test("アドレスの print=1 で、すべてのスライドを並べた印刷の形にする", () => {
+    expect(isPrintFrom("?view=present&print=1")).toBe(true);
+    expect(isPrintFrom("?view=present")).toBe(false);
+    expect(isPrintFrom("?view=present&print=0")).toBe(false);
   });
 
   test("← → などのキーで進んだり戻ったりする。端では止まる", () => {

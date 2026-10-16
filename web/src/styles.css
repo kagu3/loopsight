@@ -1347,6 +1347,18 @@ button.legend-remove:hover {
   font-weight: 600;
 }
 
+/* 印刷の形（?view=present&print=1）。枠を幅いっぱいに縦に並べ、1 枚を 1 ページにする（MCP の export_slides が PDF にする） */
+.present-print {
+  background: var(--surface-1);
+}
+.present-print .stage {
+  width: 100vw;
+  break-inside: avoid;
+}
+.present-print .stage + .stage {
+  break-before: page;
+}
+
 /* スライドの移動。マウスを乗せたときだけ出す（スライドの画像には写さない） */
 .present-nav {
   position: fixed;

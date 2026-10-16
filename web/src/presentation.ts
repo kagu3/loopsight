@@ -11,6 +11,11 @@ export function slideIndexFrom(search: string, count: number): number {
   return Math.max(0, Math.min(n, count) - 1);
 }
 
+/** アドレスに print=1 があれば、すべてのスライドを並べた印刷の形にする */
+export function isPrintFrom(search: string): boolean {
+  return new URLSearchParams(search).get("print") === "1";
+}
+
 /** 押したキーで、次に出すスライドの番号。関係ないキーなら undefined */
 export function nextSlide(key: string, index: number, count: number): number | undefined {
   if (count === 0) return undefined;

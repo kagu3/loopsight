@@ -175,7 +175,7 @@ function ok(data: unknown, compact = false): CallToolResult {
 function fail(e: unknown): CallToolResult {
   let body: { error: string; issues?: unknown[] };
   if (e instanceof ModelError) body = e.issues.length ? { error: e.message, issues: e.issues } : { error: e.message };
-  else if (e instanceof StoreError || e instanceof EditError || e instanceof ImportError) body = { error: e.message };
+  else if (e instanceof StoreError || e instanceof EditError || e instanceof ImportError || e instanceof BrowserNotFoundError) body = { error: e.message };
   else body = { error: `予期しないエラー: ${(e as Error)?.message ?? String(e)}` };
   return { isError: true, content: [{ type: "text", text: formatJSON(body) }] };
 }
@@ -246,6 +246,7 @@ b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 
    - 比較（compare）：比べる施策と要素、注目する時点。「何もしない場合」はいつも重なる
    - 結論（conclusion）：文章だけ
 c. view_slides でスライドを画像にして 1 枚ずつ確かめ、言いたいことがグラフから読み取れなければ直す。人はビューアの発表モード（http://localhost:5180/?view=present#<モデル名>）で ← → を押して見せる
+d. 資料を送るときは export_slides で PDF に書き出す（1 スライド 1 ページ。中身は止まった絵で、受け取った人は値を変えられない）
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -915,6 +916,48 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       } satisfies CallToolResult;
     }),
   );
+
+  server.registerTool(
+    "export_slides",
+    {
+      title: "会議資料を PDF に書き出す",
+      description:
+        "会議資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、1 スライド 1 ページの PDF に書き出す。" +
+        "ページは 16:9（13.33 × 7.5 インチ）で、文字のフォントを埋め込むので、ほかの PC でもそのまま開ける。中身は止まった絵で、受け取った人は値を変えられない。" +
+        "名前がモデルに合わないところ（errors）があれば書き出さない。書き出し先は作業フォルダの中（既定は exports/<モデル名>.pdf）。Edge か Chrome が必要。",
+      inputSchema: {
+        model: modelName,
+        path: z.string().optional().describe("作業フォルダからの相対パス（既定は exports/<モデル名>.pdf）"),
+      },
+    },
+    handle(async (a: { model: string; path?: string }) => {
+      const m = await store.read(a.model);
+      const read = await store.readSlidesText(a.model);
+      if (!read) throw new StoreError(`モデル "${a.model}" の筋書きがありません。set_slides で保存してください。`);
+      const deck = parseSlides(read.text);
+      const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
+      if (errors.length) throw new ModelError(`筋書きに直すところが ${errors.length} つあるため、書き出しませんでした。`, errors);
+      if (!deck.slides.length) throw new StoreError(`モデル "${a.model}" の筋書きにスライドがありません。`);
+      const rel = a.path ?? path.join("exports", `${a.model}.pdf`);
+      const file = store.resolveInside(rel.toLowerCase().endsWith(".pdf") ? rel : `${rel}.pdf`);
+      let pdf: Buffer;
+      try {
+        pdf = await renderSlidesPDF(store, a.model, deck.slides.length);
+      } catch (e) {
+        if (e instanceof BrowserNotFoundError) throw e;
+        throw new StoreError(`PDF にできませんでした: ${(e as Error).message}`);
+      }
+      await store.writeBinaryFile(file, pdf);
+      return {
+        model: a.model,
+        file,
+        pages: deck.slides.length,
+        slides: deck.slides.map((s, i) => `${i + 1}. ${SLIDE_KIND_LABEL[s.kind]}：${s.title}`),
+        warnings,
+        next_step: "このファイルを、そのまま会議の参加者に送れます。",
+      };
+    }),
+  );
 }
 
 /** ビルドした画面（dist/web）。ビルドしたものは dist/mcp/tools.js、テストではソースの src/mcp/tools.ts から探す */
@@ -961,6 +1004,38 @@ async function renderSlides(store: ModelStore, name: string, numbers: number[], 
         out.push(await browser.screenshot());
       }
       return out;
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await viewer.close();
+  }
+}
+
+/** PDF のページの大きさ（16:9）。1 インチは 96 px なので、発表モードを幅 1280 px で開いたときの 1 枚がちょうど 1 ページになる */
+const PDF_PAGE = { width: 1280, height: 720 };
+
+/** ビューアを一時的に起動し、ヘッドレスのブラウザで発表モードのスライドをすべて並べて、1 枚 1 ページの PDF にする */
+async function renderSlidesPDF(store: ModelStore, name: string, count: number): Promise<Buffer> {
+  if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
+  const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
+  try {
+    const browser = await launchBrowser();
+    try {
+      await browser.setViewport(PDF_PAGE.width, PDF_PAGE.height);
+      await browser.open(`${viewer.url}?view=present&print=1#${encodeURIComponent(name)}`, `document.querySelectorAll('.slide[data-ready="1"]').length === ${count}`);
+      await new Promise((r) => setTimeout(r, 400)); // グラフと図を描き終えるのを待つ
+      const { data } = await browser.send("Page.printToPDF", {
+        paperWidth: PDF_PAGE.width / 96,
+        paperHeight: PDF_PAGE.height / 96,
+        marginTop: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        marginRight: 0,
+        printBackground: true,
+        preferCSSPageSize: false,
+      });
+      return Buffer.from(data as string, "base64");
     } finally {
       await browser.close();
     }

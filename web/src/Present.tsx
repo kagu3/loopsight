@@ -5,7 +5,7 @@ import { fetchModel } from "./api.js";
 import { withActualPoints, type ChartRow } from "./actualPoints.js";
 import { CauseSlide } from "./CauseSlide.js";
 import { TIME_UNIT_LABEL, formatTime, formatValue } from "./Chart.js";
-import { KIND_LABEL, changeFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "./presentation.js";
+import { KIND_LABEL, changeFrom, isPrintFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "./presentation.js";
 import { BASELINE_NAME } from "./scenarios.js";
 
 // 発表モード（?view=present#<モデル名>）。会議で、SD を知らない人にスライドを順に見せる。
@@ -13,6 +13,7 @@ import { BASELINE_NAME } from "./scenarios.js";
 // 16:9 の枠に大きな文字で 1 枚ずつ出し、← → で進む。式や編集の欄、問題の一覧は出さない。グラフの縦軸は実際の値。
 // AI が筋書きやモデルを直すと、変更の知らせ（Server-Sent Events）で読み直して、その場で変わる。
 // 何枚目かはアドレスの slide= に入れる（読み直しても同じスライドから。MCP の view_slides もこれで切り替える）。
+// print=1 を付けると、すべてのスライドを縦に並べ、1 枚を 1 ページにして印刷できる形にする（MCP の export_slides が PDF にする）。
 
 /** 文字やグラフの大きさの基準にする枠の幅。実際の枠の幅との比で、グラフの文字も大きくする */
 const BASE_WIDTH = 1280;
@@ -28,6 +29,7 @@ export function Present() {
   const count = deck?.slides.length ?? 0;
   const [index, setIndex] = useState(() => slideIndexFrom(location.search, Number.MAX_SAFE_INTEGER));
   const shown = Math.min(index, Math.max(count - 1, 0));
+  const [print] = useState(() => isPrintFrom(location.search));
   const nameRef = useRef(name);
   nameRef.current = name;
   // 読み込みの番号。古い読み込みの結果が、あとから来ても使わない
@@ -91,6 +93,8 @@ export function Present() {
 
   const go = useCallback((i: number) => setIndex(i), []);
   useEffect(() => {
+    // 印刷の形では、キーでスライドを切り替えない
+    if (print) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key.toLowerCase() === "f") {
@@ -106,20 +110,19 @@ export function Present() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shown, count, go]);
+  }, [shown, count, go, print]);
 
-  // 枠の幅。グラフの文字の大きさを、枠に合わせて変えるため
-  const stageRef = useRef<HTMLDivElement>(null);
+  // 枠の幅。グラフの文字の大きさを、枠に合わせて変えるため（印刷の形では、並べた枠の幅はどれも同じ）
+  const [stage, setStage] = useState<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
   useLayoutEffect(() => {
-    const el = stageRef.current;
-    if (!el) return;
-    const update = () => setScale(el.clientWidth / BASE_WIDTH || 1);
+    if (!stage) return;
+    const update = () => setScale(stage.clientWidth / BASE_WIDTH || 1);
     update();
     const ro = new ResizeObserver(update);
-    ro.observe(el);
+    ro.observe(stage);
     return () => ro.disconnect();
-  }, []);
+  }, [stage]);
 
   useEffect(() => {
     const title = deck?.title || data?.model.name || name;
@@ -134,11 +137,21 @@ export function Present() {
     content = <StageMessage text={`このモデルには会議資料の筋書きがありません。AI に「会議資料を作って」と頼むと、筋書き（${name}.slides.json）ができて、ここに出ます。`} />;
   } else if (!deck) content = <StageMessage text={data.slides.issues[0]?.message ?? "筋書きを読めません。"} />;
   else if (!count) content = <StageMessage text="筋書きにスライドがありません。" />;
-  else content = <SlideView key={shown} deck={deck} index={shown} data={data} scale={scale} />;
+  else if (print) {
+    return (
+      <div className="present-print">
+        {deck.slides.map((_, i) => (
+          <div key={i} className="stage" ref={i === 0 ? setStage : undefined} style={{ "--u": scale } as CSSProperties}>
+            <SlideView deck={deck} index={i} data={data} scale={scale} />
+          </div>
+        ))}
+      </div>
+    );
+  } else content = <SlideView key={shown} deck={deck} index={shown} data={data} scale={scale} />;
 
   return (
     <div className="present">
-      <div className="stage" ref={stageRef} style={{ "--u": scale } as CSSProperties}>
+      <div className="stage" ref={setStage} style={{ "--u": scale } as CSSProperties}>
         {content}
       </div>
       {count > 0 && (
