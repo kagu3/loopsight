@@ -9,13 +9,14 @@ import {
   findScenario,
   numberOf,
   resultRows,
+  scenarioBadges,
   scenarioFormOf,
   scenarioPatchOf,
   valueRows,
   valueTargets,
   type ScenarioForm,
 } from "../web/src/scenarios.js";
-import { BASELINE_SCENARIO } from "../src/core/index.js";
+import { BASELINE_SCENARIO, clone, upsertElements } from "../src/core/index.js";
 
 const run: RunResult = { time_units: "years", times: [0, 1], series: { Pop: [100, 110] } };
 const scenario = (name: string, extra: Partial<ScenarioRunResult> = {}): ScenarioRunResult => ({
@@ -228,5 +229,45 @@ describe("施策の編集欄", () => {
     expect(() => scenarioPatchOf(undefined, before, form({ rows: [{ element: "Rate", value: "1" }, { element: "rate", value: "2" }] }), [])).toThrow(/2 行あります/);
     expect(() => scenarioPatchOf(undefined, before, form({ rows: [{ element: "Rate", value: " " }] }), [])).toThrow(/値が空/);
     expect(() => scenarioPatchOf(undefined, before, form({ rows: [{ element: "", value: "1" }] }), [])).toThrow(/1 行目の要素/);
+  });
+});
+
+describe("図の札（施策で変えた要素）", () => {
+  const model: ModelJSON = {
+    elements: [
+      { type: "STOCK", name: "Pop", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } },
+      { type: "FLOW", name: "Births", to: "Pop", behavior: { value: "[Pop]*[Rate]" } },
+      { type: "LINK", from: "Rate", to: "Births" },
+    ],
+  };
+
+  test("1 つの施策で変えた要素ごとに、いまの値 → 施策の値。ストックは初期値", () => {
+    const badges = scenarioBadges(model, { Pop: 200, rate: "0.3", Births: "[Pop]*0.2" });
+    expect([...badges.keys()]).toEqual(["pop", "rate", "births"]);
+    expect(badges.get("pop")).toMatchObject({ element: "Pop", initial: true, current: "100", value: "200", text: "100 → 200" });
+    expect(badges.get("pop")!.title).toBe("Popの初期値\nいまの値：100\n施策の値：200");
+    // 要素名の大文字と小文字は区別せず、モデルの表記で出す
+    expect(badges.get("rate")).toMatchObject({ element: "Rate", initial: false, text: "0.1 → 0.3" });
+    expect(badges.get("births")).toMatchObject({ text: "[Pop]*[Rate] → [Pop]*0.2", title: "Births\nいまの値：[Pop]*[Rate]\n施策の値：[Pop]*0.2" });
+  });
+
+  test("長い式は札では省略し、全文はツールチップに出す。複数行の式は 1 行にする", () => {
+    const long = "IfThenElse([Pop] > 1000,\n  [Pop]*0.01, 0)";
+    const b = scenarioBadges(model, { Births: long }).get("births")!;
+    expect(b.text).toBe("[Pop]*[Rate] → IfThenElse(…");
+    expect(b.title).toContain(long);
+  });
+
+  test("モデルにない要素は図に出ないので、札も作らない。何も変えていなければ空", () => {
+    expect([...scenarioBadges(model, { Nope: 1, Rate: 0.2 }).keys()]).toEqual(["rate"]);
+    expect(scenarioBadges(model, {}).size).toBe(0);
+  });
+
+  test("要素の名前を変えると、施策の値のキーが追従し、札は新しい名前の要素に付く", () => {
+    const m = clone({ ...model, scenarios: [{ name: "高い", values: { Rate: 0.2 } }] });
+    upsertElements(m, [{ type: "VARIABLE", name: "Rate", rename_to: "Growth" }]);
+    const badges = scenarioBadges(m, findScenario(m, "高い")!.values);
+    expect([...badges.values()].map((b) => [b.element, b.text])).toEqual([["Growth", "0.1 → 0.2"]]);
   });
 });

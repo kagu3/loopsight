@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
+import { nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
@@ -28,7 +29,8 @@ import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
-type NodeData = { g: GraphNode; selected: boolean; changed: boolean; dimmed: boolean; value?: string };
+// badge：施策に注目している間、その施策で変えた要素に付ける札（いまの値 → 施策の値）
+type NodeData = { g: GraphNode; selected: boolean; changed: boolean; dimmed: boolean; value?: string; badge?: ScenarioBadge };
 type EdgeData = { g: GraphEdge; selected: boolean; changed: boolean; dimmed: boolean; inLoop: boolean };
 type ModelNodeT = Node<NodeData, "model">;
 type ModelEdgeT = Edge<EdgeData, "floating">;
@@ -36,10 +38,24 @@ type ModelEdgeT = Edge<EdgeData, "floating">;
 const hidden = { opacity: 0, pointerEvents: "none" as const };
 
 function ModelNode({ data }: NodeProps<ModelNodeT>) {
-  const { g } = data;
-  const cls = ["node", `node-${g.kind.toLowerCase()}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : "", data.dimmed ? "is-dimmed" : ""].join(" ");
+  const { g, badge } = data;
+  const cls = [
+    "node",
+    `node-${g.kind.toLowerCase()}`,
+    data.selected ? "is-selected" : "",
+    data.changed ? "is-changed" : "",
+    data.dimmed ? "is-dimmed" : "",
+    badge ? "is-scenario" : "",
+  ].join(" ");
   return (
-    <div className={cls} style={{ width: g.width, height: g.height }} title={g.element}>
+    <div className={cls} style={{ width: g.width, height: g.height }} title={badge?.title ?? g.element}>
+      {/* 札は要素の上に出す。マウスは通す（札の下の要素や背景を押せるように）。全文は要素のツールチップで出す */}
+      {badge && (
+        <span className="scenario-badge">
+          {badge.initial && <small>初期値</small>}
+          {badge.text}
+        </span>
+      )}
       <Handle type="target" position={Position.Top} style={hidden} isConnectable={false} />
       <Handle type="source" position={Position.Bottom} style={hidden} isConnectable={false} />
       {g.kind === "VALVE" ? (
@@ -136,12 +152,21 @@ export interface DiagramProps {
    * 要素を選んでいても、こちらを優先する
    */
   loop?: LoopView;
+  /** 注目している施策（凡例にカーソルを乗せている・左の欄で直している）。変えた要素に札を付け、枠を施策の線の色にする */
+  scenario?: ScenarioMarks;
+}
+
+export interface ScenarioMarks {
+  /** 要素名（nameKey）→ 札 */
+  badges: Map<string, ScenarioBadge>;
+  /** 施策の線の色（CSS の色） */
+  color: string;
 }
 
 type Pos = { x: number; y: number };
 
 export function Diagram(props: DiagramProps) {
-  const { graph, selected, changed, values, onMove } = props;
+  const { graph, selected, changed, values, onMove, scenario } = props;
   // 要素が増えたり減ったりしたときも表示範囲を合わせ直す
   const nodeIds = useMemo(() => graph.nodes.map((n) => n.id).sort().join("|"), [graph]);
 
@@ -200,11 +225,14 @@ export function Diagram(props: DiagramProps) {
           changed: !!g.element && changed.has(g.element.toLowerCase()),
           dimmed: !!focus && !focus.nodes.has(g.id),
           value: g.kind === "STOCK" && g.element ? values[g.element] : undefined,
+          badge: g.element ? scenario?.badges.get(nameKey(g.element)) : undefined,
         },
+        // 札がほかの要素の下に隠れないように、札の付いた要素を上に重ねる
+        zIndex: g.element && scenario?.badges.has(nameKey(g.element)) ? 1 : undefined,
         draggable: g.kind !== "VALVE",
         connectable: false,
       })),
-    [placed, selected, changed, values, focus],
+    [placed, selected, changed, values, focus, scenario],
   );
 
   const onNodesChange = useCallback((changes: NodeChange<ModelNodeT>[]) => {
@@ -275,6 +303,8 @@ export function Diagram(props: DiagramProps) {
       colorMode="system"
       // ループの線の色（--loop）を R / B で変える
       className={props.loop ? `loop-${props.loop.kind.toLowerCase()}` : undefined}
+      // 札と枠の色（--scenario）は、注目している施策の線の色
+      style={scenario ? ({ "--scenario": scenario.color } as React.CSSProperties) : undefined}
       onNodesChange={onNodesChange}
       onNodeDragStop={onNodeDragStop}
       nodeDragThreshold={3}

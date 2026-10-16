@@ -180,6 +180,16 @@ try {
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("scenarios", ".results");
 
+  // 施策の凡例にカーソルを乗せて、図の変えた要素に札が付いたところ（4 つ目の「組み合わせる」）。
+  // 前の場面で変わった要素の枠が消えてから撮る（札の枠と紛らわしくないように）
+  await b.waitFor("!document.querySelector('.is-changed')");
+  await sleep(300);
+  const combined = await b.rectOf(".scenario-legend .scenario-chip:nth-child(4) .scenario-chip-button");
+  await b.hover(combined.x + combined.width / 2, combined.y + combined.height / 2);
+  await b.waitFor("document.querySelector('.scenario-badge')");
+  await sleep(200);
+  await shot("scenario-badges");
+
   // 施策の凡例を押して、左の欄で施策を直しているところ（保存せずに閉じる）
   await b.hover(W - 4, H - 4);
   // 施策名の横に変えた値の数も出るので、名前の部分で探す

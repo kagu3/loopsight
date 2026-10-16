@@ -759,6 +759,50 @@ button.link.danger-link {
 .node-cloud.is-dimmed .cloud-shape {
   stroke: color-mix(in srgb, var(--text-muted) 25%, var(--surface-1));
 }
+/* 施策に注目している間（凡例にカーソルを乗せている・左の欄で直している）：変えた要素に、施策の線の色（--scenario）の点線の枠と札を付ける。
+   枠は選んだときの枠や変わったときの枠（box-shadow）より外に、点線で描く（重なっても見分けられるように）。
+   札は要素の上に出す。色を自分で決めるので、要素が薄くなっていても読める。
+   札はマウスを通す（札が覆う下の要素や背景も、いつもどおり押せる・ドラッグできる） */
+.node.is-scenario {
+  --scenario-gap: 8px;
+  outline: 2px dashed var(--scenario);
+  outline-offset: var(--scenario-gap);
+}
+.node-valve.is-scenario {
+  --scenario-gap: 3px;
+  border-radius: 50%;
+}
+.node-valve.is-scenario .valve-label {
+  margin-top: 8px;
+}
+.node-valve.is-scenario .valve-label.side-right {
+  margin: 0 0 0 10px;
+}
+.scenario-badge {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: calc(var(--scenario-gap) + 5px);
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1.5px solid var(--scenario);
+  border-radius: 4px;
+  pointer-events: none;
+}
+.scenario-badge small {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
 /* ループを見せているとき：ループの線を太くし、R か B の色にする。リンクも実線にして、一周をたどりやすくする */
 .loop-r {
   --loop: var(--loop-r);

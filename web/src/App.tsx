@@ -2,13 +2,14 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
 import { fetchList, fetchModel, postEdit, postScenarios, postUndo, type WriteResult } from "./api.js";
-import { Chart, formatValue } from "./Chart.js";
+import { Chart, formatValue, scenarioColor } from "./Chart.js";
 import { Details } from "./Details.js";
-import { Diagram } from "./Diagram.js";
+import { Diagram, type ScenarioMarks } from "./Diagram.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { Problems } from "./Problems.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
+import { findScenario, scenarioBadges } from "./scenarios.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
@@ -80,6 +81,8 @@ export function App() {
   // 保存を待つあいだに、ほかのモデルや要素、施策を開いたかを確かめるため
   const scenarioRef = useRef(scenario);
   scenarioRef.current = scenario;
+  // グラフの上の施策の凡例にカーソルを乗せている施策
+  const [hoveredScenario, setHoveredScenario] = useState<string>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [updatedAt, setUpdatedAt] = useState<Date>();
   const [busy, setBusy] = useState(false);
@@ -210,6 +213,7 @@ export function App() {
     setData(undefined);
     setSelected(undefined);
     setScenario(undefined);
+    setHoveredScenario(undefined);
     setNotice(undefined);
     void loadModel(current);
   }, [current, loadModel]);
@@ -353,6 +357,17 @@ export function App() {
     for (const [k, v] of Object.entries(data?.run?.series ?? {})) out[k] = formatValue(v.at(-1));
     return out;
   }, [data]);
+  // 図の札：注目している施策（凡例にカーソルを乗せている施策、なければ左の欄で直している施策）で変えた要素に、保存してある値を出す
+  // 乗せたまま AI などが施策を消したり名前を変えたりして見つからなければ、直している施策に戻す
+  const scenarioMarks = useMemo<ScenarioMarks | undefined>(() => {
+    if (!data) return undefined;
+    const name = [hoveredScenario, scenario?.name].find((n) => n !== undefined && findScenario(data.model, n));
+    const s = name !== undefined ? findScenario(data.model, name) : undefined;
+    if (name === undefined || !s) return undefined;
+    // 色は施策の線の色。直している施策が実行できなかった・色が足りずに出していないときは、線がないので灰色にする
+    const color = (data.run && scenarioColor(data.run, data.scenarios ?? [], name)) ?? "var(--text-secondary)";
+    return { badges: scenarioBadges(data.model, s.values), color };
+  }, [data, hoveredScenario, scenario?.name]);
   // 名前は大文字と小文字を区別しない（AI が表記だけ変えても選んだままにする）
   const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
   const title = data?.model.name || current;
@@ -489,6 +504,7 @@ export function App() {
                 values={finalValues}
                 onSelect={selectElement}
                 onMove={move}
+                scenario={scenarioMarks}
               />
             </ReactFlowProvider>
           ) : (
@@ -506,6 +522,7 @@ export function App() {
               actual={data.actual}
               editingScenario={scenario?.name}
               onEditScenario={(name) => setScenario({ name })}
+              onFocusScenario={setHoveredScenario}
             />
           ) : data ? (
             <p className="muted pad">エラーがあるため実行できません。左の「問題」を見てください。</p>

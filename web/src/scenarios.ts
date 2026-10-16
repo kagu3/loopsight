@@ -167,7 +167,7 @@ export function resultRows(runs: CompareRun[], times: number[], elements: string
 // ここから、施策の編集欄（ScenarioEditor）の計算。送る変更は MCP の set_scenarios と同じ形にする
 
 /** 名前は大文字と小文字、前後の空白を区別しない（サーバーの sameName と同じ） */
-const nameKey = (name: string) => name.trim().toLowerCase();
+export const nameKey = (name: string) => name.trim().toLowerCase();
 
 /** 施策の名前。名前のない施策は、サーバーと同じく「scenario 1」のように呼ぶ */
 export const scenarioName = (s: Scenario, i: number) => s.name ?? `scenario ${i + 1}`;
@@ -267,4 +267,49 @@ export function scenarioPatchOf(original: string | undefined, before: ScenarioFo
   for (const r of before.rows) if (!kept.has(nameKey(r.element))) values[r.element] = null;
   if (Object.keys(values).length) patch.values = values;
   return Object.keys(patch).length > 1 ? patch : undefined;
+}
+
+// ここから、施策に注目している間（凡例にカーソルを乗せている・左の欄で直している）に、図の変えた要素に付ける札の計算
+
+/** 図の札 1 つ分 */
+export interface ScenarioBadge {
+  /** 要素の名前（モデルの表記） */
+  element: string;
+  /** ストック（いまの値・施策の値は初期値） */
+  initial: boolean;
+  /** いまの値（何もしない場合）。値のない要素なら空文字 */
+  current: string;
+  /** 施策の値 */
+  value: string;
+  /** 札に出す文字（「20 → 80」。長い式は省略する） */
+  text: string;
+  /** 全文（ツールチップ） */
+  title: string;
+}
+
+/** 札の中で、値 1 つに使う文字数。これより長い式は省略する */
+const BADGE_VALUE_CHARS = 12;
+/** 札に出す値。1 行にし（複数行の式は空白でつなぐ）、長ければ省略する */
+function badgeValue(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > BADGE_VALUE_CHARS ? `${line.slice(0, BADGE_VALUE_CHARS - 1)}…` : line;
+}
+
+/**
+ * 施策で変えた要素の札。要素名（nameKey）→ 札。
+ * 値は施策に保存してある値（編集欄で入れている途中の値ではない）。モデルにない要素は図に出ないので除く
+ */
+export function scenarioBadges(model: ModelJSON, values: Record<string, Equation>): Map<string, ScenarioBadge> {
+  const out = new Map<string, ScenarioBadge>();
+  for (const [key, v] of Object.entries(values)) {
+    const el = model.elements.find((e) => e.type !== "LINK" && e.name && nameKey(e.name) === nameKey(key));
+    if (!el?.name) continue;
+    const initial = el.type === "STOCK";
+    const current = currentValueOf(model, el.name) ?? "";
+    const value = String(v).trim();
+    const text = `${badgeValue(current) || "—"} → ${badgeValue(value)}`;
+    const title = [`${el.name}${initial ? "の初期値" : ""}`, `いまの値：${current.trim() || "—"}`, `施策の値：${value}`].join("\n");
+    out.set(nameKey(el.name), { element: el.name, initial, current, value, text, title });
+  }
+  return out;
 }

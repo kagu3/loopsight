@@ -126,16 +126,26 @@ export interface ChartProps {
   editingScenario?: string;
   /** 施策の編集欄を開く。name がなければ施策を足す */
   onEditScenario?(name?: string): void;
+  /** 施策の凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「何もしない場合」では呼ばない */
+  onFocusScenario?(name: string | undefined): void;
 }
 
 /** 「何もしない場合」の線の色と点線 */
 const BASELINE_COLOR = "var(--text-muted)";
 const BASELINE_DASH = "4 4";
 const runColor = (r: CompareRun, k: number) => (r.baseline ? BASELINE_COLOR : `var(${SLOTS[(k - 1) % SLOTS.length]})`);
+
+/** 施策の線の色（凡例と同じ）。実行できなかった施策と、色が足りずに出さない施策は undefined */
+export function scenarioColor(run: RunResult, scenarios: ScenarioRunResult[], name: string): string | undefined {
+  const runs = compareRuns(run, scenarios, MAX_SERIES).runs;
+  const k = runs.findIndex((r) => !r.baseline && r.name.toLowerCase() === name.toLowerCase());
+  return k > 0 ? runColor(runs[k]!, k) : undefined;
+}
+
 /** 施策を重ねているときの、実際のデータの点の色 */
 const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
-export function Chart({ modelName, model, run, scenarios, actual, editingScenario, onEditScenario }: ChartProps) {
+export function Chart({ modelName, model, run, scenarios, actual, editingScenario, onEditScenario, onFocusScenario }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
   const [visible, setVisible] = useState<string[]>(() => defaultVisible(model, names));
@@ -312,6 +322,7 @@ export function Chart({ modelName, model, run, scenarios, actual, editingScenari
           unit={unit}
           editing={editingScenario}
           onEdit={onEditScenario}
+          onFocus={onFocusScenario}
         />
       )}
 
@@ -462,6 +473,7 @@ function ScenarioLegend({
   unit,
   editing,
   onEdit,
+  onFocus,
 }: {
   compare: CompareRuns;
   model: ModelJSON;
@@ -473,8 +485,11 @@ function ScenarioLegend({
   unit: string;
   editing?: string;
   onEdit?(name?: string): void;
+  onFocus?(name: string | undefined): void;
 }) {
   const [open, setOpenState] = useState(loadMatrixOpen);
+  // カーソルを乗せたまま凡例が消えたら（重ねない・別のモデル）、外したことにする
+  useEffect(() => () => onFocus?.(undefined), [onFocus]);
   const [showAll, setShowAll] = useState(false);
   const setOpen = (o: boolean) => {
     setOpenState(o);
@@ -495,6 +510,11 @@ function ScenarioLegend({
     );
   // 凡例の 1 つ分。閉じているときは帯に並べ、開いているときは表の列の見出しにする（見出しにイベントを足すときは、ここに足す）
   const chip = (r: CompareRun, k: number) => {
+    // カーソルを乗せている間（キーボードで選んでいる間も）、図の変えた要素に札を付ける
+    const focus =
+      r.baseline || !onFocus
+        ? {}
+        : { onMouseEnter: () => onFocus(r.name), onMouseLeave: () => onFocus(undefined), onFocus: () => onFocus(r.name), onBlur: () => onFocus(undefined) };
     const label = (
       <>
         <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
@@ -508,9 +528,11 @@ function ScenarioLegend({
       </>
     );
     return r.baseline || !onEdit ? (
-      <span className="scenario-chip-label">{label}</span>
+      <span className="scenario-chip-label" {...focus}>
+        {label}
+      </span>
     ) : (
-      <button className={`scenario-chip-button ${isEditing(r.name) ? "on" : ""}`} onClick={() => onEdit(r.name)} aria-pressed={isEditing(r.name)}>
+      <button className={`scenario-chip-button ${isEditing(r.name) ? "on" : ""}`} onClick={() => onEdit(r.name)} aria-pressed={isEditing(r.name)} {...focus}>
         {label}
       </button>
     );
