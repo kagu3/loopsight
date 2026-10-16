@@ -112,5 +112,21 @@
         "Population"
       ]
     }
+  ],
+  "scenarios": [
+    {
+      "name": "家族計画の支援",
+      "values": {
+        "Birth Rate": 0.02
+      },
+      "description": "相談窓口と支援を広げて、出生率を 3% から 2% に下げる"
+    },
+    {
+      "name": "少しずつ支援する",
+      "values": {
+        "Birth Rate": 0.025
+      },
+      "description": "支援を少しずつ広げて、出生率を 2.5% に下げる"
+    }
   ]
 }

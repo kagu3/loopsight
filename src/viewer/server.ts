@@ -9,13 +9,16 @@ import {
   StoreError,
   checkActualData,
   checkModelName,
+  checkSlides,
   namesByElement,
   parseDataCSV,
+  parseSlides,
   renamesSince,
   runScenarios,
   upsertElements,
   validateModel,
   versionOf,
+  type ActualData,
   type ModelJSON,
   type RunData,
 } from "../core/index.js";
@@ -30,6 +33,7 @@ import {
   type ModelResponse,
   type RunResult,
   type ScenarioRunResult,
+  type SlidesResult,
   type UndoRequest,
 } from "./api.js";
 
@@ -116,12 +120,14 @@ async function modelResponse(store: ModelStore, name: string, model: ModelJSON, 
     }
   }
   const actual = await actualData(store, name, model);
-  if (actual) res.actual = actual;
+  if (actual) res.actual = actual.result;
+  const slides = await slidesResult(store, name, model, actual?.data);
+  if (slides) res.slides = slides;
   return res;
 }
 
-/** 実際のデータを読み、要素に合う列だけを要素名で返す。CSV がなければ undefined */
-async function actualData(store: ModelStore, name: string, model: ModelJSON): Promise<ActualDataResult | undefined> {
+/** 実際のデータを読み、要素に合う列だけを要素名で返す。CSV がなければ undefined。data は読めたときの中身（筋書きの確認に使う） */
+async function actualData(store: ModelStore, name: string, model: ModelJSON): Promise<{ result: ActualDataResult; data?: ActualData } | undefined> {
   const text = await store.readData(name);
   if (text === undefined) return undefined;
   const res: ActualDataResult = { file: path.basename(store.dataPathOf(name)), version: versionOf(text), times: [], series: {}, issues: [] };
@@ -131,13 +137,30 @@ async function actualData(store: ModelStore, name: string, model: ModelJSON): Pr
     res.times = data.times;
     const names = new Set(model.elements.filter((e) => e.type !== "LINK" && e.name).map((e) => e.name!));
     for (const c of data.columns) if (names.has(c.name)) res.series[c.name] = c.values;
+    return { result: res, data };
   } catch (e) {
     res.issues = [{ message: `実際のデータ（${res.file}）を読めません: ${(e as Error).message}` }];
+    return { result: res };
+  }
+}
+
+/** 会議資料の筋書きを読み、モデルに合うか確かめて返す。ファイルがなければ undefined */
+async function slidesResult(store: ModelStore, name: string, model: ModelJSON, data: ActualData | undefined): Promise<SlidesResult | undefined> {
+  const read = await store.readSlidesText(name);
+  if (!read) return undefined;
+  const res: SlidesResult = { file: path.basename(store.slidesPathOf(name)), version: read.version, issues: [] };
+  try {
+    const deck = parseSlides(read.text);
+    const { errors, warnings } = checkSlides(model, deck, data);
+    res.deck = deck;
+    res.issues = [...errors, ...warnings];
+  } catch (e) {
+    res.issues = [{ slide: 0, message: `筋書き（${res.file}）を読めません: ${(e as Error).message}` }];
   }
   return res;
 }
 
-/** 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版、renamed は変えた名前（実際のデータの列名も戻すため） */
+/** 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版、renamed は変えた名前（実際のデータの列名と筋書きの中の名前も戻すため） */
 interface HistoryEntry {
   before: string;
   after: string;
@@ -206,21 +229,22 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
   const pending = new Map<string, NodeJS.Timeout>();
   let watcher: FSWatcher | undefined;
   const notify = (file: string) => {
-    // 実際のデータ（<モデル名>.data.csv）が変わったら、そのモデルが変わったと知らせる
-    const isData = file.toLowerCase().endsWith(".data.csv");
-    if (!isData && !file.toLowerCase().endsWith(".json")) return;
-    const name = isData ? file.slice(0, -".data.csv".length) : file.replace(/\.json$/i, "");
+    // 実際のデータ（<モデル名>.data.csv）や筋書き（<モデル名>.slides.json）が変わったら、そのモデルが変わったと知らせる
+    const lower = file.toLowerCase();
+    const suffix = [".data.csv", ".slides.json"].find((x) => lower.endsWith(x));
+    if (!suffix && !lower.endsWith(".json")) return;
+    const name = suffix ? file.slice(0, -suffix.length) : file.replace(/\.json$/i, "");
     clearTimeout(pending.get(name));
     pending.set(
       name,
       setTimeout(async () => {
         pending.delete(name);
-        const exists = await stat(path.join(store.dir, isData ? `${name}.json` : file)).then(
+        const exists = await stat(path.join(store.dir, suffix ? `${name}.json` : file)).then(
           () => true,
           () => false,
         );
-        // CSV だけがあってモデルがなければ、知らせない（モデルが消えたわけではない）
-        if (isData && !exists) return;
+        // CSV や筋書きだけがあってモデルがなければ、知らせない（モデルが消えたわけではない）
+        if (suffix && !exists) return;
         const event: ChangeEvent = { type: exists ? "changed" : "removed", name };
         for (const c of clients) c.write(`data: ${JSON.stringify(event)}\n\n`);
       }, 150),
@@ -292,8 +316,11 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           if (hist.length > HISTORY_LIMIT) hist.shift();
           const data = await store.renameDataColumns(name, renamed);
           if (data.note) report.notes.push(data.note);
+          const slides = await store.renameSlideNames(name, { elements: renamed });
+          if (slides.note) report.notes.push(slides.note);
+          const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
           const model = await modelResponse(store, name, current.model, version, hist.length);
-          return [200, data.warning ? { report, model, warning: data.warning } : { report, model }];
+          return [200, warning ? { report, model, warning } : { report, model }];
         }
         const last = hist.at(-1);
         if (!last) throw new HttpError(400, "元に戻せる変更がありません。");
@@ -303,9 +330,12 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         }
         hist.pop();
         await store.writeVersioned(name, { text: last.before });
-        const data = await store.renameDataColumns(name, last.renamed.map(([from, to]) => [to, from]));
+        const back = last.renamed.map(([from, to]): [string, string] => [to, from]);
+        const data = await store.renameDataColumns(name, back);
+        const slides = await store.renameSlideNames(name, { elements: back });
+        const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
         const model = await loadModelResponse(store, name, hist.length);
-        return [200, data.warning ? { model, warning: data.warning } : { model }];
+        return [200, warning ? { model, warning } : { model }];
       });
       sendJSON(res, result[0], result[1]);
     } catch (e) {

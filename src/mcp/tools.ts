@@ -10,6 +10,7 @@ import {
   BASELINE_SCENARIO,
   EDITABLE_TYPES,
   EditError,
+  LOOP_POLARITIES,
   ImportError,
   ModelError,
   ModelStore,
@@ -19,6 +20,7 @@ import {
   addDefaultVisualization,
   checkActualData,
   checkDiagram,
+  checkSlides,
   compareScenarios,
   dataToCSV,
   emptyModel,
@@ -26,12 +28,15 @@ import {
   layoutModel,
   modelScenarios,
   namesByElement,
+  namesByScenario,
   parseDataCSV,
+  parseSlides,
   removeElements,
   renamesSince,
   resolveTargets,
   runModel,
   runToCSV,
+  scenarioRenamesSince,
   setScenarios,
   setSimulation,
   staticCheck,
@@ -39,9 +44,12 @@ import {
   summarizeRun,
   sweepParameter,
   sweepValues,
+  toSlideDeck,
   upsertElements,
   validateModel,
   withBaseline,
+  SLIDE_KIND_LABEL,
+  type ActualData,
   type ElementPatch,
   type ModelJSON,
   type ScenarioPatch,
@@ -85,6 +93,42 @@ const elementPatch = z.object({
     .optional()
     .describe("表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標は書き出し時に自動で付く"),
 });
+
+const slideText = {
+  title: z.string().describe("見出し"),
+  message: z.string().describe("言いたいこと（1 文）。SD を知らない人に伝わる言葉で、グラフから読み取れることを書く"),
+};
+const slideNames = (what: string) => z.array(z.string()).describe(`${what}（4 つまで）`);
+const slide = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("problem").describe("問題"),
+    ...slideText,
+    elements: slideNames("注目する要素の名前"),
+    data: z.array(z.string()).optional().describe("点で重ねる実際のデータ（<モデル名>.data.csv）の列名。省略すると、注目する要素のうちデータのあるものすべて"),
+    now: z.number().optional().describe("「今」の時点（モデルの時刻）。グラフに縦の線を引く"),
+  }),
+  z.object({
+    kind: z.literal("cause").describe("原因"),
+    ...slideText,
+    loop: z.object({
+      elements: z.array(z.string()).describe("ループを作る要素の名前。ループをひと回りする順に並べる"),
+      polarity: z.enum(LOOP_POLARITIES).describe("R は強めるループ、B は釣り合わせるループ"),
+    }),
+  }),
+  z.object({
+    kind: z.literal("solution").describe("解決案"),
+    ...slideText,
+    scenario: z.string().describe("施策（set_scenarios で保存したシナリオ）の名前。説明と変える値はシナリオから出す"),
+  }),
+  z.object({
+    kind: z.literal("compare").describe("比較"),
+    ...slideText,
+    scenarios: z.array(z.string()).describe(`比べる施策の名前。「${BASELINE_SCENARIO}」はいつも重ねるので並べなくてよい`),
+    elements: slideNames("比べる要素の名前"),
+    at: z.number().optional().describe("注目する時点（モデルの時刻）。その時点の値を並べて出す"),
+  }),
+  z.object({ kind: z.literal("conclusion").describe("結論（文章だけ）"), ...slideText }),
+]);
 
 // ---- 共通の処理 ----
 
@@ -180,6 +224,16 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 5. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
 6. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
+「会議資料を作って」と頼まれたら（SD を知らない人に、問題と解決案を順に見せる資料）:
+a. get_model と run_simulation でモデルの振る舞いを確かめる。実際のデータ（実績）があれば import_data で取り込む。比べる施策がなければ set_scenarios で保存する（description に、どんな施策かを書く）
+b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 比較 → 結論 の順に並べ、どのスライドにも見出しと「言いたいこと」の 1 文を書く。式や SD の用語は使わず、グラフから読み取れることを書く
+   - 問題（problem）：注目する要素、実際のデータ、「今」の時点。モデルの線に実際のデータの点が重なり、モデルが問題を再現していることを見せる
+   - 原因（cause）：問題を生むループを作る要素の名前と、強めるループ（R）か釣り合わせるループ（B）か。ループごとに 1 枚
+   - 解決案（solution）：施策の名前。施策ごとに 1 枚
+   - 比較（compare）：比べる施策と要素、注目する時点。「何もしない場合」はいつも重なる
+   - 結論（conclusion）：文章だけ
+c. view_slides でスライドを画像にして 1 枚ずつ確かめ、言いたいことがグラフから読み取れなければ直す。人はビューアの発表モード（http://localhost:5180/?view=present#<モデル名>）で ← → を押して見せる
+
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
 
@@ -191,6 +245,33 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     const file = await store.write(name, model);
     const validation = validateModel(model);
     return { model: name, file, ...extra, validation };
+  }
+
+  /** 実際のデータを読む。ないときや読めないときは undefined（筋書きの確認では「データがない」として扱う） */
+  async function readActualData(name: string): Promise<ActualData | undefined> {
+    const text = await store.readData(name);
+    if (text === undefined) return undefined;
+    try {
+      return parseDataCSV(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 要素や施策を消したり、期間や実際のデータを変えたりしたあと、筋書きがモデルに合わなくなっていれば slides_issues で知らせる。
+   * 直さないと見せられないもの（errors）と、確かめたほうがよいもの（warnings。時点が期間の外など）の両方を入れる
+   */
+  async function slidesAfterEdit(name: string, model: ModelJSON): Promise<{ slides_issues?: unknown[] }> {
+    const read = await store.readSlidesText(name);
+    if (!read) return {};
+    try {
+      const { errors, warnings } = checkSlides(model, parseSlides(read.text), await readActualData(name));
+      const issues = [...errors, ...warnings];
+      return issues.length ? { slides_issues: issues } : {};
+    } catch {
+      return {};
+    }
   }
 
   server.registerTool(
@@ -416,9 +497,13 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       const report = upsertElements(m, a.elements, { autoLink: a.auto_link });
       const result = await saveAndCheck(a.model, m, { changes: report });
       // CSV を直せなくても、モデルはもう保存してあるので成功として返し、知らせだけ添える
-      const data = await store.renameDataColumns(a.model, renamesSince(m, before));
+      const renamed = renamesSince(m, before);
+      const data = await store.renameDataColumns(a.model, renamed);
       if (data.note) report.notes.push(data.note);
       if (data.warning) report.notes.push(data.warning);
+      const slides = await store.renameSlideNames(a.model, { elements: renamed });
+      if (slides.note) report.notes.push(slides.note);
+      if (slides.warning) report.notes.push(slides.warning);
       return result;
     }),
   );
@@ -442,7 +527,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     handle(async (a: { model: string; elements: { name?: string; from?: string; to?: string }[]; cascade_flows?: boolean }) => {
       const m = await store.read(a.model);
       const report = removeElements(m, a.elements, { cascadeFlows: a.cascade_flows });
-      return saveAndCheck(a.model, m, { changes: report });
+      return saveAndCheck(a.model, m, { changes: report, ...(await slidesAfterEdit(a.model, m)) });
     }),
   );
 
@@ -457,7 +542,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       const { model, ...patch } = a;
       const m = await store.read(model);
       const sim = setSimulation(m, patch);
-      return saveAndCheck(model, m, { simulation: sim });
+      return saveAndCheck(model, m, { simulation: sim, ...(await slidesAfterEdit(model, m)) });
     }),
   );
 
@@ -491,6 +576,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     handle(async (a: { model: string; scenarios?: ScenarioPatch[]; remove?: string[]; replace?: boolean; elements?: string[] }) => {
       if (!a.scenarios?.length && !a.remove?.length && !a.replace) throw new EditError("scenarios か remove を指定してください。");
       const m = await store.read(a.model);
+      const before = namesByScenario(m);
       const report = setScenarios(m, a.scenarios ?? [], { remove: a.remove, replace: a.replace });
       const extra: Record<string, unknown> = { changes: report, scenarios: m.scenarios ?? [] };
       // 実行できないシナリオは保存しない（エラーのあるモデルは、検証結果で知らせる）
@@ -498,7 +584,12 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         const { targets: names, time_units, rows } = compareScenarios(m, withBaseline(modelScenarios(m)), { targets: a.elements });
         extra.comparison = { targets: names, time_units, rows };
       }
-      return saveAndCheck(a.model, m, extra);
+      const result = await saveAndCheck(a.model, m, extra);
+      // 施策の名前を変えたら、筋書きの中の名前も直す（モデルはもう保存してあるので、直せなくても知らせだけ添える）
+      const slides = await store.renameSlideNames(a.model, { scenarios: scenarioRenamesSince(m, before) });
+      if (slides.note) report.notes.push(slides.note);
+      if (slides.warning) report.notes.push(slides.warning);
+      return { ...result, ...(await slidesAfterEdit(a.model, m)) };
     }),
   );
 
@@ -650,7 +741,94 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         rows: data.times.length,
         ...(data.times.length ? { time_range: [data.times[0], data.times.at(-1)] } : {}),
         warnings,
+        // 差し替えたデータで、筋書きの問題のスライドが使う列がなくなっていないか
+        ...(await slidesAfterEdit(a.model, m)),
       };
+    }),
+  );
+
+  server.registerTool(
+    "set_slides",
+    {
+      title: "会議資料の筋書きを保存する",
+      description:
+        "会議資料の筋書きを作業フォルダの <モデル名>.slides.json に保存する（今の筋書きはすべて置き換える）。ビューアの発表モードで、スライドを順に見せる。" +
+        "スライドの種類は problem（問題）、cause（原因）、solution（解決案）、compare（比較）、conclusion（結論）で、この順に並べる。どのスライドにも title（見出し）と message（言いたいこと 1 文）を書く。" +
+        "要素名、施策の名前、実際のデータの列名が実在するかを確かめ、合わなければ保存せずに issues（何枚目の何が合わないか、「もしかして」）を返す。" +
+        "要素や施策の名前を upsert_elements や set_scenarios で変えると、筋書きの中の名前も直す。保存したら view_slides で画像を見て確かめる。",
+      inputSchema: {
+        model: modelName,
+        title: z.string().optional().describe("資料の題"),
+        slides: z.array(slide).min(1).describe("スライドの並び"),
+        version: z.string().optional().describe("前に view_slides で読んだ筋書きの版。渡すと、そのあとにほかで筋書きが変わっていたら保存しない"),
+      },
+    },
+    handle(async (a: { model: string; title?: string; slides: unknown[]; version?: string }) => {
+      const m = await store.read(a.model);
+      const current = await store.readSlidesText(a.model);
+      if (a.version !== undefined && current?.version !== a.version) {
+        throw new StoreError(
+          `筋書きは、読んだあとにほかのところで変わっています（いまの版: ${current?.version ?? "なし"}）。view_slides で読み直してから保存してください。`,
+        );
+      }
+      const deck = toSlideDeck({ title: a.title, slides: a.slides });
+      const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
+      if (errors.length) throw new ModelError(`筋書きに直すところが ${errors.length} つあるため、保存しませんでした。`, errors);
+      const { file, version } = await store.writeSlides(a.model, deck);
+      return {
+        model: a.model,
+        file,
+        version,
+        slides: deck.slides.map((s, i) => `${i + 1}. ${SLIDE_KIND_LABEL[s.kind]}：${s.title}`),
+        warnings,
+        next_step: `view_slides でスライドを画像にして確かめてください。人はビューアの発表モード（?view=present#${a.model}）で見られます。`,
+      };
+    }),
+  );
+
+  server.registerTool(
+    "view_slides",
+    {
+      title: "スライドを見る",
+      description:
+        "会議資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で 1 枚ずつ PNG の画像にして返す。" +
+        "あわせて、筋書きの中身と版、名前がモデルに合わないところ（errors）と確かめたほうがよいところ（warnings）を返す。" +
+        "画像には Edge か Chrome が必要（なければ image: false と同じで、中身だけ返す）。",
+      inputSchema: {
+        model: modelName,
+        slides: z.array(z.number().int().min(1)).optional().describe("画像にするスライドの番号（1 から）。省略するとすべて"),
+        image: z.boolean().optional().describe("画像を付ける（既定は true）。中身だけでよければ false"),
+        width: z.number().int().min(640).max(3840).optional().describe("画像の幅（既定 1280。高さは 16:9 にする）"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    handle(async (a: { model: string; slides?: number[]; image?: boolean; width?: number }) => {
+      const m = await store.read(a.model);
+      const read = await store.readSlidesText(a.model);
+      if (!read) throw new StoreError(`モデル "${a.model}" の筋書きがありません。set_slides で保存してください。`);
+      const deck = parseSlides(read.text);
+      const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
+      const numbers = a.slides?.length ? [...new Set(a.slides)] : deck.slides.map((_, i) => i + 1);
+      const missing = numbers.filter((n) => n > deck.slides.length);
+      if (missing.length) throw new StoreError(`スライド ${missing.join(", ")} はありません（筋書きは ${deck.slides.length} 枚）。`);
+      const info = { model: a.model, file: store.slidesPathOf(a.model), version: read.version, ...deck, errors, warnings };
+      if (a.image === false || numbers.length === 0) return info;
+      const width = a.width ?? 1280;
+      let images: Buffer[];
+      try {
+        images = await renderSlides(store, a.model, numbers, width, Math.round((width * 9) / 16));
+      } catch (e) {
+        return { ...info, image_error: e instanceof BrowserNotFoundError ? e.message : `スライドを画像にできませんでした: ${(e as Error).message}` };
+      }
+      return {
+        content: [
+          { type: "text", text: formatJSON(info) },
+          ...images.flatMap((png, i) => [
+            { type: "text" as const, text: `スライド ${numbers[i]}` },
+            { type: "image" as const, data: png.toString("base64"), mimeType: "image/png" },
+          ]),
+        ],
+      } satisfies CallToolResult;
     }),
   );
 }
@@ -677,3 +855,31 @@ async function renderDiagram(store: ModelStore, name: string, width: number, hei
   }
 }
 
+/** ビューアを一時的に起動し、ヘッドレスのブラウザで発表モードのスライドを 1 枚ずつ PNG にする */
+async function renderSlides(store: ModelStore, name: string, numbers: number[], width: number, height: number): Promise<Buffer[]> {
+  if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
+  const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
+  try {
+    const browser = await launchBrowser();
+    try {
+      await browser.setViewport(width, height);
+      const ready = (n: number) => `document.querySelector('.slide[data-index="${n}"][data-ready="1"]')`;
+      await browser.open(`${viewer.url}?view=present&slide=${numbers[0]}#${encodeURIComponent(name)}`, ready(numbers[0]!));
+      const out: Buffer[] = [];
+      for (const n of numbers) {
+        // 開き直さずに、アドレスの slide= を変えて切り替える（ページを開き直すたびにビューアへのつながりが増えないように）
+        await browser.evaluate(
+          `(() => { const u = new URL(location.href); u.searchParams.set("slide", "${n}"); history.replaceState(null, "", u); dispatchEvent(new PopStateEvent("popstate")); })()`,
+        );
+        await browser.waitFor(ready(n));
+        await new Promise((r) => setTimeout(r, 400)); // グラフと図を描き終えるのを待つ
+        out.push(await browser.screenshot());
+      }
+      return out;
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await viewer.close();
+  }
+}

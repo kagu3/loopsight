@@ -126,7 +126,12 @@ export function App() {
           return;
         }
         const prev = dataRef.current;
-        if (prev?.name === next.name && prev.version === next.version && prev.actual?.version === next.actual?.version) {
+        if (
+          prev?.name === next.name &&
+          prev.version === next.version &&
+          prev.actual?.version === next.actual?.version &&
+          prev.slides?.version === next.slides?.version
+        ) {
           // 中身は同じ（画面から書き込んだ結果の知らせなど）。元に戻せる回数だけ変わることがある（サーバーを起動し直したときなど）
           if (prev.undo_available !== next.undo_available) show(next, false);
           return;
@@ -373,6 +378,19 @@ export function App() {
           {graph && data && (
             <div className="toolbar-right">
               {graph.missingCoordinates && <span className="note">座標のない要素を仮に並べています。動かすと、この配置を保存します</span>}
+              <a
+                className="toolbar-button"
+                href={`?view=present#${encodeURIComponent(data.name)}`}
+                target="_blank"
+                rel="noopener"
+                title={
+                  data.slides
+                    ? "会議資料の筋書きを、発表モードで別のタブに開きます（← → で進む）"
+                    : "会議資料の筋書きはまだありません。AI に「会議資料を作って」と頼むと、発表モードで見られます"
+                }
+              >
+                ▶ 発表
+              </a>
               <button
                 className="toolbar-button"
                 onClick={() => void undo()}

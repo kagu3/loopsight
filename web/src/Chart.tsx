@@ -17,7 +17,7 @@ import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 export const MAX_SERIES = 8;
 const SLOTS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
 
-const TIME_UNIT_LABEL: Record<string, string> = {
+export const TIME_UNIT_LABEL: Record<string, string> = {
   seconds: "秒",
   minutes: "分",
   hours: "時間",
@@ -35,7 +35,7 @@ export function formatValue(v: number | null | undefined): string {
 }
 
 /** 時刻は桁区切りなし（2014.5 年のように） */
-function formatTime(t: number | null | undefined): string {
+export function formatTime(t: number | null | undefined): string {
   if (t === null || t === undefined || !Number.isFinite(t)) return "—";
   return t.toLocaleString("ja-JP", { useGrouping: false, maximumFractionDigits: 4 });
 }

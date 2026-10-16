@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ModelJSON } from "./modeljson.js";
 import { renameDataHeader } from "./data.js";
+import { parseSlides, renameInSlides, type SlideDeck } from "./slides.js";
 
 export class StoreError extends Error {
   override name = "StoreError";
@@ -28,7 +29,10 @@ export function checkModelName(name: string): string {
   if (/[\\/:*?"<>|\x00-\x1f]/.test(n) || n === "." || n === ".." || n.startsWith(".")) {
     throw new StoreError(`モデル名 "${name}" には使えない文字が含まれています（/ \\ : * ? " < > | と先頭の . は使えません）。`);
   }
-  return n.replace(/\.json$/i, "");
+  const base = n.replace(/\.json$/i, "");
+  // <モデル名>.slides.json は筋書きのファイルなので、モデルの名前には使わせない
+  if (/\.slides$/i.test(base)) throw new StoreError(`モデル名 "${name}" は使えません（終わりの .slides は筋書きのファイルに使います）。`);
+  return base;
 }
 
 /** ファイルの中身から版を作る（中身が同じなら同じ版） */
@@ -99,6 +103,49 @@ export class ModelStore {
     }
   }
 
+  /** 会議資料の筋書きのファイル（<モデル名>.slides.json）。モデルの一覧には出さない */
+  slidesPathOf(name: string): string {
+    return path.join(this.dir, `${checkModelName(name)}.slides.json`);
+  }
+
+  /** 筋書きのファイルの中身と版を読む。なければ undefined。版はモデルとは別に持つ */
+  async readSlidesText(name: string): Promise<{ text: string; version: string } | undefined> {
+    try {
+      const text = await readFile(this.slidesPathOf(name), "utf8");
+      return { text, version: versionOf(text) };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 筋書きを書いて、ファイルと版を返す */
+  async writeSlides(name: string, deck: SlideDeck): Promise<{ file: string; version: string }> {
+    const text = JSON.stringify(deck, null, 2) + "\n";
+    const file = await this.writeTextFile(this.slidesPathOf(name), text);
+    return { file, version: versionOf(text) };
+  }
+
+  /**
+   * 要素や施策の名前を変えたときに、筋書きの中の名前も直す。例外は投げず、知らせる文を返す（renameDataColumns と同じ）。
+   * 筋書きがないときや、合う名前がないときは何も返さない
+   */
+  async renameSlideNames(name: string, renames: { elements?: [string, string][]; scenarios?: [string, string][] }): Promise<{ note?: string; warning?: string }> {
+    if (!renames.elements?.length && !renames.scenarios?.length) return {};
+    const current = await this.readSlidesText(name);
+    if (current === undefined) return {};
+    const file = path.basename(this.slidesPathOf(name));
+    try {
+      const deck = parseSlides(current.text);
+      if (!renameInSlides(deck, renames)) return {};
+      await this.writeSlides(name, deck);
+      return { note: `筋書き（${file}）の中の名前も直しました。` };
+    } catch (e) {
+      return {
+        warning: `筋書き（${file}）の中の名前を直せませんでした（${(e as Error).message}）。set_slides で筋書きを保存し直してください。`,
+      };
+    }
+  }
+
   /** 作業フォルダ内の相対パスを絶対パスにする。フォルダの外を指していたら拒否する。 */
   resolveInside(relative: string): string {
     const p = path.resolve(this.dir, relative);
@@ -126,7 +173,8 @@ export class ModelStore {
       return [];
     }
     const out: ModelInfo[] = [];
-    for (const file of files.filter((f) => f.toLowerCase().endsWith(".json")).sort()) {
+    // 筋書き（<モデル名>.slides.json）はモデルではないので出さない
+    for (const file of files.filter((f) => f.toLowerCase().endsWith(".json") && !f.toLowerCase().endsWith(".slides.json")).sort()) {
       const full = path.join(this.dir, file);
       try {
         const [text, st] = await Promise.all([readFile(full, "utf8"), stat(full)]);

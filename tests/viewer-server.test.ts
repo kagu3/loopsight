@@ -248,6 +248,72 @@ describe("実際のデータ", () => {
   });
 });
 
+describe("会議資料の筋書き", () => {
+  const deck = {
+    slides: [
+      { kind: "problem" as const, title: "増える", message: "増え続ける", elements: ["Population"], now: 5 },
+      { kind: "cause" as const, title: "原因", message: "増えるほど生まれる", loop: { elements: ["Population", "Births"], polarity: "R" as const } },
+    ],
+  };
+
+  test("<モデル名>.slides.json があれば、筋書きと、モデルに合わない名前を返す。一覧には出さない", async () => {
+    expect((await get<ModelResponse>("/api/models/pop")).body.slides).toBeUndefined();
+    const store = new ModelStore(dir);
+    await store.writeSlides("pop", { slides: [...deck.slides, { kind: "compare", title: "比べる", message: "減る", scenarios: ["支援"], elements: ["Populaton"] }] });
+    const { body } = await get<ModelResponse>("/api/models/pop");
+    expect(body.slides).toMatchObject({ file: "pop.slides.json", deck: { slides: [{ kind: "problem" }, { kind: "cause" }, { kind: "compare" }] } });
+    expect(body.slides!.issues.map((i) => i.slide)).toEqual([3, 3, 1]);
+    expect(body.slides!.issues[0]!.hint).toMatch(/もしかして "Population"/);
+    expect((await get<ModelListResponse>("/api/models")).body.models.map((m) => m.name)).toEqual(["pop"]);
+    // 読めない筋書きは、そのことを知らせる（モデルはそのまま出す）
+    await writeFile(store.slidesPathOf("pop"), "{ 壊れた", "utf8");
+    const broken = (await get<ModelResponse>("/api/models/pop")).body;
+    expect(broken.run).toBeDefined();
+    expect(broken.slides!.deck).toBeUndefined();
+    expect(broken.slides!.issues[0]!.message).toMatch(/筋書き.*を読めません/);
+  });
+
+  test("筋書きが変わると、そのモデルが変わったとイベントで知らせる。モデルの版は変えず、筋書きの版を変える", async () => {
+    const store = new ModelStore(dir);
+    await store.writeSlides("pop", deck);
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    const controller = new AbortController();
+    const res = await fetch(new URL("/api/events", viewer.url), { signal: controller.signal });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const received = (async () => {
+      let text = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("イベントが届く前に切れた");
+        text += decoder.decode(value);
+        const m = text.match(/data: (.*)\n\n/);
+        if (m) return JSON.parse(m[1]!) as ChangeEvent;
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 100));
+    await store.writeSlides("pop", { slides: deck.slides.slice(0, 1) });
+    expect(await received).toEqual({ type: "changed", name: "pop" });
+    controller.abort();
+    const after = (await get<ModelResponse>("/api/models/pop")).body;
+    expect(after.version).toBe(before.version);
+    expect(after.slides!.version).not.toBe(before.slides!.version);
+    expect(after.slides!.deck!.slides).toHaveLength(1);
+  });
+
+  test("画面で名前を変えると筋書きの中も直し、元に戻すと筋書きも戻す", async () => {
+    await new ModelStore(dir).writeSlides("pop", deck);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Population", rename_to: "人口" }] });
+    expect(e1.status).toBe(200);
+    expect(e1.body.report!.notes.join("\n")).toMatch(/pop\.slides\.json/);
+    expect(e1.body.model.slides!.deck!.slides[1]).toMatchObject({ loop: { elements: ["人口", "Births"] } });
+    expect(e1.body.model.slides!.issues.map((i) => i.message).join("\n")).not.toMatch(/モデルにありません/);
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: e1.body.model.version });
+    expect(u.body.model.slides!.deck!.slides[0]).toMatchObject({ elements: ["Population"] });
+  });
+});
+
 describe("ビューアからの編集", () => {
   test("要素を変えて保存し、新しい版と実行結果を返す", async () => {
     const before = (await get<ModelResponse>("/api/models/pop")).body;

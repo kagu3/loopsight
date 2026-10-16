@@ -49,9 +49,10 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、15 個のツールが見える", async () => {
+  test("クライアントから接続でき、17 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
+    expect(client.getInstructions()).toMatch(/「会議資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
@@ -66,10 +67,12 @@ describe("MCP server", () => {
         "run_simulation",
         "set_scenarios",
         "set_simulation",
+        "set_slides",
         "sweep_parameter",
         "upsert_elements",
         "validate_model",
         "view_diagram",
+        "view_slides",
       ].sort(),
     );
   });
@@ -260,6 +263,69 @@ describe("MCP server", () => {
     expect(await callError("import_data", { model: "sir" })).toMatch(/path か content/);
   });
 
+  test("会議資料の筋書きを保存し、名前を変えると筋書きの中も直す", async () => {
+    await call("create_model", { model: "sir", simulation: { time_length: 100, time_units: "DAYS" } });
+    await call("upsert_elements", { model: "sir", elements: SIR });
+    await call("set_scenarios", { model: "sir", scenarios: [{ name: "外出を控える", description: "接触を半分にする", values: { "Contact Rate": 0.2 } }] });
+    await call("import_data", { model: "sir", content: "Day,Infected\n0,10\n10,60\n" });
+    const slides = [
+      { kind: "problem", title: "感染が広がる", message: "このままだと半分近くが感染する", elements: ["infected"], data: ["Infected"], now: 10 },
+      { kind: "cause", title: "うつす人が増えるほど広がる", message: "感染者が増えるほど新しい感染が増える", loop: { elements: ["Infected", "Infection"], polarity: "R" } },
+      { kind: "solution", title: "外出を控える", message: "接触を減らす", scenario: "外出を控える" },
+      { kind: "compare", title: "比べる", message: "山が低くなる", scenarios: ["外出を控える"], elements: ["Infected"], at: 40 },
+      { kind: "conclusion", title: "結論", message: "外出を控えると山を低くできる" },
+    ];
+
+    // 名前が合わなければ保存せず、何枚目の何が合わないかを返す
+    const bad = JSON.parse(await callError("set_slides", { model: "sir", slides: [{ ...slides[2], scenario: "外出を控る" }] }));
+    expect(bad.error).toMatch(/保存しませんでした/);
+    expect(bad.issues[0]).toMatchObject({ slide: 1 });
+    expect(bad.issues[0].hint).toMatch(/もしかして "外出を控える"/);
+    expect(await callError("set_slides", { model: "sir", slides: [{ kind: "chart", title: "a", message: "b" }] })).toMatch(/kind/);
+    expect(await callError("view_slides", { model: "sir", image: false })).toMatch(/筋書きがありません/);
+
+    const saved = await call("set_slides", { model: "sir", title: "感染症の対策", slides });
+    expect(path.basename(saved.file)).toBe("sir.slides.json");
+    expect(saved.slides).toEqual(["1. 問題：感染が広がる", "2. 原因：うつす人が増えるほど広がる", "3. 解決案：外出を控える", "4. 比較：比べる", "5. 結論：結論"]);
+    expect(saved.warnings).toEqual([]);
+    // 一覧には出さない
+    expect((await call("list_models")).models.map((m: any) => m.name)).toEqual(["sir"]);
+    const viewed = await call("view_slides", { model: "sir", image: false });
+    expect(viewed).toMatchObject({ title: "感染症の対策", version: saved.version, errors: [] });
+    // 表記はモデルにそろえて保存する
+    expect(viewed.slides[0].elements).toEqual(["Infected"]);
+
+    // 要素と施策の名前を変えると、筋書きの中も直す
+    const renamed = await call("upsert_elements", { model: "sir", elements: [{ name: "Infected", rename_to: "感染者" }] });
+    expect(renamed.changes.notes.join("\n")).toMatch(/sir\.slides\.json/);
+    const scenario = await call("set_scenarios", { model: "sir", scenarios: [{ name: "外出を控える", rename_to: "外出の自粛" }] });
+    expect(scenario.changes.notes.join("\n")).toMatch(/sir\.slides\.json/);
+    const after = await call("view_slides", { model: "sir", image: false });
+    expect(after.errors).toEqual([]);
+    expect(after.slides[0]).toMatchObject({ elements: ["感染者"], data: ["感染者"] });
+    expect(after.slides[1].loop.elements).toEqual(["感染者", "Infection"]);
+    expect(after.slides[2].scenario).toBe("外出の自粛");
+    expect(after.slides[3]).toMatchObject({ scenarios: ["外出の自粛"], elements: ["感染者"] });
+
+    // 期間を縮めて注目する時点が外に出たり、実際のデータの列がなくなったりしたら知らせる
+    const shorter = await call("set_simulation", { model: "sir", time_length: 30 });
+    expect(shorter.slides_issues.map((i: any) => i.message).join("\n")).toMatch(/4 枚目.*注目する時点（40）/);
+    expect((await call("set_simulation", { model: "sir", time_length: 100 })).slides_issues).toBeUndefined();
+    const replaced = await call("import_data", { model: "sir", content: "Day,Recovered\n0,0\n" });
+    expect(replaced.slides_issues.map((i: any) => i.message).join("\n")).toMatch(/1 枚目.*列 "感染者" がありません/);
+    expect((await call("import_data", { model: "sir", content: "Day,感染者\n0,10\n" })).slides_issues).toBeUndefined();
+
+    // 筋書きが使っている施策を消すと、そのことを知らせる
+    const removed = await call("set_scenarios", { model: "sir", remove: ["外出の自粛"] });
+    expect(removed.slides_issues.map((i: any) => i.slide)).toEqual([3, 4]);
+
+    // 版が違えば保存しない
+    expect(await callError("set_slides", { model: "sir", slides: [slides[4]], version: "0000" })).toMatch(/ほかのところで変わって/);
+    const ok = await call("set_slides", { model: "sir", slides: [slides[4]], version: after.version });
+    expect(ok.version).not.toBe(after.version);
+    expect(await callError("view_slides", { model: "sir", slides: [3] })).toMatch(/スライド 3 はありません/);
+  });
+
   test("エラーは直し方つきで返す", async () => {
     expect(await callError("get_model", { model: "none" })).toMatch(/見つかりません/);
     expect(await callError("get_model", { model: "../x" })).toMatch(/使えない文字/);
@@ -343,4 +409,29 @@ describe("MCP server", () => {
     const png = Buffer.from(content[1]!.data!, "base64");
     expect(png.subarray(1, 4).toString()).toBe("PNG");
   }, 30_000);
+
+  test("view_slides はスライドを 1 枚ずつ PNG で返す（ブラウザと画面のビルドがあるとき）", async () => {
+    await call("create_model", { model: "p" });
+    await call("upsert_elements", { model: "p", elements: SIR });
+    await call("set_slides", {
+      model: "p",
+      slides: [
+        { kind: "problem", title: "感染が広がる", message: "山ができる", elements: ["Infected"] },
+        { kind: "conclusion", title: "結論", message: "対策が要る" },
+      ],
+    });
+    const res = await client.callTool({ name: "view_slides", arguments: { model: "p", width: 800 } });
+    expect(res.isError).toBeFalsy();
+    const content = res.content as { type: string; text?: string; data?: string; mimeType?: string }[];
+    const info = JSON.parse(content[0]!.text!);
+    if (info.image_error) {
+      expect(info.image_error).toMatch(/Edge か Chrome|ビルド/);
+      return;
+    }
+    expect(content.slice(1).map((c) => (c.type === "text" ? c.text : c.mimeType))).toEqual(["スライド 1", "image/png", "スライド 2", "image/png"]);
+    const png = Buffer.from(content[2]!.data!, "base64");
+    expect(png.subarray(1, 4).toString()).toBe("PNG");
+    // 16:9 の高さ（PNG の IHDR の幅と高さ）
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([800, 450]);
+  }, 60_000);
 });

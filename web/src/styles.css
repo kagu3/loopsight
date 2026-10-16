@@ -364,6 +364,7 @@ button.link {
 /* ボタンと編集の欄 */
 button.small-button,
 button.toolbar-button,
+a.toolbar-button,
 .form-buttons button {
   font: inherit;
   font-size: 13px;
@@ -381,8 +382,13 @@ button.small-button {
 }
 button.small-button:hover,
 button.toolbar-button:hover:not(:disabled),
+a.toolbar-button:hover,
 .form-buttons button:hover:not(:disabled) {
   background: var(--surface-2);
+}
+a.toolbar-button {
+  text-decoration: none;
+  white-space: nowrap;
 }
 button:disabled {
   opacity: 0.5;
@@ -1008,4 +1014,321 @@ button.legend-remove:hover {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* 発表モード（?view=present）。16:9 の枠を画面いっぱいに置き、文字は枠の幅（cqw）で決める */
+.present {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+.stage {
+  width: min(100vw, calc(100vh * 16 / 9));
+  aspect-ratio: 16 / 9;
+  container-type: size;
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.slide {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 3.2cqw 4cqw 1.6cqw;
+  gap: 1.4cqw;
+}
+.slide-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6cqw;
+}
+.slide-kind {
+  align-self: flex-start;
+  font-size: 1.4cqw;
+  font-weight: 600;
+  color: var(--accent);
+  border: 0.12cqw solid var(--accent);
+  border-radius: 999px;
+  padding: 0.1cqw 1cqw;
+}
+.slide-title {
+  font-size: 3.4cqw;
+  line-height: 1.25;
+  font-weight: 700;
+}
+.slide-message {
+  margin: 0;
+  font-size: 2.1cqw;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.slide-body {
+  flex: 1;
+  min-height: 0;
+}
+.slide-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 1.1cqw;
+  color: var(--text-muted);
+}
+.slide-note,
+.stage-message {
+  margin: auto;
+  font-size: 2cqw;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 80%;
+}
+.slide-message-only {
+  justify-content: center;
+}
+
+/* グラフを並べる（1 つなら大きく、2 つは横に、3 つと 4 つは 2 段） */
+.chart-grid {
+  display: grid;
+  gap: 1.2cqw 2.4cqw;
+}
+.chart-grid.n2 {
+  grid-template-columns: 1fr 1fr;
+}
+.chart-grid.n3,
+.chart-grid.n4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.slide-chart {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+.slide-chart figcaption {
+  display: flex;
+  align-items: center;
+  gap: 1.2cqw;
+  font-size: 1.7cqw;
+  font-weight: 600;
+}
+.slide-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5cqw;
+  font-size: 1.3cqw;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.legend-line {
+  display: inline-block;
+  width: 2.2cqw;
+  height: 0.3cqw;
+  background: var(--series-1);
+}
+.legend-dot {
+  display: inline-block;
+  width: 1cqw;
+  height: 1cqw;
+  margin-left: 1cqw;
+  border-radius: 50%;
+  border: 0.2cqw solid var(--text-primary);
+  background: var(--surface-1);
+}
+.slide-chart-area {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 比較：注目する時点の値を、凡例を兼ねて並べる */
+.compare-values {
+  list-style: none;
+  margin: 0;
+  padding: 0.4cqw 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4cqw 2cqw;
+  font-size: 1.5cqw;
+  font-variant-numeric: tabular-nums;
+}
+.compare-values li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6cqw;
+}
+.compare-values .line-swatch {
+  width: 2.2cqw;
+  height: 1cqw;
+}
+.compare-name {
+  color: var(--text-secondary);
+}
+.compare-value {
+  font-weight: 700;
+}
+.compare-change {
+  font-weight: 600;
+  color: var(--accent);
+}
+.compare-note {
+  color: var(--warning);
+}
+
+/* 解決案 */
+.solution-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.4cqw;
+}
+.solution-card {
+  border-left: 0.6cqw solid var(--accent);
+  padding: 0.6cqw 0 0.6cqw 2cqw;
+}
+.solution-name {
+  margin: 0;
+  font-size: 3cqw;
+  font-weight: 700;
+}
+.solution-description {
+  margin: 0.6cqw 0 0;
+  font-size: 2.1cqw;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.solution-changes {
+  border-collapse: collapse;
+  font-size: 1.8cqw;
+  font-variant-numeric: tabular-nums;
+}
+.solution-changes th,
+.solution-changes td {
+  padding: 0.5cqw 2cqw 0.5cqw 0;
+  text-align: left;
+  border-bottom: 0.1cqw solid var(--grid);
+}
+.solution-changes th {
+  font-size: 1.4cqw;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.solution-changes td.after {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* 原因：左に図、右にループ */
+.cause-body {
+  display: grid;
+  grid-template-columns: 1fr 30%;
+  gap: 2.4cqw;
+}
+.cause-diagram {
+  min-height: 0;
+  border: 0.1cqw solid var(--border);
+  border-radius: 0.6cqw;
+  overflow: hidden;
+  /* 発表では図を動かさない */
+  pointer-events: none;
+}
+/* ループの要素の枠は消さずに残す（作業画面では、変わった要素の枠は少しして消える） */
+.cause-diagram .node.is-changed {
+  animation: none;
+  box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 6px var(--changed);
+}
+.loop-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2cqw;
+  align-self: center;
+}
+.loop-badge {
+  display: flex;
+  align-items: center;
+  gap: 1cqw;
+  font-size: 2cqw;
+  font-weight: 700;
+}
+.loop-letter {
+  display: grid;
+  place-items: center;
+  width: 4.2cqw;
+  height: 4.2cqw;
+  border-radius: 50%;
+  border: 0.3cqw solid var(--changed);
+  font-size: 2.4cqw;
+}
+.loop-path {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 1.9cqw;
+  font-weight: 600;
+}
+.loop-path li + li::before {
+  content: "↓";
+  display: block;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.loop-path li.missing {
+  color: var(--error);
+  text-decoration: line-through;
+}
+.loop-note {
+  margin: 0;
+  font-size: 1.5cqw;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* 結論 */
+.slide-conclusion .slide-head {
+  margin-top: 6cqw;
+}
+.conclusion-body {
+  display: flex;
+  align-items: flex-start;
+}
+.conclusion-message {
+  margin: 0;
+  font-size: 3cqw;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+/* スライドの移動。マウスを乗せたときだけ出す（スライドの画像には写さない） */
+.present-nav {
+  position: fixed;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.present:hover .present-nav,
+.present-nav:focus-within {
+  opacity: 1;
+}
+.present-nav button {
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.present-hint {
+  color: var(--text-muted);
 }

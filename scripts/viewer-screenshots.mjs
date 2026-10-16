@@ -179,6 +179,27 @@ try {
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("scenarios", ".results");
 
+  // 発表モード（MCP の set_slides で保存した筋書きを ?view=present で見せる）。比較のスライドを 16:9 で撮る
+  await store.writeSlides(
+    "population",
+    core.toSlideDeck({
+      title: "人口の見通し",
+      slides: [
+        {
+          kind: "compare",
+          title: "50 年後の人口を比べる",
+          message: "どちらの施策でも人口は増えます。移民を増やすほうが、50 年後の人口は多くなります。",
+          scenarios: ["移民を増やす", "死亡率を下げる"],
+          elements: ["Population"],
+          at: 50,
+        },
+      ],
+    }),
+  );
+  await b.setViewport(W, (W * 9) / 16, { scale: SCALE, colorScheme: "light" });
+  await b.open(`${viewer.url}?view=present&slide=1&t=${Date.now()}#population`, "document.querySelector('.slide[data-ready=\"1\"]')");
+  await shot("present");
+
   // 暗い配色
   await setColorScheme("dark");
   await b.open(url("disease"));

@@ -67,6 +67,7 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 - `exports/`：`export_model` で書き出した Web 版向けのファイル
 - `output/`：`run_simulation` で保存した CSV
 - `<モデル名>.data.csv`：`import_data` で取り込んだ実際のデータ（1 列目が時刻、ほかの列が要素名）。モデルの一覧には出さない。要素の名前を変えると、列名も直す
+- `<モデル名>.slides.json`：`set_slides` で保存した会議資料の筋書き。モデルの一覧には出さない。要素や施策の名前を変えると、筋書きの中の名前も直す
 
 ## ツール
 
@@ -87,6 +88,8 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 | `run_simulation` | 実行して要約（初期値、最終値、最小と最大、間引いた時系列）を返す。CSV にも保存できる |
 | `sweep_parameter` | パラメータを振って比較する（感度分析）。複数の値を変えたシナリオや、保存した施策も比べられる |
 | `import_data` | 実際のデータ（実績や観測値）の CSV を取り込み、`<モデル名>.data.csv` に保存する。ビューアのグラフで、要素の線に点で重ねる。要素名と合わない列は「もしかして」を付けて知らせる |
+| `set_slides` | 会議資料の筋書き（問題 → 原因 → 解決案 → 比較 → 結論のスライド）を `<モデル名>.slides.json` に保存する。要素名、施策の名前、実際のデータの列名が実在するかを確かめ、合わなければ保存せずに「もしかして」を付けて返す |
+| `view_slides` | 筋書きのスライドを、ビューアの発表モードと同じ描き方で 1 枚ずつ PNG の画像にして返す（画像には Edge か Chrome が必要） |
 
 `run_simulation` と `sweep_parameter` には `overrides` を渡せる。値を一時的に変えて実行するもので、ファイルは変わらない。
 
@@ -101,6 +104,8 @@ Claude Code に次のように頼む。
 > 出生率を 1% から 5% まで 5 段階で振って、50 年後の人口を比べて。
 
 > 「出生率を 4% に上げる」と「移民を毎年 20 人受け入れる」の 2 つの施策を保存して。ビューアで何もしない場合と比べたい。
+
+> 会議資料を作って。（問題 → 原因 → 解決案 → 比較 → 結論の筋書きができ、ビューアの発表モードで見せられる）
 
 > ~/Downloads/model.InsightMaker を取り込んで、どんなモデルか説明して。
 
@@ -120,7 +125,7 @@ Claude Code に次のように頼む。
    - Import/Export は、エディタ右上の共有アイコン（3 つの点を線でつないだ形）を押すと、メニューの下のほうに出てくる。上向きの矢印が読み込み
    - モデルにグラフや表の設定がなければ、書き出すときにストックの時系列グラフを 1 つ足す（`chart: false` で足さない）。ほかの要素を見たいときは、SIMULATE のあと「ADD DISPLAY」で足す
 
-[examples/population.json](examples/population.json) は、この MCP で作って書き出した例。[examples/population.data.csv](examples/population.data.csv) は、その実際のデータの例（`import_data` で取り込むと、ビューアのグラフに点で重なる）。
+[examples/population.json](examples/population.json) は、この MCP で作って書き出した例（施策を 2 つ保存してある）。[examples/population.data.csv](examples/population.data.csv) は、その実際のデータの例（`import_data` で取り込むと、ビューアのグラフに点で重なる）。[examples/population.slides.json](examples/population.slides.json) は、その会議資料の筋書きの例（3 つのファイルを作業フォルダに置くと、ビューアの発表モードで見られる）。
 
 ## ビューア（Web 画面）
 
@@ -136,6 +141,7 @@ npm run viewer
 - **グラフと表：** 実行結果の時系列。最初はモデルのグラフ設定の要素（なければストック）を出し、要素を選んで切り替えられる（同時に 8 本まで）。実際のデータ（`<モデル名>.data.csv`）があれば、線に点で重ねる
 - **詳しい情報：** 図の要素を押すと、式、初期値、単位、最終値を出す
 - **問題：** 検証のエラーと警告を出す。エラーがあるときは実行しない
+- **発表モード：** 上の帯の「▶ 発表」か `?view=present#<モデル名>` で開く。AI が `set_slides` で作った筋書きを、16:9 の画面に大きな文字で 1 枚ずつ出し、← → で進む。式や編集の欄は出さない
 
 - **編集：** 選んだ要素の式、初期値、単位などを直せる。図の要素をドラッグすると位置を保存する。画面で変えたことは「元に戻す」（Ctrl+Z）で戻せる。どれも MCP と同じファイルに書き戻す
 - **AI との同時の変更：** 画面より先に AI がモデルを変えていたら、黙って上書きせずに知らせる

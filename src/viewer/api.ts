@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON } from "../core/index.js";
+import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Slide, SlideDeck, SlideIssue } from "../core/index.js";
 
-export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON };
+export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Slide, SlideDeck, SlideIssue };
 
 /** GET /api/models */
 export interface ModelListResponse {
@@ -25,6 +25,16 @@ export interface ActualDataResult {
   series: Record<string, (number | null)[]>;
   /** 読めなかったときや、要素に合わない列があるときの知らせ */
   issues: Issue[];
+}
+
+/** 会議資料の筋書き（<モデル名>.slides.json）。読めなかったときは deck がなく、issues にその理由が入る */
+export interface SlidesResult {
+  file: string;
+  /** 版（ファイルの中身のハッシュ）。モデルとは別に持つ。筋書きだけが変わったときに、画面が気づけるように */
+  version: string;
+  deck?: SlideDeck;
+  /** 名前がモデルに合わないなど、筋書きの問題（作業画面の「問題」に出す。発表モードには出さない） */
+  issues: SlideIssue[];
 }
 
 /**
@@ -58,6 +68,8 @@ export interface ModelResponse {
   run_error?: { message: string; issues: Issue[] };
   /** 実際のデータ（あるときだけ） */
   actual?: ActualDataResult;
+  /** 会議資料の筋書き（あるときだけ） */
+  slides?: SlidesResult;
 }
 
 /** GET /api/events で送るイベント。どのモデルのファイルが変わったか */
