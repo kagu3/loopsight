@@ -16,6 +16,17 @@ export interface RunResult {
   series: Record<string, (number | null)[]>;
 }
 
+/** 実際のデータ（<モデル名>.data.csv）。series は要素名 → 各時刻の値（空欄は null）。要素に合う列だけ入れる */
+export interface ActualDataResult {
+  file: string;
+  /** 版（ファイルの中身のハッシュ）。CSV だけが変わったときに、画面が気づけるように */
+  version: string;
+  times: number[];
+  series: Record<string, (number | null)[]>;
+  /** 読めなかったときや、要素に合わない列があるときの知らせ */
+  issues: Issue[];
+}
+
 /**
  * 保存したシナリオ（施策）1 つ分の実行結果。時刻は「何もしない場合」（RunResult）と同じ。
  * 実行できなかったときは series の代わりに error が入る。画面で重ねられる数を超えた施策は実行せず、skipped にする
@@ -45,6 +56,8 @@ export interface ModelResponse {
   scenarios?: ScenarioRunResult[];
   /** 実行できなかったときの理由 */
   run_error?: { message: string; issues: Issue[] };
+  /** 実際のデータ（あるときだけ） */
+  actual?: ActualDataResult;
 }
 
 /** GET /api/events で送るイベント。どのモデルのファイルが変わったか */
@@ -68,6 +81,8 @@ export interface UndoRequest {
 export interface EditResponse {
   report?: EditReport;
   model: ModelResponse;
+  /** 書き込めたが、知らせたいこと（実際のデータの列名を直せなかったときなど） */
+  warning?: string;
 }
 
 /** 書き込めなかったとき。conflict はほかから先に変えられていた場合で、current に最新を入れる */

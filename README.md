@@ -66,6 +66,7 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 
 - `exports/`：`export_model` で書き出した Web 版向けのファイル
 - `output/`：`run_simulation` で保存した CSV
+- `<モデル名>.data.csv`：`import_data` で取り込んだ実際のデータ（1 列目が時刻、ほかの列が要素名）。モデルの一覧には出さない。要素の名前を変えると、列名も直す
 
 ## ツール
 
@@ -85,6 +86,7 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 | `validate_model` | エラーと警告を、直し方のヒントつきで返す |
 | `run_simulation` | 実行して要約（初期値、最終値、最小と最大、間引いた時系列）を返す。CSV にも保存できる |
 | `sweep_parameter` | パラメータを振って比較する（感度分析）。複数の値を変えたシナリオや、保存した施策も比べられる |
+| `import_data` | 実際のデータ（実績や観測値）の CSV を取り込み、`<モデル名>.data.csv` に保存する。ビューアのグラフで、要素の線に点で重ねる。要素名と合わない列は「もしかして」を付けて知らせる |
 
 `run_simulation` と `sweep_parameter` には `overrides` を渡せる。値を一時的に変えて実行するもので、ファイルは変わらない。
 
@@ -118,7 +120,7 @@ Claude Code に次のように頼む。
    - Import/Export は、エディタ右上の共有アイコン（3 つの点を線でつないだ形）を押すと、メニューの下のほうに出てくる。上向きの矢印が読み込み
    - モデルにグラフや表の設定がなければ、書き出すときにストックの時系列グラフを 1 つ足す（`chart: false` で足さない）。ほかの要素を見たいときは、SIMULATE のあと「ADD DISPLAY」で足す
 
-[examples/population.json](examples/population.json) は、この MCP で作って書き出した例。
+[examples/population.json](examples/population.json) は、この MCP で作って書き出した例。[examples/population.data.csv](examples/population.data.csv) は、その実際のデータの例（`import_data` で取り込むと、ビューアのグラフに点で重なる）。
 
 ## ビューア（Web 画面）
 
@@ -131,7 +133,7 @@ npm run viewer
 ブラウザで http://localhost:5180/ を開く。作業フォルダは MCP サーバーと同じ決め方（`--models-dir`、`SD_MODELER_MODELS_DIR`、`./models`）で、ポートは `--port` か環境変数 `SD_MODELER_VIEWER_PORT` で変えられる。`127.0.0.1` だけで待ち受けるので、ほかの機械からは見えない。
 
 - **図：** ストック、フロー、変数、コンバーター、リンク、モデルの外（雲）を描く。ストックには最終値を出す。座標のない要素は仮に並べる。配置は、ドラッグで直すか、AI に頼む（AI は `view_diagram` で図を見ながら直す）
-- **グラフと表：** 実行結果の時系列。最初はモデルのグラフ設定の要素（なければストック）を出し、要素を選んで切り替えられる（同時に 8 本まで）
+- **グラフと表：** 実行結果の時系列。最初はモデルのグラフ設定の要素（なければストック）を出し、要素を選んで切り替えられる（同時に 8 本まで）。実際のデータ（`<モデル名>.data.csv`）があれば、線に点で重ねる
 - **詳しい情報：** 図の要素を押すと、式、初期値、単位、最終値を出す
 - **問題：** 検証のエラーと警告を出す。エラーがあるときは実行しない
 

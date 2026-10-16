@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、14 個のツールが見える", async () => {
+  test("クライアントから接続でき、15 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     const { tools } = await client.listTools();
@@ -58,6 +58,7 @@ describe("MCP server", () => {
         "create_model",
         "export_model",
         "get_model",
+        "import_data",
         "import_model",
         "layout_model",
         "list_models",
@@ -224,6 +225,39 @@ describe("MCP server", () => {
 
     expect(await callError("import_model", { path: "no/such/file.InsightMaker" })).toMatch(/読めません/);
     expect(await callError("import_model", { path: path.join(FIXTURES_DIR, "population.InsightMaker") })).toMatch(/すでにあります/);
+  });
+
+  test("実際のデータを取り込む。合わない列は「もしかして」を付けて知らせ、名前を変えると列名も直す", async () => {
+    await call("create_model", { model: "sir", simulation: { time_length: 100 } });
+    await call("upsert_elements", { model: "sir", elements: SIR });
+    const csvPath = path.join(dir, "infected.csv");
+    await writeFile(csvPath, "Day,infected,Recoverd\n0,10,0\n10,80,\n20,200,40\n", "utf8");
+
+    const imported = await call("import_data", { model: "sir", path: csvPath });
+    expect(path.basename(imported.file)).toBe("sir.data.csv");
+    expect(imported).toMatchObject({ columns: ["Infected", "Recoverd"], rows: 3, time_range: [0, 20] });
+    expect(imported.warnings).toHaveLength(1);
+    expect(imported.warnings[0].hint).toMatch(/もしかして "Recovered"/);
+    // 一覧には出さない
+    expect((await call("list_models")).models.map((m: any) => m.name)).toEqual(["sir"]);
+
+    const renamed = await call("upsert_elements", { model: "sir", elements: [{ name: "Infected", rename_to: "感染者" }] });
+    expect(renamed.changes.notes.join("\n")).toMatch(/sir\.data\.csv/);
+    expect((await readFile(imported.file, "utf8")).replace(/^﻿/, "").split("\n")[0]).toBe("Day,感染者,Recoverd");
+
+    // CSV の列名を直せなくても（変えると列名が重なる）、モデルは保存して成功として返し、知らせを添える
+    await writeFile(imported.file, "Day,感染者,Sick\n0,10,1\n", "utf8");
+    const clash = await call("upsert_elements", { model: "sir", elements: [{ name: "感染者", rename_to: "Sick" }] });
+    expect(clash.changes.notes.join("\n")).toMatch(/列名を直せませんでした/);
+    expect((await call("get_model", { model: "sir", format: "full" })).elements.some((e: any) => e.name === "Sick")).toBe(true);
+    await call("upsert_elements", { model: "sir", elements: [{ name: "Sick", rename_to: "感染者" }] });
+
+    // content でも渡せる。Excel から貼ったタブ区切りも読む
+    const pasted = await call("import_data", { model: "sir", content: "Day\t感染者\n0\t10\n" });
+    expect(pasted.warnings).toEqual([]);
+    expect(await callError("import_data", { model: "sir", content: "Day,感染者\nx,1\n" })).toMatch(/2 行目の時刻/);
+    expect(await callError("import_data", { model: "none", content: "Day,A\n0,1\n" })).toMatch(/見つかりません/);
+    expect(await callError("import_data", { model: "sir" })).toMatch(/path か content/);
   });
 
   test("エラーは直し方つきで返す", async () => {

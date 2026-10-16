@@ -17,13 +17,18 @@ import {
   TIME_UNITS,
   addBoxSizes,
   addDefaultVisualization,
+  checkActualData,
   checkDiagram,
   compareScenarios,
+  dataToCSV,
   emptyModel,
   importModelText,
   layoutModel,
   modelScenarios,
+  namesByElement,
+  parseDataCSV,
   removeElements,
+  renamesSince,
   resolveTargets,
   runModel,
   runToCSV,
@@ -64,7 +69,7 @@ const targets = z.array(z.string()).optional().describe("結果を返す要素�
 const elementPatch = z.object({
   type: z.enum(EDITABLE_TYPES).optional().describe("新しく追加するときは必須"),
   name: z.string().optional().describe("要素名（LINK 以外は必須）。既存の名前なら更新、なければ追加"),
-  rename_to: z.string().optional().describe("既存の要素の名前を変える。式やリンクの参照も書き換える"),
+  rename_to: z.string().optional().describe("既存の要素の名前を変える。式やリンクの参照と、実際のデータ（<モデル名>.data.csv）の列名も書き換える"),
   description: z.string().nullable().optional(),
   from: z.string().nullable().optional().describe("FLOW の出元のストック（null はモデルの外）、LINK の始点"),
   to: z.string().nullable().optional().describe("FLOW の行き先のストック（null はモデルの外）、LINK の終点"),
@@ -139,6 +144,19 @@ function expandHome(p: string): string {
   return p === "~" || p.startsWith("~/") || p.startsWith("~\\") ? path.join(homedir(), p.slice(1)) : p;
 }
 
+/** 取り込むファイルを読む。相対パスは、カレントか作業フォルダから探す */
+async function readInputFile(store: ModelStore, p: string): Promise<string> {
+  const candidates = path.isAbsolute(p) ? [p] : [path.resolve(p), path.resolve(store.dir, p)];
+  for (const c of candidates) {
+    try {
+      return await readFile(c, "utf8");
+    } catch {
+      // 次の候補を試す
+    }
+  }
+  throw new ImportError(`ファイルが読めません: ${candidates.join(" / ")}`);
+}
+
 /** ファイル名をモデル名に使える形にする */
 function toModelName(base: string): string {
   const n = base.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").replace(/^\.+/, "").trim();
@@ -158,7 +176,7 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 1. create_model か import_model でモデルを用意する
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
-4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せる施策は set_scenarios でモデルに保存する（ビューアのグラフに「何もしない場合」と重ねて出る）
+4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せる施策は set_scenarios でモデルに保存する（ビューアのグラフに「何もしない場合」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
 6. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
@@ -231,16 +249,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       if (text === undefined) {
         if (!a.path) throw new ImportError("path か content を指定してください。");
         const p = expandHome(a.path);
-        const candidates = path.isAbsolute(p) ? [p] : [path.resolve(p), path.resolve(store.dir, p)];
-        for (const c of candidates) {
-          try {
-            text = await readFile(c, "utf8");
-            break;
-          } catch {
-            // 次の候補を試す
-          }
-        }
-        if (text === undefined) throw new ImportError(`ファイルが読めません: ${candidates.join(" / ")}`);
+        text = await readInputFile(store, p);
         base ??= toModelName(path.basename(p).replace(/\.(InsightMaker|json|xml)$/i, ""));
       }
       const { model, warnings } = importModelText(text, base);
@@ -403,8 +412,14 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     },
     handle(async (a: { model: string; elements: ElementPatch[]; auto_link?: boolean }) => {
       const m = await store.read(a.model);
+      const before = namesByElement(m);
       const report = upsertElements(m, a.elements, { autoLink: a.auto_link });
-      return saveAndCheck(a.model, m, { changes: report });
+      const result = await saveAndCheck(a.model, m, { changes: report });
+      // CSV を直せなくても、モデルはもう保存してあるので成功として返し、知らせだけ添える
+      const data = await store.renameDataColumns(a.model, renamesSince(m, before));
+      if (data.note) report.notes.push(data.note);
+      if (data.warning) report.notes.push(data.warning);
+      return result;
     }),
   );
 
@@ -602,6 +617,41 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         return { model: a.model, ...compareScenarios(m, fromModel ? withBaseline(withBase) : withBase, opts) };
       },
     ),
+  );
+
+  server.registerTool(
+    "import_data",
+    {
+      title: "実際のデータを取り込む",
+      description:
+        "実際のデータ（観測値や実績）の CSV を取り込み、作業フォルダの <モデル名>.data.csv に保存する。ビューアのグラフで、要素の線に点で重ねて描く。path か content のどちらかを指定する。" +
+        "1 行目は見出しで、1 列目が時刻、ほかの列が要素名（Excel から貼ったタブ区切りも読む）。空欄は値なし。" +
+        "要素名と合わない列は warnings に「もしかして」を付けて返す（保存はする）。要素の名前を upsert_elements で変えると、列名も直す。",
+      inputSchema: {
+        model: modelName,
+        path: z.string().optional().describe("取り込む CSV のパス（絶対パス、またはカレントか作業フォルダからの相対パス）"),
+        content: z.string().optional().describe("CSV の中身を直接渡す場合"),
+      },
+    },
+    handle(async (a: { model: string; path?: string; content?: string }) => {
+      const m = await store.read(a.model);
+      let text = a.content;
+      if (text === undefined) {
+        if (!a.path) throw new ImportError("path か content を指定してください。");
+        text = await readInputFile(store, expandHome(a.path));
+      }
+      const data = parseDataCSV(text);
+      const warnings = checkActualData(m, data);
+      const file = await store.writeData(a.model, dataToCSV(data));
+      return {
+        model: a.model,
+        file,
+        columns: data.columns.map((c) => c.name),
+        rows: data.times.length,
+        ...(data.times.length ? { time_range: [data.times[0], data.times.at(-1)] } : {}),
+        warnings,
+      };
+    }),
   );
 }
 

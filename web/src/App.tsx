@@ -126,7 +126,7 @@ export function App() {
           return;
         }
         const prev = dataRef.current;
-        if (prev?.name === next.name && prev.version === next.version) {
+        if (prev?.name === next.name && prev.version === next.version && prev.actual?.version === next.actual?.version) {
           // 中身は同じ（画面から書き込んだ結果の知らせなど）。元に戻せる回数だけ変わることがある（サーバーを起動し直したときなど）
           if (prev.undo_available !== next.undo_available) show(next, false);
           return;
@@ -197,6 +197,8 @@ export function App() {
       if (result.ok) {
         // 前の知らせ（衝突など）は、利用者が閉じるまで残す
         show(result.data.model, false);
+        // 書き込めたが知らせたいこと（実際のデータの列名を直せなかったときなど）
+        if (result.data.warning) setNotice(result.data.warning);
         return undefined;
       }
       if (result.error.current) {
@@ -413,7 +415,7 @@ export function App() {
 
         <div className="results">
           {data?.run ? (
-            <Chart modelName={data.name} model={data.model} run={data.run} scenarios={data.scenarios} />
+            <Chart modelName={data.name} model={data.model} run={data.run} scenarios={data.scenarios} actual={data.actual} />
           ) : data ? (
             <p className="muted pad">エラーがあるため実行できません。左の「問題」を見てください。</p>
           ) : null}

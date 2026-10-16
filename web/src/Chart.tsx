@@ -1,7 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
-import type { ModelJSON, RunResult, ScenarioRunResult } from "../../src/viewer/api.js";
-import { normalize, normalizeTogether } from "./normalize.js";
+import type { ActualDataResult, ModelJSON, RunResult, ScenarioRunResult } from "../../src/viewer/api.js";
+import { sameTime, withActualPoints } from "./actualPoints.js";
+import { normalize, normalizeLike, normalizeTogether } from "./normalize.js";
 import { BASELINE_NAME, compareRuns, describeRun, type CompareRun, type CompareRuns } from "./scenarios.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
@@ -10,6 +11,8 @@ import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 // 9 色目は作らないので、同時に出せるのは 8 本まで。
 // モデルに施策（シナリオ）が保存されていれば、要素ごとに小さなグラフを並べ、「何もしない場合」（灰色の点線）と施策を重ねる。
 // このときの色は施策ごとに決める（施策も 8 つまで）。
+// 実際のデータ（<モデル名>.data.csv）がある要素は、同じ色の白抜きの丸を線に重ねる（線の上の、塗りつぶした丸と見分けるため）。
+// 施策を重ねているときは、施策の色と見分けられるよう、文字の色の白抜きの丸にする。
 
 export const MAX_SERIES = 8;
 const SLOTS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
@@ -100,14 +103,18 @@ export interface ChartProps {
   run: RunResult;
   /** 保存した施策の実行結果 */
   scenarios?: ScenarioRunResult[];
+  /** 実際のデータ。あれば点で重ねる */
+  actual?: ActualDataResult;
 }
 
 /** 「何もしない場合」の線の色と点線 */
 const BASELINE_COLOR = "var(--text-muted)";
 const BASELINE_DASH = "4 4";
 const runColor = (r: CompareRun, k: number) => (r.baseline ? BASELINE_COLOR : `var(${SLOTS[(k - 1) % SLOTS.length]})`);
+/** 施策を重ねているときの、実際のデータの点の色 */
+const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
-export function Chart({ modelName, model, run, scenarios }: ChartProps) {
+export function Chart({ modelName, model, run, scenarios, actual }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
   const [visible, setVisible] = useState<string[]>(() => defaultVisible(model, names));
@@ -174,6 +181,18 @@ export function Chart({ modelName, model, run, scenarios }: ChartProps) {
       return row;
     });
   }, [run, visible, names, scale]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 実際のデータの点。モデルの線と同じ行に入れる。正規化するときはモデルの線と同じ目盛りにする
+  const actualKeyOf = (name: string) => `a${names.indexOf(name)}`;
+  const withActual = useMemo(() => {
+    const points = new Map<string, { t: number; v: number }[]>();
+    for (const n of visible) {
+      const values = actual?.series[n];
+      if (!values) continue;
+      const scaled = scale === "normalized" ? normalizeLike(values, run.series[n] ?? []) : values;
+      points.set(actualKeyOf(n), actual!.times.flatMap((t, i) => (scaled[i] == null ? [] : [{ t, v: scaled[i]! }])));
+    }
+    return { rows: withActualPoints(data, points, visible.map(keyOf)), names: visible.filter((n) => points.has(actualKeyOf(n))) };
+  }, [data, actual, run, visible, names, scale]); // eslint-disable-line react-hooks/exhaustive-deps
   const unit = TIME_UNIT_LABEL[run.time_units.toLowerCase()] ?? run.time_units;
   const colorOf = (name: string) => `var(${SLOTS[slots.get(name) ?? 0]})`;
 
@@ -243,6 +262,7 @@ export function Chart({ modelName, model, run, scenarios }: ChartProps) {
             <li key={n} className="legend-chip" title={n}>
               {!comparing && <span className="swatch" style={{ background: colorOf(n) }} />}
               <span className="legend-name">{n}</span>
+              {withActual.names.includes(n) && <span className="legend-actual" style={{ borderColor: comparing ? ACTUAL_COMPARE_COLOR : colorOf(n) }} title={`点は実際のデータ（${actual!.file}）`} />}
               <button className="legend-remove" onClick={(e) => removeFromLegend(e.currentTarget, n)} aria-label={`${n} を外す`} title="グラフから外す">
                 ×
               </button>
@@ -258,7 +278,7 @@ export function Chart({ modelName, model, run, scenarios }: ChartProps) {
       ) : comparing && view === "chart" ? (
         <div className="compare-grid">
           {visible.map((n) => (
-            <CompareChart key={n} name={n} times={run.times} runs={compare.runs} unit={unit} scale={scale} />
+            <CompareChart key={n} name={n} times={run.times} runs={compare.runs} unit={unit} scale={scale} actual={actual} />
           ))}
         </div>
       ) : comparing ? (
@@ -290,7 +310,7 @@ export function Chart({ modelName, model, run, scenarios }: ChartProps) {
       ) : view === "chart" ? (
         <div className="chart-area">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+            <LineChart data={withActual.rows} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
               <CartesianGrid stroke="var(--grid)" vertical={false} />
               <XAxis
                 dataKey="t"
@@ -305,7 +325,7 @@ export function Chart({ modelName, model, run, scenarios }: ChartProps) {
               {yAxis(scale)}
               <Tooltip
                 cursor={{ stroke: "var(--text-muted)", strokeWidth: 1 }}
-                content={(p: TooltipContentProps) => <ChartTooltip {...p} unit={unit} visible={visible} run={run} colorOf={colorOf} />}
+                content={(p: TooltipContentProps) => <ChartTooltip {...p} unit={unit} visible={visible} run={run} actual={actual} colorOf={colorOf} />}
                 isAnimationActive={false}
               />
               {visible.map((n) => (
@@ -320,6 +340,20 @@ export function Chart({ modelName, model, run, scenarios }: ChartProps) {
                   activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface-1)" }}
                   isAnimationActive={false}
                   connectNulls={false}
+                />
+              ))}
+              {withActual.names.map((n) => (
+                <Line
+                  key={`actual:${n}`}
+                  type="linear"
+                  dataKey={actualKeyOf(n)}
+                  name={`${n}（実際）`}
+                  stroke="none"
+                  dot={{ r: 4, fill: "var(--surface-1)", stroke: colorOf(n), strokeWidth: 2 }}
+                  activeDot={false}
+                  legendType="none"
+                  tooltipType="none"
+                  isAnimationActive={false}
                 />
               ))}
             </LineChart>
@@ -405,17 +439,37 @@ function LineSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
 }
 
 /** 1 つの要素について、「何もしない場合」と施策を重ねた小さなグラフ */
-function CompareChart({ name, times, runs, unit, scale }: { name: string; times: number[]; runs: CompareRun[]; unit: string; scale: Scale }) {
+function CompareChart({
+  name,
+  times,
+  runs,
+  unit,
+  scale,
+  actual,
+}: {
+  name: string;
+  times: number[];
+  runs: CompareRun[];
+  unit: string;
+  scale: Scale;
+  actual?: ActualDataResult;
+}) {
   // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
+  // 実際のデータの点も同じ行に入れる（キーは a）。正規化するときは、どの施策も通した最小と最大を目盛りにする
   const data = useMemo(() => {
     const raw = runs.map((r) => r.series[name] ?? []);
     const series = scale === "normalized" ? normalizeTogether(raw) : raw;
-    return times.map((t, i) => {
+    const rows = times.map((t, i) => {
       const row: Record<string, number | null> = { t, i };
       series.forEach((values, k) => (row[`r${k}`] = values[i] ?? null));
       return row;
     });
-  }, [name, times, runs, scale]);
+    const values = actual?.series[name];
+    if (!values) return rows;
+    const scaled = scale === "normalized" ? normalizeLike(values, raw.flat()) : values;
+    const points = actual!.times.flatMap((t, i) => (scaled[i] == null ? [] : [{ t, v: scaled[i]! }]));
+    return withActualPoints(rows, new Map([["a", points]]), runs.map((_, k) => `r${k}`));
+  }, [name, times, runs, scale, actual]);
   return (
     <figure className="compare-cell">
       <figcaption title={name}>{name}</figcaption>
@@ -435,7 +489,7 @@ function CompareChart({ name, times, runs, unit, scale }: { name: string; times:
             {yAxis(scale)}
             <Tooltip
               cursor={{ stroke: "var(--text-muted)", strokeWidth: 1 }}
-              content={(p: TooltipContentProps) => <CompareTooltip {...p} unit={unit} name={name} runs={runs} />}
+              content={(p: TooltipContentProps) => <CompareTooltip {...p} unit={unit} name={name} runs={runs} actual={actual} />}
               isAnimationActive={false}
             />
             {runs.map((r, k) => (
@@ -453,6 +507,19 @@ function CompareChart({ name, times, runs, unit, scale }: { name: string; times:
                 connectNulls={false}
               />
             ))}
+            {actual?.series[name] && (
+              <Line
+                type="linear"
+                dataKey="a"
+                name={`${name}（実際）`}
+                stroke="none"
+                dot={{ r: 3.5, fill: "var(--surface-1)", stroke: ACTUAL_COMPARE_COLOR, strokeWidth: 2 }}
+                activeDot={false}
+                legendType="none"
+                tooltipType="none"
+                isAnimationActive={false}
+              />
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -461,9 +528,12 @@ function CompareChart({ name, times, runs, unit, scale }: { name: string; times:
 }
 
 /** 施策を重ねたグラフのツールチップ。正規化していても実際の値を出す */
-function CompareTooltip(p: TooltipContentProps & { unit: string; name: string; runs: CompareRun[] }) {
+function CompareTooltip(p: TooltipContentProps & { unit: string; name: string; runs: CompareRun[]; actual?: ActualDataResult }) {
   if (!p.active || !p.payload?.length) return null;
   const row = p.payload[0]!.payload as Record<string, number | null>;
+  // 同じ時刻の実際のデータがあれば、最後に出す
+  const j = p.actual?.times.findIndex((t) => sameTime(t, row.t!)) ?? -1;
+  const actualValue = j >= 0 ? p.actual!.series[p.name]?.[j] : undefined;
   return (
     <div className="tooltip">
       <div className="tooltip-title">
@@ -476,6 +546,13 @@ function CompareTooltip(p: TooltipContentProps & { unit: string; name: string; r
           <span className="tooltip-value">{formatValue(r.series[p.name]?.[row.i!])}</span>
         </div>
       ))}
+      {actualValue != null && (
+        <div className="tooltip-row">
+          <span className="tooltip-actual-mark" style={{ borderColor: ACTUAL_COMPARE_COLOR }} />
+          <span className="tooltip-name">実際のデータ</span>
+          <span className="tooltip-value">{formatValue(actualValue)}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -620,10 +697,12 @@ function SeriesPicker({
 }
 
 function ChartTooltip(
-  p: TooltipContentProps & { unit: string; visible: string[]; run: RunResult; colorOf(n: string): string },
+  p: TooltipContentProps & { unit: string; visible: string[]; run: RunResult; actual?: ActualDataResult; colorOf(n: string): string },
 ) {
   if (!p.active || !p.payload?.length) return null;
   const row = p.payload[0]!.payload as Record<string, number | null>;
+  // 同じ時刻の実際のデータがあれば、モデルの値と並べて出す
+  const j = p.actual?.times.findIndex((t) => sameTime(t, row.t!)) ?? -1;
   return (
     <div className="tooltip">
       <div className="tooltip-title">
@@ -634,6 +713,13 @@ function ChartTooltip(
           <span className="swatch" style={{ background: p.colorOf(n) }} />
           <span className="tooltip-name">{n}</span>
           <span className="tooltip-value">{formatValue(p.run.series[n]?.[row.i!])}</span>
+          {j >= 0 && p.actual!.series[n]?.[j] != null && (
+            <>
+              <span className="tooltip-actual-mark" style={{ borderColor: p.colorOf(n) }} />
+              <span className="tooltip-name muted">実際のデータ</span>
+              <span className="tooltip-value">{formatValue(p.actual!.series[n][j])}</span>
+            </>
+          )}
         </div>
       ))}
     </div>

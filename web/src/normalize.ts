@@ -2,9 +2,17 @@
 
 /** 最小を 0、最大を 1 にする。ずっと同じ値なら真ん中（0.5）に置く。値のないところ（null）はそのまま */
 export function normalize(values: (number | null)[]): (number | null)[] {
+  return normalizeLike(values, values);
+}
+
+/**
+ * values を、reference の最小を 0、最大を 1 にする目盛りに置く。
+ * 実際のデータの点を、モデルの線と同じ目盛りで重ねるため（データだけで正規化すると、線とずれて見比べられない）
+ */
+export function normalizeLike(values: (number | null)[], reference: (number | null)[]): (number | null)[] {
   let min = Infinity;
   let max = -Infinity;
-  for (const v of values) {
+  for (const v of reference) {
     if (v === null || !Number.isFinite(v)) continue;
     if (v < min) min = v;
     if (v > max) max = v;

@@ -9,6 +9,7 @@ export function Problems({ data, onSelect }: { data: ModelResponse; onSelect(nam
       issue,
     })),
     ...data.validation.warnings.map((issue) => ({ level: "warning" as const, issue })),
+    ...(data.actual?.issues ?? []).map((issue) => ({ level: "warning" as const, issue })),
   ];
   if (!issues.length) return null;
   return (

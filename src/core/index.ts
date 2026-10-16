@@ -10,3 +10,4 @@ export * from "./layout.js";
 export * from "./diagram.js";
 export * from "./diagram-check.js";
 export * from "./geometry.js";
+export * from "./data.js";

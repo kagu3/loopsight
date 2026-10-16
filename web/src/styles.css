@@ -839,6 +839,18 @@ button.legend-remove:hover {
   background: var(--border);
   color: var(--text-primary);
 }
+/* 実際のデータの点があることを、グラフと同じ白抜きの丸で示す */
+.legend-actual,
+.tooltip-actual-mark {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border: 2px solid;
+  border-radius: 999px;
+  flex: none;
+  justify-self: center;
+}
 .swatch {
   display: inline-block;
   width: 10px;

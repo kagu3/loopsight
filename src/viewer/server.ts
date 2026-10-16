@@ -2,8 +2,36 @@ import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
-import { EditError, ModelError, ModelStore, StoreError, checkModelName, runScenarios, upsertElements, validateModel, type ModelJSON, type RunData } from "../core/index.js";
-import { VIEWER_HEADER, type ChangeEvent, type EditErrorResponse, type EditRequest, type EditResponse, type ModelListResponse, type ModelResponse, type RunResult, type ScenarioRunResult, type UndoRequest } from "./api.js";
+import {
+  EditError,
+  ModelError,
+  ModelStore,
+  StoreError,
+  checkActualData,
+  checkModelName,
+  namesByElement,
+  parseDataCSV,
+  renamesSince,
+  runScenarios,
+  upsertElements,
+  validateModel,
+  versionOf,
+  type ModelJSON,
+  type RunData,
+} from "../core/index.js";
+import {
+  VIEWER_HEADER,
+  type ActualDataResult,
+  type ChangeEvent,
+  type EditErrorResponse,
+  type EditRequest,
+  type EditResponse,
+  type ModelListResponse,
+  type ModelResponse,
+  type RunResult,
+  type ScenarioRunResult,
+  type UndoRequest,
+} from "./api.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
 // 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements と同じ処理を通す）。
@@ -87,13 +115,33 @@ async function modelResponse(store: ModelStore, name: string, model: ModelJSON, 
       res.run_error = { message: err.message, issues: err.issues };
     }
   }
+  const actual = await actualData(store, name, model);
+  if (actual) res.actual = actual;
   return res;
 }
 
-/** 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版 */
+/** 実際のデータを読み、要素に合う列だけを要素名で返す。CSV がなければ undefined */
+async function actualData(store: ModelStore, name: string, model: ModelJSON): Promise<ActualDataResult | undefined> {
+  const text = await store.readData(name);
+  if (text === undefined) return undefined;
+  const res: ActualDataResult = { file: path.basename(store.dataPathOf(name)), version: versionOf(text), times: [], series: {}, issues: [] };
+  try {
+    const data = parseDataCSV(text);
+    res.issues = checkActualData(model, data);
+    res.times = data.times;
+    const names = new Set(model.elements.filter((e) => e.type !== "LINK" && e.name).map((e) => e.name!));
+    for (const c of data.columns) if (names.has(c.name)) res.series[c.name] = c.values;
+  } catch (e) {
+    res.issues = [{ message: `実際のデータ（${res.file}）を読めません: ${(e as Error).message}` }];
+  }
+  return res;
+}
+
+/** 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版、renamed は変えた名前（実際のデータの列名も戻すため） */
 interface HistoryEntry {
   before: string;
   after: string;
+  renamed: [string, string][];
 }
 const HISTORY_LIMIT = 50;
 const MAX_BODY = 1024 * 1024;
@@ -158,17 +206,21 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
   const pending = new Map<string, NodeJS.Timeout>();
   let watcher: FSWatcher | undefined;
   const notify = (file: string) => {
-    if (!file.toLowerCase().endsWith(".json")) return;
-    const name = file.replace(/\.json$/i, "");
+    // 実際のデータ（<モデル名>.data.csv）が変わったら、そのモデルが変わったと知らせる
+    const isData = file.toLowerCase().endsWith(".data.csv");
+    if (!isData && !file.toLowerCase().endsWith(".json")) return;
+    const name = isData ? file.slice(0, -".data.csv".length) : file.replace(/\.json$/i, "");
     clearTimeout(pending.get(name));
     pending.set(
       name,
       setTimeout(async () => {
         pending.delete(name);
-        const exists = await stat(path.join(store.dir, file)).then(
+        const exists = await stat(path.join(store.dir, isData ? `${name}.json` : file)).then(
           () => true,
           () => false,
         );
+        // CSV だけがあってモデルがなければ、知らせない（モデルが消えたわけではない）
+        if (isData && !exists) return;
         const event: ChangeEvent = { type: exists ? "changed" : "removed", name };
         for (const c of clients) c.write(`data: ${JSON.stringify(event)}\n\n`);
       }, 150),
@@ -231,11 +283,17 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         if (action === "edit") {
           if (!Array.isArray(body.elements) || body.elements.length === 0) throw new HttpError(400, "elements がありません。");
           if (!body.elements.every((e) => e && typeof e === "object" && !Array.isArray(e))) throw new HttpError(400, "elements の中身は要素の変更（オブジェクト）にしてください。");
+          const names = namesByElement(current.model);
           const report = upsertElements(current.model, body.elements);
           const version = await store.writeVersioned(name, current.model);
-          hist.push({ before: current.text, after: version });
+          const renamed = renamesSince(current.model, names);
+          // 実際のデータの列名は、記録を残してから直す（直せなくても、保存したモデルは元に戻せるように）
+          hist.push({ before: current.text, after: version, renamed });
           if (hist.length > HISTORY_LIMIT) hist.shift();
-          return [200, { report, model: await modelResponse(store, name, current.model, version, hist.length) }];
+          const data = await store.renameDataColumns(name, renamed);
+          if (data.note) report.notes.push(data.note);
+          const model = await modelResponse(store, name, current.model, version, hist.length);
+          return [200, data.warning ? { report, model, warning: data.warning } : { report, model }];
         }
         const last = hist.at(-1);
         if (!last) throw new HttpError(400, "元に戻せる変更がありません。");
@@ -245,7 +303,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         }
         hist.pop();
         await store.writeVersioned(name, { text: last.before });
-        return [200, { model: await loadModelResponse(store, name, hist.length) }];
+        const data = await store.renameDataColumns(name, last.renamed.map(([from, to]) => [to, from]));
+        const model = await loadModelResponse(store, name, hist.length);
+        return [200, data.warning ? { model, warning: data.warning } : { model }];
       });
       sendJSON(res, result[0], result[1]);
     } catch (e) {

@@ -148,6 +148,106 @@ describe("ビューアのサーバー", () => {
   });
 });
 
+describe("実際のデータ", () => {
+  test("<モデル名>.data.csv があれば、要素に合う列を返し、合わない列は知らせる", async () => {
+    expect((await get<ModelResponse>("/api/models/pop")).body.actual).toBeUndefined();
+    await new ModelStore(dir).writeData("pop", "Year,population,Rat\n0,100,0.1\n5,170,\n");
+    const { body } = await get<ModelResponse>("/api/models/pop");
+    expect(body.actual).toMatchObject({ file: "pop.data.csv", times: [0, 5], series: { Population: [100, 170] } });
+    expect(body.actual!.issues).toHaveLength(1);
+    expect(body.actual!.issues[0]!.hint).toMatch(/もしかして "Rate"/);
+    // 一覧には出さない
+    expect((await get<ModelListResponse>("/api/models")).body.models.map((m) => m.name)).toEqual(["pop"]);
+  });
+
+  test("読めない CSV は、そのことを知らせる（モデルはそのまま出す）", async () => {
+    await new ModelStore(dir).writeData("pop", "Year,Population\nabc,1\n");
+    const { body } = await get<ModelResponse>("/api/models/pop");
+    expect(body.run).toBeDefined();
+    expect(body.actual!.issues[0]!.message).toMatch(/読めません.*2 行目/);
+  });
+
+  test("CSV が変わると、そのモデルが変わったとイベントで知らせる。モデルの版は変えず、データの版を変える", async () => {
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    const controller = new AbortController();
+    const res = await fetch(new URL("/api/events", viewer.url), { signal: controller.signal });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const received = (async () => {
+      let text = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("イベントが届く前に切れた");
+        text += decoder.decode(value);
+        const m = text.match(/data: (.*)\n\n/);
+        if (m) return JSON.parse(m[1]!) as ChangeEvent;
+      }
+    })();
+    // 接続ができてから書き換える
+    await new Promise((r) => setTimeout(r, 100));
+    await new ModelStore(dir).writeData("pop", "Year,Population\n0,100\n");
+    expect(await received).toEqual({ type: "changed", name: "pop" });
+    controller.abort();
+    const first = (await get<ModelResponse>("/api/models/pop")).body;
+    expect(first.version).toBe(before.version);
+    await new ModelStore(dir).writeData("pop", "Year,Population\n0,120\n");
+    const second = (await get<ModelResponse>("/api/models/pop")).body;
+    expect(second.actual!.series.Population).toEqual([120]);
+    expect(second.actual!.version).not.toBe(first.actual!.version);
+  });
+
+  test("画面で名前を変えると列名も直し、元に戻すと列名も戻す", async () => {
+    const store = new ModelStore(dir);
+    await store.writeData("pop", "Year,Population\n0,100\n");
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Population", rename_to: "人口" }] });
+    expect(e1.status).toBe(200);
+    expect(e1.body.model.actual!.series).toEqual({ 人口: [100] });
+    expect(e1.body.model.actual!.issues).toEqual([]);
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: e1.body.model.version });
+    expect(u.body.model.actual!.series).toEqual({ Population: [100] });
+  });
+
+  test("列名を直せなくても、編集は保存して元に戻せるようにし、知らせを添える", async () => {
+    const store = new ModelStore(dir);
+    // 変えると列名が重なるので、CSV は直せない
+    await store.writeData("pop", "Year,Population,人口\n0,100,1\n");
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Population", rename_to: "人口" }] });
+    expect(e1.status).toBe(200);
+    expect(e1.body.warning).toMatch(/列名を直せませんでした/);
+    expect(e1.body.model.undo_available).toBe(1);
+    expect((await store.read("pop")).elements.some((e) => e.name === "人口")).toBe(true);
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: e1.body.model.version });
+    expect(u.status).toBe(200);
+    expect(u.body.model.version).toBe(v0);
+  });
+
+  test("CSV だけがあってモデルがなければ、知らせない", async () => {
+    const controller = new AbortController();
+    const res = await fetch(new URL("/api/events", viewer.url), { signal: controller.signal });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const received = (async () => {
+      let text = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("イベントが届く前に切れた");
+        text += decoder.decode(value);
+        const m = text.match(/data: (.*)\n\n/);
+        if (m) return JSON.parse(m[1]!) as ChangeEvent;
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 100));
+    await new ModelStore(dir).writeData("ghost", "Year,A\n0,1\n");
+    // CSV の知らせが出るならこちらより先に届く
+    await new Promise((r) => setTimeout(r, 400));
+    await new ModelStore(dir).writeData("pop", "Year,Population\n0,1\n");
+    expect(await received).toEqual({ type: "changed", name: "pop" });
+    controller.abort();
+  });
+});
+
 describe("ビューアからの編集", () => {
   test("要素を変えて保存し、新しい版と実行結果を返す", async () => {
     const before = (await get<ModelResponse>("/api/models/pop")).body;

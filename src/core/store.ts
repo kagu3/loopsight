@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ModelJSON } from "./modeljson.js";
+import { renameDataHeader } from "./data.js";
 
 export class StoreError extends Error {
   override name = "StoreError";
@@ -53,6 +54,49 @@ export class ModelStore {
 
   pathOf(name: string): string {
     return path.join(this.dir, `${checkModelName(name)}.json`);
+  }
+
+  /** 実際のデータのファイル（<モデル名>.data.csv）。モデルの一覧には出さない */
+  dataPathOf(name: string): string {
+    return path.join(this.dir, `${checkModelName(name)}.data.csv`);
+  }
+
+  /** 実際のデータの CSV を読む。なければ undefined */
+  async readData(name: string): Promise<string | undefined> {
+    try {
+      return await readFile(this.dataPathOf(name), "utf8");
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 実際のデータを書く。BOM を付けて、Excel でも日本語の要素名が文字化けしないようにする */
+  async writeData(name: string, csv: string): Promise<string> {
+    return this.writeTextFile(this.dataPathOf(name), "﻿" + csv);
+  }
+
+  /**
+   * 要素の名前を変えたときに、実際のデータの列名も直す。例外は投げず、知らせる文を返す。
+   * 直したら note、直せなかったら warning（モデルはもう保存してあるので、編集は失敗にしない）。
+   * データがないときや、合う列がないときは何も返さない
+   */
+  async renameDataColumns(name: string, renames: [string, string][]): Promise<{ note?: string; warning?: string }> {
+    if (!renames.length) return {};
+    const text = await this.readData(name);
+    if (text === undefined) return {};
+    const file = path.basename(this.dataPathOf(name));
+    try {
+      const next = renameDataHeader(text, renames);
+      if (next === undefined) return {};
+      await this.writeTextFile(this.dataPathOf(name), next);
+      return { note: `実際のデータ（${file}）の列名も直しました。` };
+    } catch (e) {
+      return {
+        warning:
+          `実際のデータ（${file}）の列名を直せませんでした（${(e as Error).message}）。` +
+          "ファイルがほかのアプリ（Excel など）で開かれていないか確かめ、列名を要素名にそろえてください。",
+      };
+    }
   }
 
   /** 作業フォルダ内の相対パスを絶対パスにする。フォルダの外を指していたら拒否する。 */
