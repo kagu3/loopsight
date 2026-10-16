@@ -408,6 +408,95 @@ describe("ビューアからの編集", () => {
   });
 });
 
+describe("ビューアからの施策の編集", () => {
+  test("施策を足し、直し、消す。保存した内容はモデルの scenarios に入り、グラフの実行結果も返す", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const add = await post<EditResponse>("/api/models/pop/scenarios", {
+      version: v0,
+      scenarios: [{ name: "高い", description: "増える割合を上げる", values: { rate: 0.2 } }],
+    });
+    expect(add.status).toBe(200);
+    expect(add.body.report).toMatchObject({ added: ["高い"] });
+    // 値の名前は要素の表記にそろえる
+    expect(add.body.model.model.scenarios).toEqual([{ name: "高い", description: "増える割合を上げる", values: { Rate: 0.2 } }]);
+    expect(add.body.model.scenarios![0]!.series!.Population!.at(-1)).toBeCloseTo(100 * 1.2 ** 10, 6);
+    expect(add.body.model.undo_available).toBe(1);
+
+    const fix = await post<EditResponse>("/api/models/pop/scenarios", {
+      version: add.body.model.version,
+      scenarios: [{ name: "高い", description: null, values: { Rate: null, Population: 200 } }],
+    });
+    expect(fix.status).toBe(200);
+    expect(fix.body.model.model.scenarios).toEqual([{ name: "高い", values: { Population: 200 } }]);
+
+    const remove = await post<EditResponse>("/api/models/pop/scenarios", { version: fix.body.model.version, scenarios: [], remove: ["高い"] });
+    expect(remove.status).toBe(200);
+    expect(remove.body.report).toMatchObject({ removed: ["高い"] });
+    expect(remove.body.model.scenarios).toBeUndefined();
+    expect((await new ModelStore(dir).read("pop")).scenarios).toBeUndefined();
+    expect(remove.body.model.undo_available).toBe(3);
+  });
+
+  test("施策の変更も元に戻せる", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const add = await post<EditResponse>("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "高い", values: { Rate: 0.2 } }] });
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: add.body.model.version });
+    expect(u.status).toBe(200);
+    expect(u.body.model.version).toBe(v0);
+    expect(u.body.model.model.scenarios).toBeUndefined();
+  });
+
+  test("施策の名前を変えると筋書きの中も直し、元に戻すと筋書きも戻す", async () => {
+    const store = new ModelStore(dir);
+    const m = population();
+    m.scenarios = [{ name: "支援", values: { Rate: 0.2 } }];
+    await store.write("pop", m);
+    await store.writeSlides("pop", { slides: [{ kind: "solution", title: "解決案", message: "支援する", scenario: "支援" }] });
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const e1 = await post<EditResponse>("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "支援", rename_to: "手厚い支援" }] });
+    expect(e1.status).toBe(200);
+    expect(e1.body.report!.notes.join("\n")).toMatch(/pop\.slides\.json/);
+    expect(e1.body.model.slides!.deck!.slides[0]).toMatchObject({ scenario: "手厚い支援" });
+    expect(e1.body.model.model.scenarios![0]!.name).toBe("手厚い支援");
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: e1.body.model.version });
+    expect(u.body.model.model.scenarios![0]!.name).toBe("支援");
+    expect(u.body.model.slides!.deck!.slides[0]).toMatchObject({ scenario: "支援" });
+  });
+
+  test("版が違えば書き込まず、最新を返す（AI などが先に施策を変えた場合）", async () => {
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    const m = population();
+    m.scenarios = [{ name: "AI の施策", values: { Rate: 0.3 } }];
+    await new ModelStore(dir).write("pop", m);
+    const { status, body } = await post<EditErrorResponse>("/api/models/pop/scenarios", { version: before.version, scenarios: [{ name: "高い", values: { Rate: 0.2 } }] });
+    expect(status).toBe(409);
+    expect(body.conflict).toBe(true);
+    expect(body.current!.model.scenarios).toEqual([{ name: "AI の施策", values: { Rate: 0.3 } }]);
+    expect((await new ModelStore(dir).read("pop")).scenarios).toEqual([{ name: "AI の施策", values: { Rate: 0.3 } }]);
+  });
+
+  test("施策の誤り（名前の重なり、「何もしない場合」、値を変えられない要素など）は 400 で、ファイルは変えない", async () => {
+    const store = new ModelStore(dir);
+    const m = population();
+    m.scenarios = [{ name: "高い", values: { Rate: 0.2 } }];
+    await store.write("pop", m);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const bad = async (body: unknown) => (await post<EditErrorResponse>("/api/models/pop/scenarios", { version: v0, ...(body as object) })).body.error;
+    expect(await bad({ scenarios: [{ name: "低い" }, { name: "低い", rename_to: "高い" }] })).toMatch(/すでにあります/);
+    expect(await bad({ scenarios: [{ name: "何もしない場合", values: { Rate: 0 } }] })).toMatch(/何も変えない実行/);
+    expect(await bad({ scenarios: [{ name: "低い", values: { Rat: 0 } }] })).toMatch(/Rate/);
+    expect(await bad({ scenarios: [], remove: ["ない施策"] })).toMatch(/見つかりません/);
+    // 形の誤り
+    expect((await post("/api/models/pop/scenarios", { version: v0 })).status).toBe(400);
+    expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [] })).status).toBe(400);
+    expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [{ values: {} }] })).status).toBe(400);
+    expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [], remove: "高い" })).status).toBe(400);
+    expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "x" }] }, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await store.readVersioned("pop")).version).toBe(v0);
+    expect((await get<ModelResponse>("/api/models/pop")).body.undo_available).toBe(0);
+  });
+});
+
 describe("作業フォルダがまだないとき", () => {
   test("作ってから見張るので、あとからできたモデルにも気づく", async () => {
     const parent = await tempDir();

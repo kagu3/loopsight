@@ -179,6 +179,16 @@ try {
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("scenarios", ".results");
 
+  // 施策の凡例を押して、左の欄で施策を直しているところ（保存せずに閉じる）
+  await b.hover(W - 4, H - 4);
+  await b.clickText(".scenario-chip-button", "移民を増やす");
+  await b.waitFor("document.querySelector('.scenario-table input')");
+  await b.evaluate("(() => { const t = document.querySelector('.scenario-table input'); t.focus(); t.select(); })()");
+  await b.send("Input.insertText", { text: "80" });
+  await sleep(200);
+  await shot("scenario-edit");
+  await b.clickText(".form-buttons button", "やめる");
+
   // 発表モード（MCP の set_slides で保存した筋書きを ?view=present で見せる）。比較のスライドを 16:9 で撮る
   await store.writeSlides(
     "population",

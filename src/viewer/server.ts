@@ -11,10 +11,13 @@ import {
   checkModelName,
   checkSlides,
   namesByElement,
+  namesByScenario,
   parseDataCSV,
   parseSlides,
   renamesSince,
   runScenarios,
+  scenarioRenamesSince,
+  setScenarios,
   upsertElements,
   validateModel,
   versionOf,
@@ -33,12 +36,13 @@ import {
   type ModelResponse,
   type RunResult,
   type ScenarioRunResult,
+  type ScenariosRequest,
   type SlidesResult,
   type UndoRequest,
 } from "./api.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
-// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements と同じ処理を通す）。
+// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、set_scenarios と同じ処理を通す）。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
 // 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
 
@@ -160,11 +164,15 @@ async function slidesResult(store: ModelStore, name: string, model: ModelJSON, d
   return res;
 }
 
-/** 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版、renamed は変えた名前（実際のデータの列名と筋書きの中の名前も戻すため） */
+/**
+ * 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版。
+ * renamed は変えた要素の名前（実際のデータの列名と筋書きの中の名前も戻すため）、renamedScenarios は変えた施策の名前（筋書きの中の名前も戻すため）
+ */
 interface HistoryEntry {
   before: string;
   after: string;
   renamed: [string, string][];
+  renamedScenarios: [string, string][];
 }
 const HISTORY_LIMIT = 50;
 const MAX_BODY = 1024 * 1024;
@@ -293,10 +301,10 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     current: await loadModelResponse(store, name, historyOf(name).length),
   });
 
-  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "undo") => {
+  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "undo") => {
     try {
       checkWriteRequest(req);
-      const body = await readBody<EditRequest & UndoRequest>(req);
+      const body = await readBody<EditRequest & ScenariosRequest & UndoRequest>(req);
       if (typeof body?.version !== "string") throw new HttpError(400, "version がありません。");
       const result = await serial(name, async (): Promise<[number, EditResponse | EditErrorResponse]> => {
         const current = await store.readVersioned(name);
@@ -312,7 +320,7 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           const version = await store.writeVersioned(name, current.model);
           const renamed = renamesSince(current.model, names);
           // 実際のデータの列名は、記録を残してから直す（直せなくても、保存したモデルは元に戻せるように）
-          hist.push({ before: current.text, after: version, renamed });
+          hist.push({ before: current.text, after: version, renamed, renamedScenarios: [] });
           if (hist.length > HISTORY_LIMIT) hist.shift();
           const data = await store.renameDataColumns(name, renamed);
           if (data.note) report.notes.push(data.note);
@@ -321,6 +329,27 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
           const model = await modelResponse(store, name, current.model, version, hist.length);
           return [200, warning ? { report, model, warning } : { report, model }];
+        }
+        if (action === "scenarios") {
+          if (!Array.isArray(body.scenarios)) throw new HttpError(400, "scenarios がありません。");
+          if (!body.scenarios.every((s) => s && typeof s === "object" && !Array.isArray(s) && typeof s.name === "string")) {
+            throw new HttpError(400, "scenarios の中身は、name のある施策の変更（オブジェクト）にしてください。");
+          }
+          if (body.remove !== undefined && !(Array.isArray(body.remove) && body.remove.every((r) => typeof r === "string"))) {
+            throw new HttpError(400, "remove は消す施策の名前の並びにしてください。");
+          }
+          if (body.scenarios.length === 0 && !body.remove?.length) throw new HttpError(400, "scenarios か remove を指定してください。");
+          const names = namesByScenario(current.model);
+          const report = setScenarios(current.model, body.scenarios, { remove: body.remove });
+          const version = await store.writeVersioned(name, current.model);
+          const renamedScenarios = scenarioRenamesSince(current.model, names);
+          // 筋書きの中の名前は、記録を残してから直す（直せなくても、保存したモデルは元に戻せるように）
+          hist.push({ before: current.text, after: version, renamed: [], renamedScenarios });
+          if (hist.length > HISTORY_LIMIT) hist.shift();
+          const slides = await store.renameSlideNames(name, { scenarios: renamedScenarios });
+          if (slides.note) report.notes.push(slides.note);
+          const model = await modelResponse(store, name, current.model, version, hist.length);
+          return [200, slides.warning ? { report, model, warning: slides.warning } : { report, model }];
         }
         const last = hist.at(-1);
         if (!last) throw new HttpError(400, "元に戻せる変更がありません。");
@@ -331,8 +360,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         hist.pop();
         await store.writeVersioned(name, { text: last.before });
         const back = last.renamed.map(([from, to]): [string, string] => [to, from]);
+        const backScenarios = last.renamedScenarios.map(([from, to]): [string, string] => [to, from]);
         const data = await store.renameDataColumns(name, back);
-        const slides = await store.renameSlideNames(name, { elements: back });
+        const slides = await store.renameSlideNames(name, { elements: back, scenarios: backScenarios });
         const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
         const model = await loadModelResponse(store, name, hist.length);
         return [200, warning ? { model, warning } : { model }];
@@ -358,9 +388,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
       sendJSON(res, 200, body);
       return;
     }
-    const write = p.match(/^\/api\/models\/([^/]+)\/(edit|undo)$/);
+    const write = p.match(/^\/api\/models\/([^/]+)\/(edit|scenarios|undo)$/);
     if (write) {
-      await handleWrite(req, res, write[1]!, write[2] as "edit" | "undo");
+      await handleWrite(req, res, write[1]!, write[2] as "edit" | "scenarios" | "undo");
       return;
     }
     if (p.startsWith("/api/models/")) {

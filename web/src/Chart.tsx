@@ -105,6 +105,10 @@ export interface ChartProps {
   scenarios?: ScenarioRunResult[];
   /** 実際のデータ。あれば点で重ねる */
   actual?: ActualDataResult;
+  /** 左の欄で直している施策の名前（凡例で目立たせる） */
+  editingScenario?: string;
+  /** 施策の編集欄を開く。name がなければ施策を足す */
+  onEditScenario?(name?: string): void;
 }
 
 /** 「何もしない場合」の線の色と点線 */
@@ -114,7 +118,7 @@ const runColor = (r: CompareRun, k: number) => (r.baseline ? BASELINE_COLOR : `v
 /** 施策を重ねているときの、実際のデータの点の色 */
 const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
-export function Chart({ modelName, model, run, scenarios, actual }: ChartProps) {
+export function Chart({ modelName, model, run, scenarios, actual, editingScenario, onEditScenario }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
   const [visible, setVisible] = useState<string[]>(() => defaultVisible(model, names));
@@ -229,6 +233,12 @@ export function Chart({ modelName, model, run, scenarios, actual }: ChartProps) 
             </button>
           </div>
         )}
+        {/* 施策の凡例を出していないとき（施策がない・重ねない）の、施策を足す入口 */}
+        {!comparing && onEditScenario && (
+          <button className="toolbar-button" onClick={() => onEditScenario()} title={`値を変えた施策を足し、「${BASELINE_NAME}」と重ねて比べます`}>
+            ＋ 施策を足す
+          </button>
+        )}
         {view === "chart" && (
           <div className="segmented" role="radiogroup" aria-label="縦軸">
             <button
@@ -271,7 +281,7 @@ export function Chart({ modelName, model, run, scenarios, actual }: ChartProps) 
         </ul>
       </div>
 
-      {comparing && <ScenarioLegend compare={compare} />}
+      {comparing && <ScenarioLegend compare={compare} editing={editingScenario} onEdit={onEditScenario} />}
 
       {visible.length === 0 ? (
         <p className="muted pad">表示する要素を選んでください。</p>
@@ -403,26 +413,59 @@ function yAxis(scale: Scale) {
   );
 }
 
-/** 施策の凡例。「何もしない場合」は灰色の点線。実行できなかった施策と、色が足りずに出さない施策も知らせる */
-function ScenarioLegend({ compare }: { compare: CompareRuns }) {
+/**
+ * 施策の凡例。「何もしない場合」は灰色の点線。実行できなかった施策と、色が足りずに出さない施策も知らせる。
+ * onEdit があれば、施策の名前を押すと左の欄で直せる。最後に「＋ 施策を足す」を置く
+ */
+function ScenarioLegend({ compare, editing, onEdit }: { compare: CompareRuns; editing?: string; onEdit?(name?: string): void }) {
+  const isEditing = (n: string) => editing !== undefined && editing.toLowerCase() === n.toLowerCase();
+  // 実行できなかった施策と、出していない施策の名前も、押すと直せる
+  const nameButton = (n: string) =>
+    onEdit ? (
+      <button className="link inline-link" onClick={() => onEdit(n)} title={`施策「${n}」を左の欄で直します`}>
+        {n}
+      </button>
+    ) : (
+      n
+    );
   return (
     <div className="scenario-bar">
       <ul className="scenario-legend" aria-label="重ねている施策">
         {compare.runs.map((r, k) => (
           <li key={k} className="scenario-chip" title={`${r.name}\n${describeRun(r)}`}>
-            <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
-            <span className="legend-name">{r.name}</span>
+            {r.baseline || !onEdit ? (
+              <>
+                <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
+                <span className="legend-name">{r.name}</span>
+              </>
+            ) : (
+              <button className={`scenario-chip-button ${isEditing(r.name) ? "on" : ""}`} onClick={() => onEdit(r.name)} aria-pressed={isEditing(r.name)}>
+                <LineSwatch color={runColor(r, k)} />
+                <span className="legend-name">{r.name}</span>
+              </button>
+            )}
           </li>
         ))}
+        {onEdit && (
+          <li className="scenario-chip">
+            <button className="link" onClick={() => onEdit()} title={`値を変えた施策を足し、「${BASELINE_NAME}」と重ねて比べます`}>
+              ＋ 施策を足す
+            </button>
+          </li>
+        )}
       </ul>
       {compare.failed.map((f) => (
         <p key={f.name} className="scenario-note error-text" title={f.error}>
-          施策「{f.name}」は実行できませんでした: {f.error}
+          施策「{nameButton(f.name)}」は実行できませんでした: {f.error}
         </p>
       ))}
       {compare.omitted.length > 0 && (
         <p className="scenario-note">
-          同時に重ねられる施策は {MAX_SERIES} つまでです。{compare.omitted.map((n) => `「${n}」`).join("")}は出していません
+          同時に重ねられる施策は {MAX_SERIES} つまでです。
+          {compare.omitted.map((n) => (
+            <span key={n}>「{nameButton(n)}」</span>
+          ))}
+          は出していません
         </p>
       )}
     </div>

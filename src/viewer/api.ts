@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Slide, SlideDeck, SlideIssue } from "../core/index.js";
+import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue } from "../core/index.js";
 
-export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Slide, SlideDeck, SlideIssue };
+export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue };
 
 /** GET /api/models */
 export interface ModelListResponse {
@@ -84,6 +84,14 @@ export interface EditRequest {
   elements: ElementPatch[];
 }
 
+/** POST /api/models/:name/scenarios の本文。scenarios と remove は MCP の set_scenarios と同じ形 */
+export interface ScenariosRequest {
+  version: string;
+  scenarios: ScenarioPatch[];
+  /** 消す施策の名前 */
+  remove?: string[];
+}
+
 /** POST /api/models/:name/undo の本文 */
 export interface UndoRequest {
   version: string;
@@ -91,7 +99,8 @@ export interface UndoRequest {
 
 /** 書き込みの結果。成功すると新しいモデルを返す */
 export interface EditResponse {
-  report?: EditReport;
+  /** 要素の編集なら EditReport、施策の編集なら ScenarioReport */
+  report?: EditReport | ScenarioReport;
   model: ModelResponse;
   /** 書き込めたが、知らせたいこと（実際のデータの列名を直せなかったときなど） */
   warning?: string;

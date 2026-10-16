@@ -276,6 +276,23 @@ describe("シナリオ（施策）の保存", () => {
     expect(r2.notes.join("\n")).toMatch(/何もしない場合/);
   });
 
+  test("値を直しても、変える値の並び順は変えない。表記の違うキーは元の位置で要素の表記にそろえる", () => {
+    const m = sir();
+    m.scenarios = [{ name: "a", values: { beta: 0.2, Gamma: 0.2, S: 500 } }];
+    setScenarios(m, [{ name: "a", values: { Gamma: 0.3 } }]);
+    expect(Object.entries(m.scenarios[0]!.values)).toEqual([
+      ["beta", 0.2],
+      ["Gamma", 0.3],
+      ["S", 500],
+    ]);
+    setScenarios(m, [{ name: "a", values: { Beta: 0.1 } }]);
+    expect(Object.entries(m.scenarios![0]!.values)).toEqual([
+      ["Beta", 0.1],
+      ["Gamma", 0.3],
+      ["S", 500],
+    ]);
+  });
+
   test("名前を変える、消す、すべて置き換える", () => {
     const m = sir();
     setScenarios(m, [{ name: "a", values: { Beta: 0.2 } }, { name: "b", values: { Beta: 0.3 } }]);

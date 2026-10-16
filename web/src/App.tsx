@@ -1,17 +1,18 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse } from "../../src/viewer/api.js";
-import { fetchList, fetchModel, postEdit, postUndo, type WriteResult } from "./api.js";
+import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
+import { fetchList, fetchModel, postEdit, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatValue } from "./Chart.js";
 import { Details } from "./Details.js";
 import { Diagram } from "./Diagram.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { Problems } from "./Problems.js";
+import { ScenarioEditor } from "./ScenarioEditor.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
-// 画面からの編集（式などの変更、位置の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
+// 画面からの編集（式などの変更、位置の変更、施策の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
@@ -74,6 +75,11 @@ export function App() {
   const [notice, setNotice] = useState<string>();
   const [connected, setConnected] = useState(false);
   const [selected, setSelected] = useState<string>();
+  // 左の欄で直している施策。name がなければ、施策を足している
+  const [scenario, setScenario] = useState<{ name?: string }>();
+  // 保存を待つあいだに、ほかのモデルや要素、施策を開いたかを確かめるため
+  const scenarioRef = useRef(scenario);
+  scenarioRef.current = scenario;
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [updatedAt, setUpdatedAt] = useState<Date>();
   const [busy, setBusy] = useState(false);
@@ -203,6 +209,7 @@ export function App() {
     dataRef.current = undefined;
     setData(undefined);
     setSelected(undefined);
+    setScenario(undefined);
     setNotice(undefined);
     void loadModel(current);
   }, [current, loadModel]);
@@ -268,6 +275,41 @@ export function App() {
       }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
   );
+
+  /** 施策を足す・直す・消す（MCP の set_scenarios と同じ形） */
+  const editScenarios = useCallback(
+    (patches: ScenarioPatch[], remove?: string[]): Promise<string | undefined> =>
+      enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        return applyWrite(await postScenarios(d.name, d.version, patches, remove));
+      }, SKIPPED_MESSAGE),
+    [applyWrite, enqueueWrite],
+  );
+  const saveScenario = useCallback(
+    async (patch: ScenarioPatch) => {
+      const [model, target] = [currentRef.current, scenarioRef.current];
+      const err = await editScenarios([patch]);
+      // 足したり名前を変えたりしたら、その名前で編集欄を開いたままにする。待つあいだにほかを開いていたら、そのままにする
+      if (!err && currentRef.current === model && scenarioRef.current === target) setScenario({ name: patch.rename_to ?? patch.name });
+      return err;
+    },
+    [editScenarios],
+  );
+  const removeScenario = useCallback(
+    async (name: string) => {
+      const [model, target] = [currentRef.current, scenarioRef.current];
+      const err = await editScenarios([], [name]);
+      if (!err && currentRef.current === model && scenarioRef.current === target) setScenario(undefined);
+      return err;
+    },
+    [editScenarios],
+  );
+  /** 図で要素を選ぶと、施策の編集欄を閉じて、その要素を出す */
+  const selectElement = useCallback((name: string) => {
+    setScenario(undefined);
+    setSelected(name);
+  }, []);
 
   const undo = useCallback(
     () =>
@@ -341,8 +383,17 @@ export function App() {
         </header>
 
         <section className="panel">
-          <h2>選んだ要素</h2>
-          {selectedEl ? (
+          <h2>{scenario ? "施策" : "選んだ要素"}</h2>
+          {scenario && data ? (
+            <ScenarioEditor
+              key={scenario.name?.toLowerCase() ?? "（新しい施策）"}
+              model={data.model}
+              name={scenario.name}
+              onSave={saveScenario}
+              onRemove={removeScenario}
+              onClose={() => setScenario(undefined)}
+            />
+          ) : selectedEl ? (
             <Details el={selectedEl} value={finalValues[selectedEl.name!]} onSave={(patch) => edit([patch])} />
           ) : selected && data ? (
             <p className="muted">選んでいた「{selected}」が見つかりません。名前が変わったか、消された可能性があります。図で選び直してください。</p>
@@ -351,7 +402,7 @@ export function App() {
           )}
         </section>
 
-        {data && <Problems data={data} onSelect={setSelected} />}
+        {data && <Problems data={data} onSelect={selectElement} />}
 
         <section className="panel models-panel">
           <h2>
@@ -436,7 +487,7 @@ export function App() {
                 selected={selected}
                 changed={changed}
                 values={finalValues}
-                onSelect={setSelected}
+                onSelect={selectElement}
                 onMove={move}
               />
             </ReactFlowProvider>
@@ -447,7 +498,15 @@ export function App() {
 
         <div className="results">
           {data?.run ? (
-            <Chart modelName={data.name} model={data.model} run={data.run} scenarios={data.scenarios} actual={data.actual} />
+            <Chart
+              modelName={data.name}
+              model={data.model}
+              run={data.run}
+              scenarios={data.scenarios}
+              actual={data.actual}
+              editingScenario={scenario?.name}
+              onEditScenario={(name) => setScenario({ name })}
+            />
           ) : data ? (
             <p className="muted pad">エラーがあるため実行できません。左の「問題」を見てください。</p>
           ) : null}

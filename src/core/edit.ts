@@ -362,9 +362,17 @@ export function setScenarios(model: ModelJSON, patches: ScenarioPatch[], options
       if (!SCENARIO_TYPES.includes(el.type)) {
         throw new EditError(`${el.type} "${el.name}" の値はシナリオで変えられません（変えられるのは STOCK の初期値、VARIABLE と FLOW の値）。`);
       }
-      // 表記の違う同じ名前（"rate" と "Rate"）は 1 つにまとめる
-      for (const k of Object.keys(s.values)) if (sameName(k, el.name)) delete s.values[k];
-      if (value !== null) s.values[el.name!] = value;
+      // 表記の違う同じ名前（"rate" と "Rate"）は 1 つにまとめる。値を直すときは、元の位置のまま要素の表記にそろえる
+      const same = Object.keys(s.values).filter((k) => sameName(k, el.name));
+      if (value === null) {
+        for (const k of same) delete s.values[k];
+      } else if (!same.length) {
+        s.values[el.name!] = value;
+      } else {
+        s.values = Object.fromEntries(
+          Object.entries(s.values).flatMap(([k, v]): [string, Equation][] => (k === same[0] ? [[el.name!, value]] : same.includes(k) ? [] : [[k, v]])),
+        );
+      }
     }
     if (!Object.keys(s.values).length) report.notes.push(`シナリオ "${s.name}" は値を変えていないので、「${BASELINE_SCENARIO}」と同じ結果になります。`);
   }
