@@ -17,7 +17,7 @@
       },
       "display": {
         "coordinates": [
-          100,
+          300,
           260
         ],
         "size": [
@@ -37,8 +37,8 @@
         "interactive_min": 0,
         "interactive_max": 0.1,
         "coordinates": [
-          180,
-          190
+          155,
+          160
         ],
         "size": [
           120,
@@ -54,8 +54,8 @@
       },
       "display": {
         "coordinates": [
-          180,
-          320
+          425,
+          160
         ],
         "size": [
           120,
@@ -73,8 +73,8 @@
       },
       "display": {
         "from_coordinates": [
-          150,
-          150
+          80,
+          280
         ]
       }
     },
@@ -88,20 +88,42 @@
       },
       "display": {
         "to_coordinates": [
-          150,
-          410
+          620,
+          280
         ]
       }
     },
     {
       "type": "LINK",
+      "from": "Population",
+      "to": "Births",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "Population",
+      "to": "Deaths",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
       "from": "Birth Rate",
-      "to": "Births"
+      "to": "Births",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
     },
     {
       "type": "LINK",
       "from": "Death Rate",
-      "to": "Deaths"
+      "to": "Deaths",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
     }
   ],
   "visualizations": [

@@ -5,6 +5,7 @@ import {
   Handle,
   MarkerType,
   MiniMap,
+  Panel,
   Position,
   ReactFlow,
   useInternalNode,
@@ -18,15 +19,17 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
-import { borderPoint, connectedTo, fitTargets, linkControlPoint, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
+import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
+import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
 // 箱と雲はドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
 
-// dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）
+// dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
+// inLoop：ループを見せているとき、ループの線（太くする）
 type NodeData = { g: GraphNode; selected: boolean; changed: boolean; dimmed: boolean; value?: string };
-type EdgeData = { g: GraphEdge; selected: boolean; changed: boolean; dimmed: boolean };
+type EdgeData = { g: GraphEdge; selected: boolean; changed: boolean; dimmed: boolean; inLoop: boolean };
 type ModelNodeT = Node<NodeData, "model">;
 type ModelEdgeT = Edge<EdgeData, "floating">;
 
@@ -85,7 +88,7 @@ function FloatingEdge({ id, source, target, markerEnd, data }: EdgeProps<ModelEd
   // 弁には縁ではなく中心でつなぐ
   const endAt = (n: typeof a, c: [number, number], toward: [number, number]) => (n.kind === "VALVE" ? c : borderPoint(n, toward[0], toward[1]));
 
-  const cls = ["edge", `edge-${data.g.kind}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : "", data.dimmed ? "is-dimmed" : ""].join(" ");
+  const cls = ["edge", `edge-${data.g.kind}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : "", data.dimmed ? "is-dimmed" : "", data.inLoop ? "is-loop" : ""].join(" ");
   if (data.g.kind !== "link") {
     const p1 = endAt(a, ca, cb);
     const p2 = endAt(b, cb, ca);
@@ -127,6 +130,12 @@ export interface DiagramProps {
   onMove(patches: ElementPatch[]): Promise<string | undefined>;
   /** 図だけを見せる表示（MCP の view_diagram が画像にする）。操作の道具を出さない */
   embed?: boolean;
+  /**
+   * 目立たせるループ（find_loops の結果や、筋書きの「原因」のスライドから渡す）。
+   * ループの要素と線だけをふつうに出してほかを薄くし、図の左上にループの名前と R / B を出す。
+   * 要素を選んでいても、こちらを優先する
+   */
+  loop?: LoopView;
 }
 
 type Pos = { x: number; y: number };
@@ -170,8 +179,12 @@ export function Diagram(props: DiagramProps) {
     return graph.nodes.map((n) => byId.get(n.id)!);
   }, [graph, moved, valveEnds]);
 
-  // 選んだ要素につながる線とノード。ほかは薄くする（配置を変えずに、見たいところを読めるように）
-  const focus = useMemo(() => (selected ? connectedTo(graph, selected) : undefined), [graph, selected]);
+  // 選んだ要素につながる線とノード。ほかは薄くする（配置を変えずに、見たいところを読めるように）。
+  // ループを見せているときは、ループの要素と線
+  // 呼ぶ側が毎回新しい配列を渡しても作り直さないよう、要素名の並びで覚える
+  const loopKey = props.loop && JSON.stringify(props.loop.elements);
+  const loop = useMemo(() => (loopKey ? loopFocus(graph, JSON.parse(loopKey) as string[]) : undefined), [graph, loopKey]);
+  const focus = useMemo(() => loop ?? (selected ? connectedTo(graph, selected) : undefined), [graph, selected, loop]);
 
   const nodes = useMemo<ModelNodeT[]>(
     () =>
@@ -238,16 +251,19 @@ export function Diagram(props: DiagramProps) {
           selected: !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(),
           changed: !!g.element && changed.has(g.element.toLowerCase()),
           dimmed: !!focus && !focus.edges.has(g.id),
+          inLoop: !!loop?.edges.has(g.id),
         },
         // 矢印の色は線と同じトークンにする（React Flow は色を style に入れるので CSS 変数が効く）
         markerEnd: g.arrow
-          ? g.kind === "link"
-            ? { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "var(--link)" }
-            : { type: MarkerType.ArrowClosed, width: 12, height: 12, color: "var(--flow)" }
+          ? loop?.edges.has(g.id)
+            ? { type: MarkerType.ArrowClosed, width: 12, height: 12, color: "var(--loop)" }
+            : g.kind === "link"
+              ? { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "var(--link)" }
+              : { type: MarkerType.ArrowClosed, width: 12, height: 12, color: "var(--flow)" }
           : undefined,
         selectable: false,
       })),
-    [graph, selected, changed, focus],
+    [graph, selected, changed, focus, loop],
   );
 
   return (
@@ -257,6 +273,8 @@ export function Diagram(props: DiagramProps) {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       colorMode="system"
+      // ループの線の色（--loop）を R / B で変える
+      className={props.loop ? `loop-${props.loop.kind.toLowerCase()}` : undefined}
       onNodesChange={onNodesChange}
       onNodeDragStop={onNodeDragStop}
       nodeDragThreshold={3}
@@ -264,14 +282,15 @@ export function Diagram(props: DiagramProps) {
       elementsSelectable
       fitView
       // 画像にする図は全体を 1 枚に収める。ビューアでは名前が読める大きさより縮めない
-      fitViewOptions={props.embed ? EMBED_FIT : VIEWER_FIT}
+      fitViewOptions={props.embed ? (props.loop ? EMBED_LOOP_FIT : EMBED_FIT) : VIEWER_FIT}
       minZoom={0.1}
       proOptions={{ hideAttribution: true }}
       onNodeClick={(_, n) => props.onSelect(n.data.g.element)}
       onPaneClick={() => props.onSelect(undefined)}
     >
-      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} />
+      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} />
       <Background gap={20} size={1} />
+      {props.loop && <LoopBadge loop={props.loop} />}
       {!props.embed && <Controls showInteractive={false} fitViewOptions={VIEWER_FIT} />}
       {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
       {!props.embed && <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} ariaLabel="図の全体" style={{ width: 150, height: 90 }} />}
@@ -279,9 +298,27 @@ export function Diagram(props: DiagramProps) {
   );
 }
 
+/** 目立たせているループの名前と R / B */
+function LoopBadge({ loop }: { loop: LoopView }) {
+  return (
+    <Panel position="top-left" className={`loop-badge loop-${loop.kind.toLowerCase()}`}>
+      <span className="loop-kind" aria-hidden>
+        {loop.kind === "unknown" ? "?" : loop.kind}
+      </span>
+      <span className="loop-text">
+        <span className="loop-name">{loop.name}</span>
+        {loop.name !== LOOP_KIND_LABEL[loop.kind] && <span className="loop-kind-label">{LOOP_KIND_LABEL[loop.kind]}</span>}
+      </span>
+    </Panel>
+  );
+}
+
 const FIT_PADDING = 0.15;
 // 毎回作り直すと React Flow が合わせ直しの途中の設定を上書きするので、ここで 1 度だけ作る
 const EMBED_FIT = { padding: 0.04, maxZoom: 1.5 };
+/** ループの札（左上）の分だけ、上を空ける。図だけの表示で、札が図に重ならないように */
+const BADGE_SPACE = "76px" as const;
+const EMBED_LOOP_FIT = { padding: { top: BADGE_SPACE, bottom: 0.04, x: 0.04 }, maxZoom: 1.5 };
 const VIEWER_FIT = { padding: FIT_PADDING, maxZoom: 1.5, minZoom: MIN_FIT_ZOOM };
 
 const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stock-border)" : "var(--link)");
@@ -291,7 +328,7 @@ const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stoc
  * 式や値が変わっただけのとき（AI が値を調整したなど）は動かさない。
  * 全体が名前の読める大きさで入らないときは、ストックが入るように合わせる（ほかはドラッグやミニマップで見る）。
  */
-function FitOnChange({ modelName, layoutKey, nodes, embed }: { modelName: string; layoutKey: string; nodes: GraphNode[]; embed?: boolean }) {
+function FitOnChange({ modelName, layoutKey, nodes, embed, badge }: { modelName: string; layoutKey: string; nodes: GraphNode[]; embed?: boolean; badge?: boolean }) {
   const flow = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
@@ -303,13 +340,14 @@ function FitOnChange({ modelName, layoutKey, nodes, embed }: { modelName: string
     if (last.current === key) return;
     last.current = key;
     if (embed) {
-      requestAnimationFrame(() => flow.fitView({ padding: FIT_PADDING, maxZoom: 1.5, duration: 200 }));
+      const padding = badge ? { top: BADGE_SPACE, bottom: FIT_PADDING, x: FIT_PADDING } : FIT_PADDING;
+      requestAnimationFrame(() => flow.fitView({ padding, maxZoom: 1.5, duration: 200 }));
       return;
     }
     // 全体が名前の読める大きさで入らなければ、ストックが入るように合わせる
     const fit = fitTargets(nodesRef.current, width, height, FIT_PADDING);
     const targets = fit.nodes.map((n) => ({ id: n.id }));
     requestAnimationFrame(() => flow.fitView({ nodes: targets, padding: FIT_PADDING, maxZoom: fit.maxZoom, minZoom: MIN_FIT_ZOOM, duration: 200 }));
-  }, [key, flow, embed, width, height]);
+  }, [key, flow, embed, badge, width, height]);
   return null;
 }

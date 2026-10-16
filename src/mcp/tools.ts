@@ -12,6 +12,8 @@ import {
   EditError,
   LOOP_POLARITIES,
   ImportError,
+  LOOP_KIND_LABEL,
+  MAX_LOOPS,
   ModelError,
   ModelStore,
   StoreError,
@@ -23,7 +25,11 @@ import {
   checkSlides,
   compareScenarios,
   dataToCSV,
+  describeLoop,
+  didYouMean,
   emptyModel,
+  findElement,
+  findLoops,
   importModelText,
   layoutModel,
   modelScenarios,
@@ -51,6 +57,8 @@ import {
   SLIDE_KIND_LABEL,
   type ActualData,
   type ElementPatch,
+  type LoopStep,
+  type LoopView,
   type ModelJSON,
   type ScenarioPatch,
 } from "../core/index.js";
@@ -131,6 +139,10 @@ const slide = z.discriminatedUnion("kind", [
 ]);
 
 // ---- 共通の処理 ----
+
+/** ループのつながりを 1 行ずつの文にする（例: "採用 → 新人 (+, フロー)"） */
+const VIA_LABEL: Record<LoopStep["via"], string> = { link: "", flow: ", フロー", reference: ", フローの式の参照" };
+const stepText = (s: LoopStep) => `${s.from} → ${s.to} (${s.polarity}${VIA_LABEL[s.via]})`;
 
 const isPrimitive = (v: unknown) => v === null || typeof v !== "object";
 
@@ -221,14 +233,15 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せる施策は set_scenarios でモデルに保存する（ビューアのグラフに「何もしない場合」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
-5. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
-6. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
+5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる
+6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
+7. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
 「会議資料を作って」と頼まれたら（SD を知らない人に、問題と解決案を順に見せる資料）:
 a. get_model と run_simulation でモデルの振る舞いを確かめる。実際のデータ（実績）があれば import_data で取り込む。比べる施策がなければ set_scenarios で保存する（description に、どんな施策かを書く）
 b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 比較 → 結論 の順に並べ、どのスライドにも見出しと「言いたいこと」の 1 文を書く。式や SD の用語は使わず、グラフから読み取れることを書く
    - 問題（problem）：注目する要素、実際のデータ、「今」の時点。モデルの線に実際のデータの点が重なり、モデルが問題を再現していることを見せる
-   - 原因（cause）：問題を生むループを作る要素の名前と、強めるループ（R）か釣り合わせるループ（B）か。ループごとに 1 枚
+   - 原因（cause）：問題を生むループを作る要素の名前と、強めるループ（R）か釣り合わせるループ（B）か。ループごとに 1 枚。find_loops で探したループの elements を loop.elements に、kind を loop.polarity に使う（set_slides は、ループになっているか、R / B がリンクの極性と合うかを確かめる。極性が決まっていなければ upsert_elements で入れる）
    - 解決案（solution）：施策の名前。施策ごとに 1 枚
    - 比較（compare）：比べる施策と要素、注目する時点。「何もしない場合」はいつも重なる
    - 結論（conclusion）：文章だけ
@@ -422,19 +435,36 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       description:
         "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、各要素の位置を返す。" +
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
-        "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。",
+        "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
+        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議資料の「原因」のスライド向けの表示）。",
       inputSchema: {
         model: modelName,
         image: z.boolean().optional().describe("画像を付ける（既定は true）。一覧だけでよければ false"),
+        loop: z
+          .object({
+            elements: z.array(z.string()).min(1).describe("ループを作る要素名を、つながる順に（find_loops の elements）"),
+            name: z.string().optional().describe("図に出すループの名前（find_loops の name や「増員で遅れが増える」など。省略すると「強めるループ」などの種類の名前）"),
+          })
+          .optional()
+          .describe("目立たせるループ"),
         width: z.number().int().min(400).max(4000).optional().describe("画像の幅（既定 1600）"),
         height: z.number().int().min(300).max(4000).optional().describe("画像の高さ（既定 1000）"),
       },
       annotations: { readOnlyHint: true },
     },
-    handle(async (a: { model: string; image?: boolean; width?: number; height?: number }) => {
+    handle(async (a: { model: string; image?: boolean; width?: number; height?: number; loop?: { elements: string[]; name?: string } }) => {
       const m = await store.read(a.model);
+      let loop: LoopView | undefined;
+      let loopSteps: string[] | undefined;
+      if (a.loop) {
+        const found = describeLoop(m, a.loop.elements);
+        if ("error" in found) throw new ModelError(`ループになっていません。${found.error}`, []);
+        loop = { name: a.loop.name ?? LOOP_KIND_LABEL[found.loop.kind], kind: found.loop.kind, elements: found.loop.elements };
+        loopSteps = found.loop.steps.map(stepText);
+      }
       const check = {
         model: a.model,
+        ...(loop ? { loop: { ...loop, steps: loopSteps } } : {}),
         how_to_move:
           "upsert_elements で [{name:'要素名', display:{coordinates:[x, y]}}]（左上）。雲は [{name:'フロー名', display:{from_coordinates:[x, y]}}]（中心、行き先なら to_coordinates）。y は下向き",
         ...checkDiagram(m),
@@ -442,7 +472,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       if (a.image === false) return check;
       let png: Buffer;
       try {
-        png = await renderDiagram(store, a.model, a.width ?? 1600, a.height ?? 1000);
+        png = await renderDiagram(store, a.model, a.width ?? 1600, a.height ?? 1000, loop);
       } catch (e) {
         return { ...check, image_error: e instanceof BrowserNotFoundError ? e.message : `図を画像にできませんでした: ${(e as Error).message}` };
       }
@@ -474,6 +504,59 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         return fail(e);
       }
     },
+  );
+
+  server.registerTool(
+    "find_loops",
+    {
+      title: "ループを探す",
+      description:
+        "モデルのフィードバックループ（リンクとフローがつくる因果の循環）を探し、強めるループ（R）か釣り合わせるループ（B）かを返す。" +
+        "R か B かはリンクの極性（behavior.polarity）で決める。フローは行き先のストックを増やし（+）、出元のストックを減らす（-）。- が偶数個なら R、奇数個なら B。" +
+        "極性が決まっていないつながり（polarity のないリンクや、フローの式がリンクなしで自分のストックを見ているところ）があれば kind は unknown にし、undetermined に挙げる。" +
+        "ループは短い順。elements はつながる順で、最後の要素は最初の要素につながる。name（R1、B2 など）は返したループの中での通し番号で、element や max_length を変えると変わる。" +
+        "view_diagram の loop に elements を渡すと、そのループを目立たせた図を見られる。",
+      inputSchema: {
+        model: modelName,
+        element: z.string().optional().describe("この要素を通るループだけを返す"),
+        max_length: z.number().int().min(1).optional().describe("返すループの要素数の上限"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    handle(async (a: { model: string; element?: string; max_length?: number }) => {
+      const m = await store.read(a.model);
+      if (a.element !== undefined && !findElement(m, a.element)) {
+        const names = m.elements.filter((e) => e.type !== "LINK" && e.name).map((e) => e.name!);
+        throw new EditError(`要素 "${a.element}" が見つかりません。${didYouMean(a.element, names)}`);
+      }
+      const { loops, truncated } = findLoops(m, { element: a.element, maxLength: a.max_length });
+      const undetermined = (steps: LoopStep[]) => steps.filter((s) => s.polarity === "?").map(stepText);
+      const anyUndetermined = loops.some((l) => l.kind === "unknown");
+      return {
+        model: a.model,
+        count: { R: loops.filter((l) => l.kind === "R").length, B: loops.filter((l) => l.kind === "B").length, unknown: loops.filter((l) => l.kind === "unknown").length },
+        loops: loops.map((l) => {
+          const u = undetermined(l.steps);
+          return { name: l.name, kind: l.kind, elements: l.elements, steps: l.steps.map(stepText), ...(u.length ? { undetermined: u } : {}) };
+        }),
+        ...(truncated
+          ? {
+              truncated:
+                (truncated === "loops"
+                  ? `ループが多いため、${MAX_LOOPS} 個で探すのをやめました。`
+                  : "つながりが多く、探すのに時間がかかるため、途中で探すのをやめました。") +
+                "短いループから探しているので、返した中で最も長いものと同じ長さか、それより長いループが残っているかもしれません。element（その要素を通るループだけを探す）か max_length で絞ってください。",
+            }
+          : {}),
+        ...(anyUndetermined
+          ? {
+              hint:
+                "極性が決まっていないつながりがあります。upsert_elements で LINK の behavior.polarity（POSITIVE か NEGATIVE）を入れると、R か B かが決まります。" +
+                "フローの式がリンクなしで自分のストックを見ているところは、そのストックからフローへの LINK を polarity つきで足します。",
+            }
+          : {}),
+      };
+    }),
   );
 
   server.registerTool(
@@ -755,6 +838,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "会議資料の筋書きを作業フォルダの <モデル名>.slides.json に保存する（今の筋書きはすべて置き換える）。ビューアの発表モードで、スライドを順に見せる。" +
         "スライドの種類は problem（問題）、cause（原因）、solution（解決案）、compare（比較）、conclusion（結論）で、この順に並べる。どのスライドにも title（見出し）と message（言いたいこと 1 文）を書く。" +
         "要素名、施策の名前、実際のデータの列名が実在するかを確かめ、合わなければ保存せずに issues（何枚目の何が合わないか、「もしかして」）を返す。" +
+        "原因のスライドは、loop.elements がつながる順のループになっているか、polarity がリンクの極性から決まる R / B と合うかも確かめる（極性が決まっていなければ warnings で知らせて保存する）。" +
         "要素や施策の名前を upsert_elements や set_scenarios で変えると、筋書きの中の名前も直す。保存したら view_slides で画像を見て確かめる。",
       inputSchema: {
         model: modelName,
@@ -838,14 +922,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = [path.resolve(HERE, "../web"), path.resolve(HERE, "../../dist/web")].find((d) => existsSync(path.join(d, "index.html"))) ?? path.resolve(HERE, "../web");
 
 /** ビューアを一時的に起動し、ヘッドレスのブラウザで図だけを描いて PNG にする */
-async function renderDiagram(store: ModelStore, name: string, width: number, height: number): Promise<Buffer> {
+async function renderDiagram(store: ModelStore, name: string, width: number, height: number, loop?: LoopView): Promise<Buffer> {
   if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
   const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
   try {
     const browser = await launchBrowser();
     try {
       await browser.setViewport(width, height);
-      await browser.open(`${viewer.url}?view=diagram#${encodeURIComponent(name)}`);
+      const query = loop ? `&loop=${encodeURIComponent(JSON.stringify(loop))}` : "";
+      await browser.open(`${viewer.url}?view=diagram${query}#${encodeURIComponent(name)}`);
       return await browser.screenshot();
     } finally {
       await browser.close();

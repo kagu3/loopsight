@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、17 個のツールが見える", async () => {
+  test("クライアントから接続でき、18 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     expect(client.getInstructions()).toMatch(/「会議資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
@@ -58,6 +58,7 @@ describe("MCP server", () => {
       [
         "create_model",
         "export_model",
+        "find_loops",
         "get_model",
         "import_data",
         "import_model",
@@ -268,6 +269,8 @@ describe("MCP server", () => {
     await call("upsert_elements", { model: "sir", elements: SIR });
     await call("set_scenarios", { model: "sir", scenarios: [{ name: "外出を控える", description: "接触を半分にする", values: { "Contact Rate": 0.2 } }] });
     await call("import_data", { model: "sir", content: "Day,Infected\n0,10\n10,60\n" });
+    // 原因のスライドのループ（Infected → Infection → Infected）が R だと決まるように、極性を入れる
+    await call("upsert_elements", { model: "sir", elements: [{ type: "LINK", from: "Infected", to: "Infection", behavior: { polarity: "POSITIVE" } }] });
     const slides = [
       { kind: "problem", title: "感染が広がる", message: "このままだと半分近くが感染する", elements: ["infected"], data: ["Infected"], now: 10 },
       { kind: "cause", title: "うつす人が増えるほど広がる", message: "感染者が増えるほど新しい感染が増える", loop: { elements: ["Infected", "Infection"], polarity: "R" } },
@@ -409,6 +412,39 @@ describe("MCP server", () => {
     const png = Buffer.from(content[1]!.data!, "base64");
     expect(png.subarray(1, 4).toString()).toBe("PNG");
   }, 30_000);
+
+  test("find_loops で brooks_law のループと R / B を返し、view_diagram の loop で目立たせる", async () => {
+    await call("import_model", { path: path.join(FIXTURES_DIR, "brooks_law.json"), model: "brooks" });
+    const unknown = await call("find_loops", { model: "brooks", element: "全員の人数", max_length: 3 });
+    expect(unknown.loops).toEqual([
+      {
+        name: "?1",
+        kind: "unknown",
+        elements: ["新人", "全員の人数", "採用"],
+        steps: ["新人 → 全員の人数 (?)", "全員の人数 → 採用 (?)", "採用 → 新人 (+, フロー)"],
+        undetermined: ["新人 → 全員の人数 (?)", "全員の人数 → 採用 (?)"],
+      },
+    ]);
+    expect(unknown.hint).toMatch(/polarity/);
+
+    await call("upsert_elements", {
+      model: "brooks",
+      elements: [
+        { from: "新人", to: "全員の人数", behavior: { polarity: "POSITIVE" } },
+        { from: "全員の人数", to: "採用", behavior: { polarity: "NEGATIVE" } },
+      ],
+    });
+    const found = await call("find_loops", { model: "brooks", element: "全員の人数", max_length: 3 });
+    expect(found.loops[0]).toMatchObject({ name: "B1", kind: "B" });
+    expect(found.loops[0].undetermined).toBeUndefined();
+    expect(found.count).toEqual({ R: 0, B: 1, unknown: 0 });
+    expect(found.hint).toBeUndefined();
+
+    const view = await call("view_diagram", { model: "brooks", image: false, loop: { elements: found.loops[0].elements, name: "採用で人数をそろえる" } });
+    expect(view.loop).toMatchObject({ name: "採用で人数をそろえる", kind: "B", elements: ["新人", "全員の人数", "採用"] });
+    expect(await callError("view_diagram", { model: "brooks", image: false, loop: { elements: ["新人", "採用"] } })).toMatch(/ループになっていません/);
+    expect(await callError("find_loops", { model: "brooks", element: "新入" })).toMatch(/"新入.*見つかりません。もしかして.*新人/);
+  });
 
   test("view_slides はスライドを 1 枚ずつ PNG で返す（ブラウザと画面のビルドがあるとき）", async () => {
     await call("create_model", { model: "p" });

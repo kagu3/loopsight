@@ -8,7 +8,7 @@
 import { layoutModel } from "./layout.js";
 import { boxLayout, BOX_TYPES } from "./geometry.js";
 export { LINK_BEND, linkControlPoint } from "./geometry.js";
-import type { ModelElement, ModelJSON } from "./modeljson.js";
+import { sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
 
 export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "STATE" | "VALVE" | "CLOUD";
 export type Shape = "rect" | "ellipse";
@@ -228,6 +228,33 @@ export function connectedTo(graph: Graph, element: string): { nodes: Set<string>
         nodes.add(f.source);
         nodes.add(f.target);
       }
+    }
+  }
+  return { nodes, edges };
+}
+
+/**
+ * ループ（要素名の並び。最後の要素は最初の要素につながる）の要素と線（図で目立たせるもの）。ほかは薄くする。
+ * 要素が 1 つも図になければ undefined（何も薄くしない）。
+ *
+ * - ループの要素のノード（フローなら弁）
+ * - 隣り合う要素 a → b のリンク
+ * - 隣り合う要素の一方がフローで、もう一方がその端のストックなら、そのあいだのフローの線（向きは問わない。
+ *   フローがストックを増やす・減らすところと、フローの式が自分のストックを見ているところ）
+ */
+export function loopFocus(graph: Graph, elements: string[]): { nodes: Set<string>; edges: Set<string> } | undefined {
+  // 名前の比べ方は find_loops と同じ（前後の空白と大文字小文字を区別しない）
+  const idsOf = (name: string) => graph.nodes.filter((n) => sameName(n.element, name)).map((n) => n.id);
+  const nodes = new Set(elements.flatMap(idsOf));
+  if (!nodes.size) return undefined;
+  const edges = new Set<string>();
+  for (const [i, name] of elements.entries()) {
+    const a = new Set(idsOf(name));
+    const b = new Set(idsOf(elements[(i + 1) % elements.length]!));
+    for (const e of graph.edges) {
+      const forward = a.has(e.source) && b.has(e.target);
+      const backward = b.has(e.source) && a.has(e.target);
+      if (forward || (e.kind !== "link" && backward)) edges.add(e.id);
     }
   }
   return { nodes, edges };

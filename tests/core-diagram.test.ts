@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addBoxSizes, borderPoint, bounds, boxLayout, checkDiagram, connectedTo, emptyModel, fitTargets, labelLines, layoutModel, MIN_FIT_ZOOM, positionPatches, shiftIntoView, textWidth, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
+import { addBoxSizes, borderPoint, bounds, boxLayout, checkDiagram, connectedTo, emptyModel, fitTargets, labelLines, layoutModel, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, textWidth, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
 import { loadSample, sampleNames } from "./helpers.js";
 
 function population(): ModelJSON {
@@ -205,6 +205,42 @@ describe("選んだ要素につながるもの", () => {
 
   test("図にない要素なら何も薄くしない", () => {
     expect(connectedTo(toGraph(population()), "Nothing")).toBeUndefined();
+  });
+});
+
+describe("ループの要素と線", () => {
+  const sorted = (s: Set<string>) => [...s].sort();
+
+  test("ストックとフローのループは、弁とストックのあいだのフローの線だけを含める（雲側の線は含めない）", () => {
+    const g = toGraph(population());
+    // Births がストックを増やし、Births の式がストックを見ている
+    const births = loopFocus(g, ["Population", "Births"])!;
+    expect(sorted(births.nodes)).toEqual(["el:population", "valve:births"]);
+    expect(sorted(births.edges)).toEqual(["valve:births:out"]);
+    // Deaths は出元のストックを減らす。線の向き（ストック → 弁）は問わない
+    const deaths = loopFocus(g, ["population", "deaths"])!;
+    expect(sorted(deaths.edges)).toEqual(["valve:deaths:in"]);
+  });
+
+  test("リンクは並びの向きのものだけを含める", () => {
+    const m = population();
+    upsertElements(m, [
+      { type: "VARIABLE", name: "Crowding", behavior: { value: "[Population] / 1000" } },
+      { type: "VARIABLE", name: "Birth Rate", behavior: { value: "0.03 / [Crowding]" } },
+    ]);
+    const g = toGraph(m);
+    const loop = loopFocus(g, ["Population", "Crowding", "Birth Rate", "Births"])!;
+    expect(sorted(loop.nodes)).toEqual(["el:birth rate", "el:crowding", "el:population", "valve:births"]);
+    expect(sorted(loop.edges)).toEqual([
+      "link:el:birth rate->valve:births",
+      "link:el:crowding->el:birth rate",
+      "link:el:population->el:crowding",
+      "valve:births:out",
+    ]);
+  });
+
+  test("図にない要素だけなら何も薄くしない", () => {
+    expect(loopFocus(toGraph(population()), ["Nothing"])).toBeUndefined();
   });
 });
 

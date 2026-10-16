@@ -6,6 +6,7 @@ import { Chart, formatValue } from "./Chart.js";
 import { Details } from "./Details.js";
 import { Diagram } from "./Diagram.js";
 import { toGraph } from "../../src/core/diagram.js";
+import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { Problems } from "./Problems.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
@@ -16,6 +17,19 @@ const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
 /** ?view=diagram なら図だけを出す（MCP の view_diagram がヘッドレスのブラウザで画像にする） */
 const EMBED = new URLSearchParams(location.search).get("view") === "diagram";
+
+/** 図だけの表示で目立たせるループ（?loop= に { name, kind, elements } の JSON。MCP の view_diagram が渡す） */
+function loopFromQuery(): LoopView | undefined {
+  const text = new URLSearchParams(location.search).get("loop");
+  if (!text) return undefined;
+  try {
+    const v = JSON.parse(text) as LoopView;
+    return Array.isArray(v.elements) && typeof v.name === "string" && Object.hasOwn(LOOP_KIND_LABEL, v.kind) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const EMBED_LOOP = EMBED ? loopFromQuery() : undefined;
 
 /** 前の版と比べて、変わった（または増えた）要素の名前（小文字） */
 function changedElements(prev: ModelResponse | undefined, next: ModelResponse): Set<string> {
@@ -306,7 +320,7 @@ export function App() {
       <div className="embed-diagram">
         {graph && data ? (
           <ReactFlowProvider>
-            <Diagram graph={graph} modelName={data.name} changed={changed} values={finalValues} onSelect={() => undefined} onMove={move} embed />
+            <Diagram graph={graph} modelName={data.name} changed={changed} values={finalValues} onSelect={() => undefined} onMove={move} embed loop={EMBED_LOOP} />
           </ReactFlowProvider>
         ) : (
           <p className="muted pad">{error ?? "読み込んでいます…"}</p>

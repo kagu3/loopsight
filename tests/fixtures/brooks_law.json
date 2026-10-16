@@ -1,0 +1,463 @@
+{
+  "engine": "SIMULATION_PACKAGE",
+  "name": "ブルックスの法則（遅れたプロジェクトへの増員）",
+  "simulation": {
+    "algorithm": "RK1",
+    "time_start": 0,
+    "time_length": 60,
+    "time_step": 0.25,
+    "time_units": "WEEKS"
+  },
+  "elements": [
+    {
+      "type": "STOCK",
+      "name": "残りの作業",
+      "description": "実際の作業量（タスク）。計画の 1200 より多い",
+      "behavior": {
+        "initial_value": 1500,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          350,
+          100
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "終わった作業",
+      "behavior": {
+        "initial_value": 0
+      },
+      "display": {
+        "coordinates": [
+          750,
+          100
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "新人",
+      "description": "加わったばかりで、まだ慣れていない人",
+      "behavior": {
+        "initial_value": 0,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          370,
+          420
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "経験者",
+      "behavior": {
+        "initial_value": 10,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          710,
+          420
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "プロジェクトの期間",
+      "description": "作業が残っているあいだだけ増える。最終値が終わるまでの週数",
+      "behavior": {
+        "initial_value": 0
+      },
+      "display": {
+        "coordinates": [
+          470,
+          20
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "経過",
+      "from": null,
+      "to": "プロジェクトの期間",
+      "behavior": {
+        "value": "IfThenElse([残りの作業] > 0.5, 1, 0)"
+      },
+      "display": {
+        "from_coordinates": [
+          150,
+          40
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "標準の生産性",
+      "description": "慣れた人 1 人が 1 週に終えるタスク数（意思疎通の手間を除く）",
+      "behavior": {
+        "value": 5
+      },
+      "display": {
+        "coordinates": [
+          450,
+          170
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "新人の生産性の割合",
+      "description": "新人は経験者の何割の仕事ができるか",
+      "behavior": {
+        "value": 0.3
+      },
+      "display": {
+        "coordinates": [
+          380,
+          230
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "教育に取られる時間",
+      "description": "新人 1 人を教えるために、経験者の何人分の時間が取られるか",
+      "behavior": {
+        "value": 0.25
+      },
+      "display": {
+        "coordinates": [
+          380,
+          300
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "慣れるまでの時間",
+      "description": "新人が経験者になるまでの平均（週）",
+      "behavior": {
+        "value": 8
+      },
+      "display": {
+        "coordinates": [
+          530,
+          360
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "1 組あたりの意思疎通の手間",
+      "description": "意思疎通の経路 1 本あたり、全員の時間の何割を使うか",
+      "behavior": {
+        "value": 0.002
+      },
+      "display": {
+        "coordinates": [
+          1080,
+          400
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "締め切り",
+      "description": "週",
+      "behavior": {
+        "value": 24
+      },
+      "display": {
+        "coordinates": [
+          130,
+          140
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "増員の方針",
+      "description": "1 で遅れを取り戻すために人を足す。0 で足さない",
+      "behavior": {
+        "value": 1
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 0,
+        "interactive_max": 1,
+        "coordinates": [
+          60,
+          560
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "人数の上限",
+      "behavior": {
+        "value": 30
+      },
+      "display": {
+        "coordinates": [
+          150,
+          650
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "採用の時間",
+      "description": "足りない人数を何週で埋めるか",
+      "behavior": {
+        "value": 2
+      },
+      "display": {
+        "coordinates": [
+          40,
+          400
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "全員の人数",
+      "behavior": {
+        "value": "[新人] + [経験者]"
+      },
+      "display": {
+        "coordinates": [
+          300,
+          560
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "意思疎通の経路の数",
+      "description": "n(n-1)/2",
+      "behavior": {
+        "value": "[全員の人数] * ([全員の人数] - 1) / 2"
+      },
+      "display": {
+        "coordinates": [
+          900,
+          520
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "意思疎通に取られる割合",
+      "behavior": {
+        "value": "Min(0.9, [意思疎通の経路の数] * [1 組あたりの意思疎通の手間])"
+      },
+      "display": {
+        "coordinates": [
+          900,
+          300
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "実際に働ける人数",
+      "description": "経験者に換算した人数。教育と意思疎通の分を引く",
+      "behavior": {
+        "value": "Max(0, [経験者] - [新人] * [教育に取られる時間] + [新人] * [新人の生産性の割合]) * (1 - [意思疎通に取られる割合])"
+      },
+      "display": {
+        "coordinates": [
+          530,
+          240
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "作業の進み",
+      "from": "残りの作業",
+      "to": "終わった作業",
+      "behavior": {
+        "value": "[実際に働ける人数] * [標準の生産性]",
+        "non_negative": true
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "管理者が考える必要な人数",
+      "description": "残りの作業 ÷（残りの週数 × 標準の生産性）。新人の低い生産性や意思疎通の手間を考えない",
+      "behavior": {
+        "value": "[残りの作業] / (Max([締め切り] - Weeks(), 2) * [標準の生産性])"
+      },
+      "display": {
+        "coordinates": [
+          130,
+          250
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "採用",
+      "from": null,
+      "to": "新人",
+      "behavior": {
+        "value": "IfThenElse([残りの作業] > 0.5, [増員の方針] * Max(0, Min([管理者が考える必要な人数], [人数の上限]) - [全員の人数]) / [採用の時間], 0)"
+      },
+      "display": {
+        "from_coordinates": [
+          230,
+          440
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "慣れる",
+      "from": "新人",
+      "to": "経験者",
+      "behavior": {
+        "value": "[新人] / [慣れるまでの時間]"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "残りの作業",
+      "to": "経過"
+    },
+    {
+      "type": "LINK",
+      "from": "新人",
+      "to": "全員の人数"
+    },
+    {
+      "type": "LINK",
+      "from": "経験者",
+      "to": "全員の人数"
+    },
+    {
+      "type": "LINK",
+      "from": "全員の人数",
+      "to": "意思疎通の経路の数"
+    },
+    {
+      "type": "LINK",
+      "from": "意思疎通の経路の数",
+      "to": "意思疎通に取られる割合"
+    },
+    {
+      "type": "LINK",
+      "from": "1 組あたりの意思疎通の手間",
+      "to": "意思疎通に取られる割合"
+    },
+    {
+      "type": "LINK",
+      "from": "経験者",
+      "to": "実際に働ける人数"
+    },
+    {
+      "type": "LINK",
+      "from": "新人",
+      "to": "実際に働ける人数"
+    },
+    {
+      "type": "LINK",
+      "from": "教育に取られる時間",
+      "to": "実際に働ける人数"
+    },
+    {
+      "type": "LINK",
+      "from": "新人の生産性の割合",
+      "to": "実際に働ける人数"
+    },
+    {
+      "type": "LINK",
+      "from": "意思疎通に取られる割合",
+      "to": "実際に働ける人数"
+    },
+    {
+      "type": "LINK",
+      "from": "実際に働ける人数",
+      "to": "作業の進み"
+    },
+    {
+      "type": "LINK",
+      "from": "標準の生産性",
+      "to": "作業の進み"
+    },
+    {
+      "type": "LINK",
+      "from": "残りの作業",
+      "to": "管理者が考える必要な人数"
+    },
+    {
+      "type": "LINK",
+      "from": "締め切り",
+      "to": "管理者が考える必要な人数"
+    },
+    {
+      "type": "LINK",
+      "from": "標準の生産性",
+      "to": "管理者が考える必要な人数"
+    },
+    {
+      "type": "LINK",
+      "from": "残りの作業",
+      "to": "採用"
+    },
+    {
+      "type": "LINK",
+      "from": "増員の方針",
+      "to": "採用"
+    },
+    {
+      "type": "LINK",
+      "from": "管理者が考える必要な人数",
+      "to": "採用"
+    },
+    {
+      "type": "LINK",
+      "from": "人数の上限",
+      "to": "採用"
+    },
+    {
+      "type": "LINK",
+      "from": "全員の人数",
+      "to": "採用"
+    },
+    {
+      "type": "LINK",
+      "from": "採用の時間",
+      "to": "採用"
+    },
+    {
+      "type": "LINK",
+      "from": "慣れるまでの時間",
+      "to": "慣れる"
+    }
+  ],
+  "description": "遅れたソフトウェアプロジェクトに人を足すと、さらに遅れる（『人月の神話』のブルックスの法則）。実際の作業量は計画（1200 タスク）より多い 1500 タスクで、10 人では締め切り（24 週）に間に合わない。管理者は「残りの作業 ÷（残りの週数 × 1 人の標準生産性）」で必要な人数を出し、足りない分を毎週採用する。新しい人は慣れるまで生産性が低く、教育のために経験者の時間を奪う。さらに人数 n に対して意思疎通の経路が n(n-1)/2 本に増え、その手間が全員の時間を削る。「増員の方針」を 0 にすると増員しない場合と比べられる。終わるまでの週数は「プロジェクトの期間」に出る。",
+  "visualizations": [
+    {
+      "type": "TIME_SERIES",
+      "name": "人数と実際の働き",
+      "elements": [
+        "全員の人数",
+        "実際に働ける人数"
+      ]
+    },
+    {
+      "type": "TIME_SERIES",
+      "name": "作業",
+      "elements": [
+        "残りの作業",
+        "プロジェクトの期間"
+      ]
+    }
+  ]
+}

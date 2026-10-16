@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 import {
   ImportError,
+  MAX_LOOP_ELEMENTS,
   ModelStore,
   StoreError,
   checkModelName,
@@ -25,6 +26,8 @@ function population() {
     { type: "STOCK", name: "Population", behavior: { initial_value: 100 } },
     { type: "VARIABLE", name: "Birth Rate", behavior: { value: 0.03 } },
     { type: "FLOW", name: "Births", to: "Population", behavior: { value: "[Population]*[Birth Rate]" } },
+    // 原因のスライドのループ（Population → Births → Population）が R だと決まるように、極性を入れる
+    { type: "LINK", from: "Population", to: "Births", behavior: { polarity: "POSITIVE" } },
   ]);
   setScenarios(m, [{ name: "支援", description: "出生率を下げる", values: { "Birth Rate": 0.02 } }]);
   return m;
@@ -101,6 +104,40 @@ describe("筋書きをモデルと照らし合わせる", () => {
     const without = checkSlides(population(), deck);
     expect(without.errors).toEqual([]);
     expect(without.warnings[0]!.hint).toMatch(/import_data/);
+  });
+});
+
+describe("原因のスライドのループをモデルで確かめる", () => {
+  const cause = (elements: string[], polarity: "R" | "B") => toSlideDeck({ slides: [{ kind: "cause", title: "原因", message: "増えるほど生まれる", loop: { elements, polarity } }] });
+
+  test("ループになっていなければエラー。find_loops で探すよう添える", () => {
+    const m = population();
+    upsertElements(m, [{ type: "VARIABLE", name: "Other", behavior: { value: 1 } }]);
+    const { errors } = checkSlides(m, cause(["Population", "Other"], "R"));
+    expect(errors[0]).toMatchObject({ slide: 1, message: expect.stringMatching(/ループになっていません。"Population" から "Other" へのつながり/), hint: expect.stringMatching(/find_loops/) });
+  });
+
+  test("空のときと、要素が多すぎるときは、そのことだけを知らせる", () => {
+    expect(checkSlides(population(), cause([], "R")).errors.map((e) => e.message)).toEqual(["1 枚目（原因）: ループを作る要素がありません。"]);
+    const many = Array.from({ length: MAX_LOOP_ELEMENTS + 1 }, () => "Population");
+    const { errors } = checkSlides(population(), cause(many, "R"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toMatch(`${MAX_LOOP_ELEMENTS} 個まで`);
+    expect(errors[0]!.hint).toMatch(/短いループ.*find_loops/);
+  });
+
+  test("リンクの極性から決まる R / B と違えばエラー", () => {
+    const { errors } = checkSlides(population(), cause(["Population", "Births"], "B"));
+    expect(errors[0]!.message).toMatch(/polarity は B（釣り合わせるループ）ですが、リンクの極性から決めると R（強めるループ）です/);
+    expect(errors[0]!.hint).toMatch(/behavior\.polarity/);
+  });
+
+  test("モデルで極性が決まっていなければ、スライドの R / B のまま出すと知らせる", () => {
+    const m = population();
+    m.elements.find((e) => e.type === "LINK" && e.from === "Population")!.behavior = {};
+    const { errors, warnings } = checkSlides(m, cause(["Population", "Births"], "R"));
+    expect(errors).toEqual([]);
+    expect(warnings[0]!.message).toMatch(/極性が決まっていない/);
   });
 });
 

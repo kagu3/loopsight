@@ -3,6 +3,7 @@ import { didYouMean, findElement, sameName } from "./modeljson.js";
 import type { ActualData } from "./data.js";
 import { BASELINE_SCENARIO } from "./edit.js";
 import { ImportError } from "./importer.js";
+import { describeLoop, LOOP_KIND_LABEL } from "./loops.js";
 import type { Issue } from "./validate.js";
 
 // 会議資料の筋書き（<モデル名>.slides.json）。ビューアの発表モードで、スライドを順に見せる。
@@ -27,6 +28,8 @@ export type LoopPolarity = (typeof LOOP_POLARITIES)[number];
 
 /** 1 つのグラフに並べる要素の数の上限（発表の画面に収まる数） */
 export const MAX_SLIDE_ELEMENTS = 4;
+/** 原因のスライドのループの要素の数の上限（図と、右に並べる名前が収まる数） */
+export const MAX_LOOP_ELEMENTS = 10;
 /** 比較のスライドで重ねる施策の数の上限（グラフの色の数。「何もしない場合」はほかに出す） */
 export const MAX_SLIDE_SCENARIOS = 8;
 
@@ -187,9 +190,10 @@ export function checkSlides(model: ModelJSON, deck: SlideDeck, data?: ActualData
     if (!s.message.trim()) error("言いたいこと（message）が空です。", "このスライドで伝えたいことを 1 文で書いてください。");
 
     /** 要素名をモデルの表記にそろえる。なければエラー */
-    const elements = (list: string[], what: string): string[] => {
+    const chartLimit = { max: MAX_SLIDE_ELEMENTS, unit: "つ", hint: "スライドを分けてください。" };
+    const elements = (list: string[], what: string, limit = chartLimit): string[] => {
       if (list.length === 0) error(`${what}がありません。`);
-      if (list.length > MAX_SLIDE_ELEMENTS) error(`${what}は ${MAX_SLIDE_ELEMENTS} つまでにしてください（${list.length} あります）。`, "スライドを分けてください。");
+      if (list.length > limit.max) error(`${what}は ${limit.max} ${limit.unit}までにしてください（${list.length} あります）。`, limit.hint);
       return list.map((name) => {
         const el = findElement(model, name);
         if (el) return el.name!;
@@ -240,8 +244,28 @@ export function checkSlides(model: ModelJSON, deck: SlideDeck, data?: ActualData
         break;
       }
       case "cause": {
-        s.loop.elements = elements(s.loop.elements, "ループを作る要素");
+        const loopLimit = { max: MAX_LOOP_ELEMENTS, unit: "個", hint: "ループは分けられないので、もっと短いループ（find_loops は短い順に返す）を選んでください。" };
+        s.loop.elements = elements(s.loop.elements, "ループを作る要素", loopLimit);
+        // 空か多すぎるときは、それだけを知らせる（ループかどうかは確かめない）
+        if (s.loop.elements.length === 0 || s.loop.elements.length > MAX_LOOP_ELEMENTS) break;
         if (s.loop.elements.length === 1) error("ループを作る要素が 1 つだけです。", "ループをひと回りする順に、2 つ以上の要素を並べてください。");
+        else if (s.loop.elements.every((name) => findElement(model, name))) {
+          // ループになっているか、R / B がリンクの極性から決まるものと合っているかを、モデルで確かめる
+          const found = describeLoop(model, s.loop.elements);
+          if ("error" in found) {
+            error(`ループになっていません。${found.error}`, "find_loops でループを探し、その elements をつながる順に並べてください。");
+          } else if (found.loop.kind === "unknown") {
+            warning(
+              "モデルではこのループの極性が決まっていないため、R か B かはスライドの polarity のとおりに出します。",
+              "find_loops で極性の決まっていないつながりを確かめ、upsert_elements でリンクの極性（behavior.polarity）を入れると、ここでも確かめられます。",
+            );
+          } else if (found.loop.kind !== s.loop.polarity) {
+            error(
+              `polarity は ${s.loop.polarity}（${LOOP_KIND_LABEL[s.loop.polarity]}）ですが、リンクの極性から決めると ${found.loop.kind}（${LOOP_KIND_LABEL[found.loop.kind]}）です。`,
+              "polarity を直すか、upsert_elements でリンクの極性（behavior.polarity）を直してください。",
+            );
+          }
+        }
         break;
       }
       case "solution":

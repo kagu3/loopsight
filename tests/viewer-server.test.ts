@@ -262,7 +262,8 @@ describe("会議資料の筋書き", () => {
     await store.writeSlides("pop", { slides: [...deck.slides, { kind: "compare", title: "比べる", message: "減る", scenarios: ["支援"], elements: ["Populaton"] }] });
     const { body } = await get<ModelResponse>("/api/models/pop");
     expect(body.slides).toMatchObject({ file: "pop.slides.json", deck: { slides: [{ kind: "problem" }, { kind: "cause" }, { kind: "compare" }] } });
-    expect(body.slides!.issues.map((i) => i.slide)).toEqual([3, 3, 1]);
+    // 3 枚目は名前の誤り、1 枚目は実際のデータがないこと、2 枚目はループの極性がモデルで決まっていないこと
+    expect(body.slides!.issues.map((i) => i.slide)).toEqual([3, 3, 1, 2]);
     expect(body.slides!.issues[0]!.hint).toMatch(/もしかして "Population"/);
     expect((await get<ModelListResponse>("/api/models")).body.models.map((m) => m.name)).toEqual(["pop"]);
     // 読めない筋書きは、そのことを知らせる（モデルはそのまま出す）

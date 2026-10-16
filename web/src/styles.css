@@ -25,6 +25,9 @@
   --link: #8b8a84;
   --changed: #eda100;
   --selected: #2a78d6;
+  /* 目立たせるループ（R：強める、B：釣り合わせる） */
+  --loop-r: #e34948;
+  --loop-b: #2a78d6;
 
   /* グラフの系列（dataviz の検証済みパレット、明るい表示） */
   --series-1: #2a78d6;
@@ -67,6 +70,8 @@
     --link: #8f8e86;
     --changed: #c98500;
     --selected: #5598e7;
+    --loop-r: #e66767;
+    --loop-b: #5598e7;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -656,6 +661,58 @@ button:disabled {
 .node-cloud.is-dimmed .cloud-shape {
   stroke: color-mix(in srgb, var(--text-muted) 25%, var(--surface-1));
 }
+/* ループを見せているとき：ループの線を太くし、R か B の色にする。リンクも実線にして、一周をたどりやすくする */
+.loop-r {
+  --loop: var(--loop-r);
+}
+.loop-b {
+  --loop: var(--loop-b);
+}
+.loop-unknown {
+  --loop: var(--text-secondary);
+}
+.react-flow__edge-path.is-loop {
+  stroke: var(--loop);
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+.react-flow__edge-path.edge-flow.is-loop {
+  stroke-width: 4;
+}
+.loop-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 8px;
+  background: var(--surface-1);
+  border: 2px solid var(--loop);
+  border-radius: 10px;
+}
+.loop-kind {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--loop);
+  color: var(--surface-1);
+  font-size: 20px;
+  font-weight: 700;
+}
+.loop-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.loop-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.loop-kind-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
 
 /* グラフと表 */
 .results {
@@ -1232,32 +1289,11 @@ button.legend-remove:hover {
   /* 発表では図を動かさない */
   pointer-events: none;
 }
-/* ループの要素の枠は消さずに残す（作業画面では、変わった要素の枠は少しして消える） */
-.cause-diagram .node.is-changed {
-  animation: none;
-  box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 6px var(--changed);
-}
 .loop-card {
   display: flex;
   flex-direction: column;
   gap: 1.2cqw;
   align-self: center;
-}
-.loop-badge {
-  display: flex;
-  align-items: center;
-  gap: 1cqw;
-  font-size: 2cqw;
-  font-weight: 700;
-}
-.loop-letter {
-  display: grid;
-  place-items: center;
-  width: 4.2cqw;
-  height: 4.2cqw;
-  border-radius: 50%;
-  border: 0.3cqw solid var(--changed);
-  font-size: 2.4cqw;
 }
 .loop-path {
   margin: 0;
@@ -1270,7 +1306,20 @@ button.legend-remove:hover {
   content: "↓";
   display: block;
   font-weight: 400;
-  color: var(--text-muted);
+  /* 図のループの線と同じ色（R は赤、B は青） */
+  color: var(--loop);
+}
+/* 長いループは縦に並べると収まらないので、横に続けて折り返す */
+.loop-path.is-long {
+  font-size: 1.6cqw;
+  line-height: 1.7;
+}
+.loop-path.is-long li {
+  display: inline;
+}
+.loop-path.is-long li + li::before {
+  content: " → ";
+  display: inline;
 }
 .loop-path li.missing {
   color: var(--error);
