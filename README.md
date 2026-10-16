@@ -81,13 +81,14 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 | `upsert_elements` | 要素をまとめて追加・更新する。名前変更にも使える。足りないリンクは自動で足す |
 | `remove_elements` | 要素を削除する。つながっているリンクを消し、フローの端は空（モデルの外）にする |
 | `set_simulation` | 開始時刻、期間、刻み幅、解法、時間の単位を設定する |
+| `set_scenarios` | 施策（シナリオ：名前、説明、変える値の組）をモデルに保存する。何も変えない実行を「何もしない場合」として、各施策と比べた結果を返す。ビューアのグラフにも重ねて出る |
 | `validate_model` | エラーと警告を、直し方のヒントつきで返す |
 | `run_simulation` | 実行して要約（初期値、最終値、最小と最大、間引いた時系列）を返す。CSV にも保存できる |
-| `sweep_parameter` | パラメータを振って比較する（感度分析）。複数の値を変えたシナリオも比べられる |
+| `sweep_parameter` | パラメータを振って比較する（感度分析）。複数の値を変えたシナリオや、保存した施策も比べられる |
 
 `run_simulation` と `sweep_parameter` には `overrides` を渡せる。値を一時的に変えて実行するもので、ファイルは変わらない。
 
-編集するツール（`upsert_elements`、`remove_elements`、`set_simulation`）は、保存した後に検証結果を返す。AI はその結果を見て、自分で直せる。
+編集するツール（`upsert_elements`、`remove_elements`、`set_simulation`、`set_scenarios`）は、保存した後に検証結果を返す。AI はその結果を見て、自分で直せる。
 
 ## 使い方の例
 
@@ -96,6 +97,8 @@ Claude Code に次のように頼む。
 > 人口モデルを作って。初期人口 1000、出生率 3%、死亡率 1%、50 年。
 
 > 出生率を 1% から 5% まで 5 段階で振って、50 年後の人口を比べて。
+
+> 「出生率を 4% に上げる」と「移民を毎年 20 人受け入れる」の 2 つの施策を保存して。ビューアで何もしない場合と比べたい。
 
 > ~/Downloads/model.InsightMaker を取り込んで、どんなモデルか説明して。
 

@@ -413,7 +413,7 @@ export function App() {
 
         <div className="results">
           {data?.run ? (
-            <Chart modelName={data.name} model={data.model} run={data.run} />
+            <Chart modelName={data.name} model={data.model} run={data.run} scenarios={data.scenarios} />
           ) : data ? (
             <p className="muted pad">エラーがあるため実行できません。左の「問題」を見てください。</p>
           ) : null}

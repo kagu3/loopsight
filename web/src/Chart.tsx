@@ -1,12 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
-import type { ModelJSON, RunResult } from "../../src/viewer/api.js";
-import { normalize } from "./normalize.js";
+import type { ModelJSON, RunResult, ScenarioRunResult } from "../../src/viewer/api.js";
+import { normalize, normalizeTogether } from "./normalize.js";
+import { BASELINE_NAME, compareRuns, describeRun, type CompareRun, type CompareRuns } from "./scenarios.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
 // 実行結果の時系列グラフと表。
 // 色は検証済みの 8 色を順に使う。色は要素ごとに決め、ほかの要素を出し入れしても変えない。
 // 9 色目は作らないので、同時に出せるのは 8 本まで。
+// モデルに施策（シナリオ）が保存されていれば、要素ごとに小さなグラフを並べ、「何もしない場合」（灰色の点線）と施策を重ねる。
+// このときの色は施策ごとに決める（施策も 8 つまで）。
 
 export const MAX_SERIES = 8;
 const SLOTS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
@@ -95,15 +98,27 @@ export interface ChartProps {
   modelName: string;
   model: ModelJSON;
   run: RunResult;
+  /** 保存した施策の実行結果 */
+  scenarios?: ScenarioRunResult[];
 }
 
-export function Chart({ modelName, model, run }: ChartProps) {
+/** 「何もしない場合」の線の色と点線 */
+const BASELINE_COLOR = "var(--text-muted)";
+const BASELINE_DASH = "4 4";
+const runColor = (r: CompareRun, k: number) => (r.baseline ? BASELINE_COLOR : `var(${SLOTS[(k - 1) % SLOTS.length]})`);
+
+export function Chart({ modelName, model, run, scenarios }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
   const [visible, setVisible] = useState<string[]>(() => defaultVisible(model, names));
   const [slots, setSlots] = useState<Map<string, number>>(() => assignSlots(visible, new Map()));
   const [view, setView] = useState<"chart" | "table">("chart");
   const [scale, setScaleState] = useState<Scale>(loadScale);
+  // 施策を重ねるか。施策が保存されていれば、はじめは重ねる
+  const [overlay, setOverlay] = useState(true);
+  const compare = useMemo(() => compareRuns(run, scenarios ?? [], MAX_SERIES), [run, scenarios]);
+  const hasScenarios = (scenarios?.length ?? 0) > 0;
+  const comparing = overlay && hasScenarios;
   const setScale = (s: Scale) => {
     setScaleState(s);
     saveScale(s);
@@ -173,6 +188,28 @@ export function Chart({ modelName, model, run }: ChartProps) {
             表
           </button>
         </div>
+        {hasScenarios && (
+          <div className="segmented" role="radiogroup" aria-label="施策">
+            <button
+              role="radio"
+              aria-checked={comparing}
+              className={comparing ? "on" : ""}
+              onClick={() => setOverlay(true)}
+              title={`要素ごとにグラフを分け、「${BASELINE_NAME}」とモデルに保存した施策を重ねます`}
+            >
+              施策を重ねる
+            </button>
+            <button
+              role="radio"
+              aria-checked={!comparing}
+              className={!comparing ? "on" : ""}
+              onClick={() => setOverlay(false)}
+              title={`「${BASELINE_NAME}」だけを、要素を重ねて出します`}
+            >
+              重ねない
+            </button>
+          </div>
+        )}
         {view === "chart" && (
           <div className="segmented" role="radiogroup" aria-label="縦軸">
             <button
@@ -189,18 +226,22 @@ export function Chart({ modelName, model, run }: ChartProps) {
               aria-checked={scale === "normalized"}
               className={scale === "normalized" ? "on" : ""}
               onClick={() => setScale("normalized")}
-              title="要素ごとに、最小を 0%、最大を 100% にそろえます。大きさの違う要素の、変わり方の形を比べられます"
+              title={
+                comparing
+                  ? "要素ごとに、どの施策も通した最小を 0%、最大を 100% にそろえます"
+                  : "要素ごとに、最小を 0%、最大を 100% にそろえます。大きさの違う要素の、変わり方の形を比べられます"
+              }
             >
               正規化
             </button>
           </div>
         )}
-        <SeriesPicker candidates={candidates} visible={visible} colorOf={colorOf} onToggle={toggle} />
-        {/* 凡例を兼ねる。出している要素だけを色つきで出し、× で外せる */}
+        <SeriesPicker candidates={candidates} visible={visible} colorOf={colorOf} plain={comparing} onToggle={toggle} />
+        {/* 凡例を兼ねる。出している要素だけを色つきで出し、× で外せる。施策を重ねているときの色は施策のものなので、要素には色を付けない */}
         <ul className="series-legend" aria-label="表示している要素">
           {visible.map((n) => (
             <li key={n} className="legend-chip" title={n}>
-              <span className="swatch" style={{ background: colorOf(n) }} />
+              {!comparing && <span className="swatch" style={{ background: colorOf(n) }} />}
               <span className="legend-name">{n}</span>
               <button className="legend-remove" onClick={(e) => removeFromLegend(e.currentTarget, n)} aria-label={`${n} を外す`} title="グラフから外す">
                 ×
@@ -210,8 +251,42 @@ export function Chart({ modelName, model, run }: ChartProps) {
         </ul>
       </div>
 
+      {comparing && <ScenarioLegend compare={compare} />}
+
       {visible.length === 0 ? (
         <p className="muted pad">表示する要素を選んでください。</p>
+      ) : comparing && view === "chart" ? (
+        <div className="compare-grid">
+          {visible.map((n) => (
+            <CompareChart key={n} name={n} times={run.times} runs={compare.runs} unit={unit} scale={scale} />
+          ))}
+        </div>
+      ) : comparing ? (
+        <div className="table-area">
+          <table>
+            <thead>
+              <tr>
+                <th>時間（{unit}）</th>
+                {visible.flatMap((n) =>
+                  compare.runs.map((r, k) => (
+                    <th key={`${n}/${k}`}>
+                      {n}
+                      <span className="th-sub">{r.name}</span>
+                    </th>
+                  )),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {run.times.map((t, i) => (
+                <tr key={i}>
+                  <td>{formatTime(t)}</td>
+                  {visible.flatMap((n) => compare.runs.map((r, k) => <td key={`${n}/${k}`}>{formatValue(r.series[n]?.[i])}</td>))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : view === "chart" ? (
         <div className="chart-area">
           <ResponsiveContainer width="100%" height="100%">
@@ -227,18 +302,7 @@ export function Chart({ modelName, model, run }: ChartProps) {
                 label={{ value: `時間（${unit}）`, position: "insideBottomRight", offset: -4, fill: "var(--text-secondary)", fontSize: 12 }}
                 height={36}
               />
-              {scale === "normalized" ? (
-                <YAxis
-                  domain={[0, 1]}
-                  ticks={[0, 0.25, 0.5, 0.75, 1]}
-                  tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
-                  stroke="var(--axis)"
-                  tickFormatter={formatPercent}
-                  width={72}
-                />
-              ) : (
-                <YAxis tick={{ fill: "var(--text-secondary)", fontSize: 12 }} stroke="var(--axis)" tickFormatter={(v: number) => formatValue(v)} width={72} />
-              )}
+              {yAxis(scale)}
               <Tooltip
                 cursor={{ stroke: "var(--text-muted)", strokeWidth: 1 }}
                 content={(p: TooltipContentProps) => <ChartTooltip {...p} unit={unit} visible={visible} run={run} colorOf={colorOf} />}
@@ -289,6 +353,133 @@ export function Chart({ modelName, model, run }: ChartProps) {
   );
 }
 
+/** 縦軸。正規化しているときは 0%〜100% */
+function yAxis(scale: Scale) {
+  return scale === "normalized" ? (
+    <YAxis
+      domain={[0, 1]}
+      ticks={[0, 0.25, 0.5, 0.75, 1]}
+      tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+      stroke="var(--axis)"
+      tickFormatter={formatPercent}
+      width={72}
+    />
+  ) : (
+    <YAxis tick={{ fill: "var(--text-secondary)", fontSize: 12 }} stroke="var(--axis)" tickFormatter={(v: number) => formatValue(v)} width={72} />
+  );
+}
+
+/** 施策の凡例。「何もしない場合」は灰色の点線。実行できなかった施策と、色が足りずに出さない施策も知らせる */
+function ScenarioLegend({ compare }: { compare: CompareRuns }) {
+  return (
+    <div className="scenario-bar">
+      <ul className="scenario-legend" aria-label="重ねている施策">
+        {compare.runs.map((r, k) => (
+          <li key={k} className="scenario-chip" title={`${r.name}\n${describeRun(r)}`}>
+            <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
+            <span className="legend-name">{r.name}</span>
+          </li>
+        ))}
+      </ul>
+      {compare.failed.map((f) => (
+        <p key={f.name} className="scenario-note error-text" title={f.error}>
+          施策「{f.name}」は実行できませんでした: {f.error}
+        </p>
+      ))}
+      {compare.omitted.length > 0 && (
+        <p className="scenario-note">
+          同時に重ねられる施策は {MAX_SERIES} つまでです。{compare.omitted.map((n) => `「${n}」`).join("")}は出していません
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** 凡例の線の見本。点線も見分けられるように、四角ではなく線で描く */
+function LineSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
+  return (
+    <svg className="line-swatch" width="18" height="10" aria-hidden="true">
+      <line x1="1" y1="5" x2="17" y2="5" stroke={color} strokeWidth={2} strokeDasharray={dashed ? "3 2" : undefined} />
+    </svg>
+  );
+}
+
+/** 1 つの要素について、「何もしない場合」と施策を重ねた小さなグラフ */
+function CompareChart({ name, times, runs, unit, scale }: { name: string; times: number[]; runs: CompareRun[]; unit: string; scale: Scale }) {
+  // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
+  const data = useMemo(() => {
+    const raw = runs.map((r) => r.series[name] ?? []);
+    const series = scale === "normalized" ? normalizeTogether(raw) : raw;
+    return times.map((t, i) => {
+      const row: Record<string, number | null> = { t, i };
+      series.forEach((values, k) => (row[`r${k}`] = values[i] ?? null));
+      return row;
+    });
+  }, [name, times, runs, scale]);
+  return (
+    <figure className="compare-cell">
+      <figcaption title={name}>{name}</figcaption>
+      <div className="compare-chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
+            <CartesianGrid stroke="var(--grid)" vertical={false} />
+            <XAxis
+              dataKey="t"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+              tickFormatter={(v: number) => formatTime(v)}
+              stroke="var(--axis)"
+              height={24}
+            />
+            {yAxis(scale)}
+            <Tooltip
+              cursor={{ stroke: "var(--text-muted)", strokeWidth: 1 }}
+              content={(p: TooltipContentProps) => <CompareTooltip {...p} unit={unit} name={name} runs={runs} />}
+              isAnimationActive={false}
+            />
+            {runs.map((r, k) => (
+              <Line
+                key={k}
+                type="linear"
+                dataKey={`r${k}`}
+                name={r.name}
+                stroke={runColor(r, k)}
+                strokeWidth={2}
+                strokeDasharray={r.baseline ? BASELINE_DASH : undefined}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface-1)" }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </figure>
+  );
+}
+
+/** 施策を重ねたグラフのツールチップ。正規化していても実際の値を出す */
+function CompareTooltip(p: TooltipContentProps & { unit: string; name: string; runs: CompareRun[] }) {
+  if (!p.active || !p.payload?.length) return null;
+  const row = p.payload[0]!.payload as Record<string, number | null>;
+  return (
+    <div className="tooltip">
+      <div className="tooltip-title">
+        {p.name}（{formatTime(row.t)} {p.unit}）
+      </div>
+      {p.runs.map((r, k) => (
+        <div key={k} className="tooltip-row">
+          <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
+          <span className="tooltip-name">{r.name}</span>
+          <span className="tooltip-value">{formatValue(r.series[p.name]?.[row.i!])}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * 要素を選ぶ一覧。ボタンで開け閉めする。
  * 種類ごとにまとめ、上の欄で名前を絞り込める。Esc か一覧の外を押すと閉じる
@@ -297,11 +488,14 @@ function SeriesPicker({
   candidates,
   visible,
   colorOf,
+  plain,
   onToggle,
 }: {
   candidates: SeriesCandidate[];
   visible: string[];
   colorOf(n: string): string;
+  /** 要素に色を付けない（施策を重ねているとき） */
+  plain?: boolean;
   onToggle(n: string): void;
 }) {
   const [open, setOpen] = useState(false);
@@ -411,7 +605,7 @@ function SeriesPicker({
                   return (
                     <label key={c.name} className={`series-option ${disabled ? "full" : ""}`} title={disabled ? `同時に出せるのは ${MAX_SERIES} 本までです` : c.name}>
                       <input type="checkbox" checked={on} disabled={disabled} onChange={() => onToggle(c.name)} />
-                      <span className="swatch" style={{ background: on ? colorOf(c.name) : "transparent" }} />
+                      {!plain && <span className="swatch" style={{ background: on ? colorOf(c.name) : "transparent" }} />}
                       <span className="series-option-name">{c.name}</span>
                     </label>
                   );

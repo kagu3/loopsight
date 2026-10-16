@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、13 個のツールが見える", async () => {
+  test("クライアントから接続でき、14 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     const { tools } = await client.listTools();
@@ -63,6 +63,7 @@ describe("MCP server", () => {
         "list_models",
         "remove_elements",
         "run_simulation",
+        "set_scenarios",
         "set_simulation",
         "sweep_parameter",
         "upsert_elements",
@@ -160,6 +161,51 @@ describe("MCP server", () => {
     const sim = await call("set_simulation", { model: "m", time_step: 0.25, algorithm: "RK4" });
     expect(sim.simulation).toMatchObject({ time_step: 0.25, algorithm: "RK4", time_length: 100 });
     expect(await callError("set_simulation", { model: "m", time_step: -1 })).toMatch(/time_step/);
+  });
+
+  test("施策を保存し、「何もしない場合」と比べる。要素の名前を変えると施策の中も変わる", async () => {
+    await call("create_model", { model: "s" });
+    await call("upsert_elements", { model: "s", elements: SIR });
+    const saved = await call("set_scenarios", {
+      model: "s",
+      scenarios: [
+        { name: "外出を控える", description: "接触を半分にする", values: { "contact rate": 0.2 } },
+        { name: "早く治す", values: { "Recovery Rate": 0.2 } },
+      ],
+      elements: ["Infected"],
+    });
+    expect(saved.changes.added).toEqual(["外出を控える", "早く治す"]);
+    expect(saved.validation.ok).toBe(true);
+    expect(saved.comparison.rows.map((r: any) => r.scenario)).toEqual(["何もしない場合", "外出を控える", "早く治す"]);
+    const peaks = saved.comparison.rows.map((r: any) => r.results.Infected.max);
+    expect(peaks[1]).toBeLessThan(peaks[0]);
+    expect(peaks[2]).toBeLessThan(peaks[0]);
+
+    // 保存した施策は sweep_parameter でも「何もしない場合」と並べて比べられる
+    const sweep = await call("sweep_parameter", { model: "s", overrides: { "Recovery Rate": 0.3 }, elements: ["Infected"] });
+    expect(sweep.rows.map((r: any) => r.scenario)).toEqual(["何もしない場合", "外出を控える", "早く治す"]);
+    // 「何もしない場合」には overrides を当てない
+    expect(sweep.rows[0].overrides).toEqual({});
+    expect(sweep.rows[0].results.Infected.max).toBe(peaks[0]);
+    expect(sweep.rows[1].overrides).toEqual({ "Contact Rate": 0.2, "Recovery Rate": 0.3 });
+
+    await call("upsert_elements", { model: "s", elements: [{ name: "Contact Rate", rename_to: "接触率" }] });
+    const renamed = await call("set_scenarios", { model: "s", scenarios: [{ name: "早く治す", rename_to: "治療を早める" }] });
+    expect(renamed.scenarios).toEqual([
+      { name: "外出を控える", description: "接触を半分にする", values: { 接触率: 0.2 } },
+      { name: "治療を早める", values: { "Recovery Rate": 0.2 } },
+    ]);
+
+    // 実行できない施策は保存しない
+    expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "壊れた", values: { 接触率: "[Nope]" } }] })).toMatch(/壊れた/);
+    expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "x", values: { Contact: 1 } }] })).toMatch(/見つかりません/);
+    expect(await callError("set_scenarios", { model: "s" })).toMatch(/scenarios か remove/);
+    const full = await call<ModelJSON>("get_model", { model: "s", format: "full" });
+    expect(full.scenarios!.map((s) => s.name)).toEqual(["外出を控える", "治療を早める"]);
+
+    const removed = await call("set_scenarios", { model: "s", remove: ["外出を控える", "治療を早める"] });
+    expect(removed.scenarios).toEqual([]);
+    expect(removed.comparison).toBeUndefined();
   });
 
   test("取り込み：.InsightMaker と ModelJSON", async () => {

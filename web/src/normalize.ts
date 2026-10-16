@@ -14,3 +14,14 @@ export function normalize(values: (number | null)[]): (number | null)[] {
     return max > min ? (v - min) / (max - min) : 0.5;
   });
 }
+
+/**
+ * いくつかの系列を、まとめて同じ物差しで正規化する（施策を重ねて比べるとき）。
+ * 全部の系列を通した最小を 0、最大を 1 にするので、系列どうしの高さの違いは残る
+ */
+export function normalizeTogether(list: (number | null)[][]): (number | null)[][] {
+  const lengths = list.map((v) => v.length);
+  const all = normalize(list.flat());
+  let at = 0;
+  return lengths.map((n) => all.slice(at, (at += n)));
+}

@@ -151,6 +151,20 @@ try {
   await sleep(500);
   await shot("live-update");
 
+  // AI が施策を保存して、「何もしない場合」と重ねたところ（MCP の set_scenarios と同じ処理でファイルを書き換える）。
+  // 開いている画面のまま撮る（ページを開き直すたびにビューアへのつながりが残り、ブラウザの同時接続の上限に近づくため）
+  core.setScenarios(m, [
+    { name: "移民を増やす", description: "受け入れを毎年 50 人にする", values: { Immigrants: 50 } },
+    { name: "死亡率を下げる", description: "医療を充実させて死亡率を 0.5% にする", values: { "Death Rate": 0.005 } },
+  ]);
+  await store.write("population", m);
+  await b.waitFor("document.querySelector('.compare-grid .recharts-line')");
+  await sleep(300);
+  const cell = await b.rectOf(".compare-chart");
+  await b.hover(cell.x + cell.width * 0.7, cell.y + cell.height * 0.5);
+  await b.waitFor("document.querySelector('.tooltip')");
+  await shot("scenarios", ".results");
+
   // 暗い配色
   await setColorScheme("dark");
   await b.open(url("disease"));

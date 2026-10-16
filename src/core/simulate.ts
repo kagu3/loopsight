@@ -1,7 +1,7 @@
 import { Link } from "simulation";
 import type { Equation, ModelElement, ModelJSON, SimulationSettings } from "./modeljson.js";
 import { clone, didYouMean, findElement } from "./modeljson.js";
-import { checkSimulation } from "./edit.js";
+import { BASELINE_SCENARIO, checkSimulation } from "./edit.js";
 import { ModelError, buildModel, staticCheck, toModelError } from "./validate.js";
 
 /** 実行 1 回分の全データ */
@@ -272,4 +272,47 @@ export function sweepParameter(
 /** モデルに保存されているシナリオ（ModelJSON の scenarios）を比較用の形にする */
 export function modelScenarios(model: ModelJSON): ScenarioInput[] {
   return (model.scenarios ?? []).map((s, i) => ({ name: s.name ?? `scenario ${i + 1}`, overrides: s.values }));
+}
+
+/** 「何もしない場合」（何も変えない実行）を先頭に足したシナリオの並び */
+export function withBaseline(scenarios: ScenarioInput[]): ScenarioInput[] {
+  return [{ name: BASELINE_SCENARIO, overrides: {} }, ...scenarios];
+}
+
+/** 保存したシナリオ 1 つ分の実行結果。実行できなかったときは data の代わりに error が入る */
+export interface ScenarioRun {
+  name: string;
+  description?: string;
+  overrides: Record<string, Equation>;
+  data?: RunData;
+  error?: ModelError;
+  /** limit を超えたため実行しなかった */
+  skipped?: boolean;
+}
+
+/**
+ * 「何もしない場合」と、モデルに保存したシナリオすべてを実行して、全時系列を返す。
+ * 「何もしない場合」が実行できなければ例外にする。シナリオごとの失敗は、そのシナリオの error に入れる。
+ * limit を付けると、先頭からその数までだけ実行する（残りは skipped にして名前だけ返す）。
+ */
+export function runScenarios(
+  model: ModelJSON,
+  options: { simulation?: SimulationSettings; limit?: number } = {},
+): { baseline: RunData; scenarios: ScenarioRun[] } {
+  const baseline = runModel(model, { simulation: options.simulation });
+  const scenarios = (model.scenarios ?? []).map((s, i): ScenarioRun => {
+    const run: ScenarioRun = { name: s.name ?? `scenario ${i + 1}`, overrides: s.values };
+    if (s.description) run.description = s.description;
+    if (options.limit !== undefined && i >= options.limit) {
+      run.skipped = true;
+      return run;
+    }
+    try {
+      run.data = runModel(model, { overrides: s.values, simulation: options.simulation });
+    } catch (e) {
+      run.error = toModelError(e);
+    }
+    return run;
+  });
+  return { baseline, scenarios };
 }

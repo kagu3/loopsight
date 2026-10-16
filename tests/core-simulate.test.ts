@@ -5,12 +5,14 @@ import {
   emptyModel,
   modelScenarios,
   runModel,
+  runScenarios,
   runToCSV,
   sampleIndices,
   summarizeRun,
   sweepParameter,
   sweepValues,
   upsertElements,
+  withBaseline,
   type ModelJSON,
 } from "../src/core/index.js";
 import { loadSample } from "./helpers.js";
@@ -138,6 +140,29 @@ describe("比較", () => {
     const c = compareScenarios(m, modelScenarios(m), { samples: 2 });
     expect(c.rows[1]!.results.Pop!.initial).toBe(10);
     expect(c.rows[1]!.results.Pop!.series).toHaveLength(2);
+  });
+
+  test("「何もしない場合」と保存したシナリオの全時系列をまとめて返す", () => {
+    const m = growth();
+    m.scenarios = [
+      { name: "fast", description: "速く増やす", values: { Rate: 0.2 } },
+      { name: "broken", values: { Rate: "[Nope]" } },
+    ];
+    const { baseline, scenarios } = runScenarios(m);
+    expect(baseline.columns.get("Pop")!.at(-1)).toBeCloseTo(100 * 1.1 ** 10, 6);
+    expect(scenarios.map((s) => s.name)).toEqual(["fast", "broken"]);
+    expect(scenarios[0]!.description).toBe("速く増やす");
+    expect(scenarios[0]!.data!.times).toEqual(baseline.times);
+    expect(scenarios[0]!.data!.columns.get("Pop")!.at(-1)).toBeCloseTo(100 * 1.2 ** 10, 6);
+    // 実行できないシナリオは、ほかを止めずに error に入れる
+    expect(scenarios[1]!.data).toBeUndefined();
+    expect(scenarios[1]!.error).toBeInstanceOf(ModelError);
+    expect(withBaseline(modelScenarios(m)).map((s) => s.name)).toEqual(["何もしない場合", "fast", "broken"]);
+    // limit を超えたシナリオは実行せず、名前だけ返す
+    const limited = runScenarios(m, { limit: 1 }).scenarios;
+    expect(limited[1]).toMatchObject({ name: "broken", skipped: true });
+    expect(limited[1]!.data).toBeUndefined();
+    expect(limited[1]!.error).toBeUndefined();
   });
 
   test("値の指定がなければエラー", () => {

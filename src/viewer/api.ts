@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { EditReport, ElementPatch, Issue, ModelElement, ModelInfo, ModelJSON } from "../core/index.js";
+import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON } from "../core/index.js";
 
-export type { EditReport, ElementPatch, Issue, ModelElement, ModelInfo, ModelJSON };
+export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON };
 
 /** GET /api/models */
 export interface ModelListResponse {
@@ -16,6 +16,19 @@ export interface RunResult {
   series: Record<string, (number | null)[]>;
 }
 
+/**
+ * 保存したシナリオ（施策）1 つ分の実行結果。時刻は「何もしない場合」（RunResult）と同じ。
+ * 実行できなかったときは series の代わりに error が入る。画面で重ねられる数を超えた施策は実行せず、skipped にする
+ */
+export interface ScenarioRunResult {
+  name: string;
+  description?: string;
+  values: Record<string, Equation>;
+  series?: Record<string, (number | null)[]>;
+  error?: string;
+  skipped?: boolean;
+}
+
 /** GET /api/models/:name */
 export interface ModelResponse {
   name: string;
@@ -26,8 +39,10 @@ export interface ModelResponse {
   undo_available: number;
   model: ModelJSON;
   validation: { ok: boolean; errors: Issue[]; warnings: Issue[] };
-  /** 実行できたときの結果 */
+  /** 実行できたときの結果（何も変えない実行。「何もしない場合」） */
   run?: RunResult;
+  /** モデルにシナリオ（施策）が保存されていれば、その実行結果。モデルの並び順 */
+  scenarios?: ScenarioRunResult[];
   /** 実行できなかったときの理由 */
   run_error?: { message: string; issues: Issue[] };
 }

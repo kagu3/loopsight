@@ -62,6 +62,34 @@ describe("ビューアのサーバー", () => {
     expect(body.run!.series.Rate!.every((v) => v === 0.1)).toBe(true);
   });
 
+  test("保存した施策（シナリオ）も実行して、全時系列を返す", async () => {
+    const m = population();
+    m.scenarios = [
+      { name: "高い", description: "増える割合を上げる", values: { Rate: 0.2 } },
+      { name: "壊れた", values: { Rate: "[Nope]" } },
+    ];
+    await new ModelStore(dir).write("pop", m);
+    const { body } = await get<ModelResponse>("/api/models/pop");
+    expect(body.run!.series.Population!.at(-1)).toBeCloseTo(100 * 1.1 ** 10, 6);
+    expect(body.scenarios!.map((s) => s.name)).toEqual(["高い", "壊れた"]);
+    expect(body.scenarios![0]).toMatchObject({ description: "増える割合を上げる", values: { Rate: 0.2 } });
+    expect(body.scenarios![0]!.series!.Population).toHaveLength(11);
+    expect(body.scenarios![0]!.series!.Population!.at(-1)).toBeCloseTo(100 * 1.2 ** 10, 6);
+    expect(body.scenarios![1]!.series).toBeUndefined();
+    expect(body.scenarios![1]!.error).toBeTruthy();
+    // 画面で重ねられる 8 つを超えた施策は実行せず、skipped で知らせる
+    const many = population();
+    many.scenarios = Array.from({ length: 9 }, (_, i) => ({ name: `s${i + 1}`, values: { Rate: 0.1 + i / 100 } }));
+    await new ModelStore(dir).write("pop", many);
+    const nine = (await get<ModelResponse>("/api/models/pop")).body.scenarios!;
+    expect(nine.filter((s) => s.series)).toHaveLength(8);
+    expect(nine[8]).toMatchObject({ name: "s9", skipped: true });
+    expect(nine[8]!.series).toBeUndefined();
+    // 施策がなければ scenarios は付けない
+    await new ModelStore(dir).write("pop", population());
+    expect((await get<ModelResponse>("/api/models/pop")).body.scenarios).toBeUndefined();
+  });
+
   test("エラーのあるモデルは実行せず、検証結果を返す", async () => {
     const m = population();
     m.elements.find((e) => e.name === "Births")!.behavior!.value = "[Population]*[Nope]";

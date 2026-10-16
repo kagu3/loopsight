@@ -2,8 +2,8 @@ import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
-import { EditError, ModelError, ModelStore, StoreError, checkModelName, runModel, upsertElements, validateModel, type ModelJSON } from "../core/index.js";
-import { VIEWER_HEADER, type ChangeEvent, type EditErrorResponse, type EditRequest, type EditResponse, type ModelListResponse, type ModelResponse, type RunResult, type UndoRequest } from "./api.js";
+import { EditError, ModelError, ModelStore, StoreError, checkModelName, runScenarios, upsertElements, validateModel, type ModelJSON, type RunData } from "../core/index.js";
+import { VIEWER_HEADER, type ChangeEvent, type EditErrorResponse, type EditRequest, type EditResponse, type ModelListResponse, type ModelResponse, type RunResult, type ScenarioRunResult, type UndoRequest } from "./api.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
 // 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements と同じ処理を通す）。
@@ -49,6 +49,15 @@ function toNumber(v: unknown): number | null {
   return null;
 }
 
+/** 画面で重ねられる施策の数（web/src/Chart.tsx の MAX_SERIES）。これより後の施策は実行しない */
+const MAX_SCENARIOS = 8;
+
+function seriesOf(data: RunData): RunResult["series"] {
+  const series: RunResult["series"] = {};
+  for (const [k, values] of data.columns) series[k] = values.map(toNumber);
+  return series;
+}
+
 export async function loadModelResponse(store: ModelStore, name: string, undoAvailable = 0): Promise<ModelResponse> {
   const { model, version } = await store.readVersioned(name);
   return modelResponse(store, name, model, version, undoAvailable);
@@ -60,10 +69,19 @@ async function modelResponse(store: ModelStore, name: string, model: ModelJSON, 
   const res: ModelResponse = { name, modified, version, undo_available: undoAvailable, model, validation };
   if (validation.ok) {
     try {
-      const data = runModel(model);
-      const series: RunResult["series"] = {};
-      for (const [k, values] of data.columns) series[k] = values.map(toNumber);
-      res.run = { time_units: data.timeUnits, times: data.times, series };
+      // 「何もしない場合」と、保存したシナリオ（施策）をまとめて実行する
+      const { baseline, scenarios } = runScenarios(model, { limit: MAX_SCENARIOS });
+      res.run = { time_units: baseline.timeUnits, times: baseline.times, series: seriesOf(baseline) };
+      if (scenarios.length) {
+        res.scenarios = scenarios.map((s) => {
+          const out: ScenarioRunResult = { name: s.name, values: s.overrides };
+          if (s.description) out.description = s.description;
+          if (s.skipped) out.skipped = true;
+          else if (s.data) out.series = seriesOf(s.data);
+          else out.error = s.error?.message ?? "実行できませんでした。";
+          return out;
+        });
+      }
     } catch (e) {
       const err = e instanceof ModelError ? e : new ModelError((e as Error).message, []);
       res.run_error = { message: err.message, issues: err.issues };

@@ -1,4 +1,4 @@
-import type { ElementBehavior, ElementDisplay, ElementType, ModelElement, ModelJSON, SimulationSettings } from "./modeljson.js";
+import type { ElementBehavior, ElementDisplay, ElementType, Equation, ModelElement, ModelJSON, Scenario, SimulationSettings } from "./modeljson.js";
 import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 import { canReference } from "./validate.js";
 
@@ -94,10 +94,14 @@ export function renameElement(model: ModelJSON, oldName: string, newName: string
   }
   for (const s of model.scenarios ?? []) {
     for (const key of Object.keys(s.values)) {
+      // 値が式なら、式の中の参照も書き換える
+      const raw = s.values[key]!;
+      const val = typeof raw === "string" ? renameInEquation(raw, from, newName) : raw;
       if (sameName(key, from)) {
-        const val = s.values[key]!;
         delete s.values[key];
         s.values[newName] = val;
+      } else {
+        s.values[key] = val;
       }
     }
   }
@@ -272,6 +276,101 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
   for (const s of model.scenarios ?? []) {
     for (const key of Object.keys(s.values)) if (gone.has(nameKey(key))) delete s.values[key];
   }
+  return report;
+}
+
+/** 何も変えない実行の名前。保存したシナリオ（施策）と並べて比べる基準にする */
+export const BASELINE_SCENARIO = "何もしない場合";
+
+/** シナリオで値を変えられる要素の種類（実行時の上書きと同じ） */
+const SCENARIO_TYPES: readonly ElementType[] = ["STOCK", "VARIABLE", "FLOW", "STATE", "TRANSITION"];
+
+/** set_scenarios の 1 件分。values は既存の値に重ねる（null を入れるとその要素の値を消す） */
+export interface ScenarioPatch {
+  name: string;
+  /** 既存のシナリオの名前を変える */
+  rename_to?: string;
+  description?: string | null;
+  values?: Record<string, Equation | null>;
+}
+
+export interface ScenarioReport {
+  added: string[];
+  updated: string[];
+  removed: string[];
+  notes: string[];
+}
+
+function scenarioNameOf(s: Scenario, i: number): string {
+  return s.name ?? `scenario ${i + 1}`;
+}
+
+function checkScenarioName(name: string, scenarios: Scenario[], self?: Scenario): string {
+  const n = name.trim();
+  if (!n) throw new EditError("シナリオには name が必要です。");
+  if (sameName(n, BASELINE_SCENARIO)) throw new EditError(`"${BASELINE_SCENARIO}" は何も変えない実行の名前なので、シナリオには使えません。`);
+  const clash = scenarios.find((s, i) => s !== self && sameName(scenarioNameOf(s, i), n));
+  if (clash) throw new EditError(`"${n}" という名前のシナリオがすでにあります。`);
+  return n;
+}
+
+/**
+ * シナリオ（施策）をまとめて追加・更新・削除する。モデルはその場で書き換える。
+ * 名前で既存のシナリオを探し、あれば重ね、なければ追加する。replace なら今のシナリオを捨ててから足す。
+ * 値の名前は要素の表記にそろえる（ない要素や、値を変えられない要素はエラー）。
+ */
+export function setScenarios(model: ModelJSON, patches: ScenarioPatch[], options: { remove?: string[]; replace?: boolean } = {}): ScenarioReport {
+  const report: ScenarioReport = { added: [], updated: [], removed: [], notes: [] };
+  const scenarios = options.replace ? [] : [...(model.scenarios ?? [])];
+  if (options.replace) report.removed.push(...(model.scenarios ?? []).map(scenarioNameOf));
+
+  const find = (name: string) => scenarios.find((s, i) => sameName(scenarioNameOf(s, i), name));
+  for (const name of options.remove ?? []) {
+    const s = find(name);
+    if (!s) {
+      const guess = didYouMean(name, scenarios.map(scenarioNameOf));
+      throw new EditError(`消すシナリオ "${name}" が見つかりません。${guess}`);
+    }
+    report.removed.push(scenarioNameOf(s, scenarios.indexOf(s)));
+    scenarios.splice(scenarios.indexOf(s), 1);
+  }
+
+  const valueNames = model.elements.filter((e) => e.name && SCENARIO_TYPES.includes(e.type)).map((e) => e.name!);
+  for (const p of patches) {
+    if (!p.name?.trim()) throw new EditError("シナリオには name が必要です。");
+    let s = find(p.name);
+    if (s) {
+      if (p.rename_to !== undefined) {
+        const before = scenarioNameOf(s, scenarios.indexOf(s));
+        s.name = checkScenarioName(p.rename_to, scenarios, s);
+        if (!sameName(before, s.name)) report.notes.push(`シナリオ "${before}" を "${s.name}" に名前変更しました。`);
+      }
+      report.updated.push(s.name ?? p.name);
+    } else {
+      if (p.rename_to !== undefined) {
+        throw new EditError(`名前を変えるシナリオ "${p.name}" が見つかりません。${didYouMean(p.name, scenarios.map(scenarioNameOf))}`);
+      }
+      s = { name: checkScenarioName(p.name, scenarios), values: {} };
+      scenarios.push(s);
+      report.added.push(s.name!);
+    }
+    if (p.description === null || p.description === "") delete s.description;
+    else if (p.description !== undefined) s.description = p.description;
+    for (const [key, value] of Object.entries(p.values ?? {})) {
+      const el = findElement(model, key);
+      if (!el) throw new EditError(`シナリオ "${s.name}" の値の要素 "${key}" が見つかりません。${didYouMean(key, valueNames)}`);
+      if (!SCENARIO_TYPES.includes(el.type)) {
+        throw new EditError(`${el.type} "${el.name}" の値はシナリオで変えられません（変えられるのは STOCK の初期値、VARIABLE と FLOW の値）。`);
+      }
+      // 表記の違う同じ名前（"rate" と "Rate"）は 1 つにまとめる
+      for (const k of Object.keys(s.values)) if (sameName(k, el.name)) delete s.values[k];
+      if (value !== null) s.values[el.name!] = value;
+    }
+    if (!Object.keys(s.values).length) report.notes.push(`シナリオ "${s.name}" は値を変えていないので、「${BASELINE_SCENARIO}」と同じ結果になります。`);
+  }
+
+  if (scenarios.length) model.scenarios = scenarios;
+  else delete model.scenarios;
   return report;
 }
 

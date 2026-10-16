@@ -7,6 +7,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
+  BASELINE_SCENARIO,
   EDITABLE_TYPES,
   EditError,
   ImportError,
@@ -26,6 +27,7 @@ import {
   resolveTargets,
   runModel,
   runToCSV,
+  setScenarios,
   setSimulation,
   staticCheck,
   summarizeModel,
@@ -34,8 +36,10 @@ import {
   sweepValues,
   upsertElements,
   validateModel,
+  withBaseline,
   type ElementPatch,
   type ModelJSON,
+  type ScenarioPatch,
 } from "../core/index.js";
 import { BrowserNotFoundError, launchBrowser } from "../viewer/browser.js";
 import { startViewer } from "../viewer/server.js";
@@ -154,7 +158,7 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 1. create_model か import_model でモデルを用意する
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
-4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする
+4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せる施策は set_scenarios でモデルに保存する（ビューアのグラフに「何もしない場合」と重ねて出る）
 5. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
 6. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
@@ -443,6 +447,47 @@ export function registerTools(server: McpServer, store: ModelStore): void {
   );
 
   server.registerTool(
+    "set_scenarios",
+    {
+      title: "施策（シナリオ）を保存する",
+      description:
+        "施策（シナリオ）をモデルの scenarios に保存する。シナリオは名前、説明、変える値の組 { 要素名: 値 }（STOCK は初期値、VARIABLE と FLOW は式を置き換える）。" +
+        `名前で既存のシナリオを探し、あれば説明と値を重ね（値を null にするとその要素は変えない）、なければ追加する。remove で消し、replace: true で今のシナリオをすべて置き換える。` +
+        `何も変えない実行は「${BASELINE_SCENARIO}」として扱う（保存しなくてよい）。ビューアのグラフでは「${BASELINE_SCENARIO}」と各シナリオが重なって出る。` +
+        `結果に、「${BASELINE_SCENARIO}」と各シナリオの初期値・最終値・最小・最大の比較を付ける。`,
+      inputSchema: {
+        model: modelName,
+        scenarios: z
+          .array(
+            z.object({
+              name: z.string().describe("シナリオ名。既存の名前なら更新、なければ追加"),
+              rename_to: z.string().optional().describe("既存のシナリオの名前を変える"),
+              description: z.string().nullable().optional().describe("どんな施策か（null で消す）"),
+              values: z.record(z.string(), equation.nullable()).optional().describe("変える値 { 要素名: 値 }。既存の値に重ねる（null でその要素は変えない）"),
+            }),
+          )
+          .optional()
+          .describe("[{name:'広告を増やす', description:'広告費を 2 倍にする', values:{'Ad Budget':200}}, ...]"),
+        remove: z.array(z.string()).optional().describe("消すシナリオの名前"),
+        replace: z.boolean().optional().describe("今のシナリオをすべて捨ててから scenarios を保存する（既定は false）"),
+        elements: targets,
+      },
+    },
+    handle(async (a: { model: string; scenarios?: ScenarioPatch[]; remove?: string[]; replace?: boolean; elements?: string[] }) => {
+      if (!a.scenarios?.length && !a.remove?.length && !a.replace) throw new EditError("scenarios か remove を指定してください。");
+      const m = await store.read(a.model);
+      const report = setScenarios(m, a.scenarios ?? [], { remove: a.remove, replace: a.replace });
+      const extra: Record<string, unknown> = { changes: report, scenarios: m.scenarios ?? [] };
+      // 実行できないシナリオは保存しない（エラーのあるモデルは、検証結果で知らせる）
+      if (m.scenarios?.length && staticCheck(m).errors.length === 0) {
+        const { targets: names, time_units, rows } = compareScenarios(m, withBaseline(modelScenarios(m)), { targets: a.elements });
+        extra.comparison = { targets: names, time_units, rows };
+      }
+      return saveAndCheck(a.model, m, extra);
+    }),
+  );
+
+  server.registerTool(
     "validate_model",
     {
       title: "モデルを検証する",
@@ -507,7 +552,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "感度分析とシナリオ比較。次のどれかを指定する: " +
         "(1) parameter と values（または from, to, steps）で 1 つの値を振る、" +
         "(2) scenarios で複数の値をまとめて変えた組を比べる、" +
-        "(3) どちらもなければモデルに保存されたシナリオを比べる。結果は組ごとに、指定した要素の初期値・最終値・最小・最大を返す。",
+        `(3) どちらもなければモデルに保存されたシナリオ（set_scenarios）を「${BASELINE_SCENARIO}」と並べて比べる（overrides は各シナリオにだけ当て、「${BASELINE_SCENARIO}」には当てない）。` +
+        "結果は組ごとに、指定した要素の初期値・最終値・最小・最大を返す。",
       inputSchema: {
         model: modelName,
         parameter: z.string().optional().describe("振る要素の名前（STOCK なら初期値、VARIABLE と FLOW なら値）"),
@@ -519,7 +565,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
           .array(z.object({ name: z.string(), overrides: z.record(z.string(), equation) }))
           .optional()
           .describe("[{name:'高成長', overrides:{'Birth Rate':0.05}}, ...]"),
-        overrides: overrides.optional().describe("すべての組に共通で当てる上書き"),
+        overrides: overrides.optional().describe("すべての組に共通で当てる上書き（保存したシナリオと比べるときの「何もしない場合」には当てない）"),
         elements: targets,
         samples: z.number().int().min(0).max(50).optional().describe("組ごとに返す時系列の点数（既定 0）"),
         simulation: simulation.optional(),
@@ -546,12 +592,14 @@ export function registerTools(server: McpServer, store: ModelStore): void {
           const values = a.values?.length ? a.values : sweepValues({ from: a.from, to: a.to, steps: a.steps });
           return { model: a.model, parameter: a.parameter, ...sweepParameter(m, a.parameter, values, { ...opts, baseOverrides: a.overrides }) };
         }
-        const scenarios = a.scenarios?.length ? a.scenarios : modelScenarios(m);
+        const fromModel = !a.scenarios?.length;
+        const scenarios = fromModel ? modelScenarios(m) : a.scenarios!;
         if (!scenarios.length) {
           throw new ModelError("比べるものがありません。parameter か scenarios を指定してください（モデルにもシナリオが保存されていません）。", []);
         }
         const withBase = scenarios.map((s) => ({ name: s.name, overrides: { ...(a.overrides ?? {}), ...s.overrides } }));
-        return { model: a.model, ...compareScenarios(m, withBase, opts) };
+        // 保存したシナリオと比べるときの「何もしない場合」は、名前どおり何も変えない（overrides も当てない）
+        return { model: a.model, ...compareScenarios(m, fromModel ? withBaseline(withBase) : withBase, opts) };
       },
     ),
   );

@@ -11,6 +11,7 @@ import {
   importInsightMakerXML,
   importModelText,
   removeElements,
+  setScenarios,
   setSimulation,
   similarNames,
   summarizeModel,
@@ -232,6 +233,20 @@ describe("要素の編集", () => {
     expect(() => setSimulation(m, { time_step: 100 })).toThrow();
   });
 
+  test("名前を変えると、シナリオの値の式の中の参照も変わる", () => {
+    const m = sir();
+    m.scenarios = [{ name: "high", values: { Gamma: "[Beta]*2", S: 900 } }];
+    upsertElements(m, [{ name: "Beta", rename_to: "Contact Rate" }]);
+    expect(m.scenarios[0]!.values).toEqual({ Gamma: "[Contact Rate]*2", S: 900 });
+  });
+
+  test("消した要素の値はシナリオからも消える", () => {
+    const m = sir();
+    m.scenarios = [{ name: "high", values: { Beta: 0.5, Gamma: 0.2 } }];
+    removeElements(m, [{ name: "Gamma" }]);
+    expect(m.scenarios[0]!.values).toEqual({ Beta: 0.5 });
+  });
+
   test("要約には式とつながりが入り、座標は入らない", () => {
     const s = summarizeModel(sir());
     expect(s.counts).toEqual({ STOCK: 3, VARIABLE: 2, FLOW: 2, LINK: 3 });
@@ -239,6 +254,50 @@ describe("要素の編集", () => {
     expect(s.title).toBe("sir");
     expect(s.links).toContain("Beta → Infection");
     expect(JSON.stringify(s)).not.toMatch(/coordinates/);
+  });
+});
+
+describe("シナリオ（施策）の保存", () => {
+  test("追加し、名前で探して値を重ねる。値の名前は要素の表記にそろえる", () => {
+    const m = sir();
+    const r = setScenarios(m, [
+      { name: "接触を減らす", description: "外出を控える", values: { beta: 0.2 } },
+      { name: "早く治す", values: { Gamma: 0.2 } },
+    ]);
+    expect(r.added).toEqual(["接触を減らす", "早く治す"]);
+    expect(m.scenarios).toEqual([
+      { name: "接触を減らす", description: "外出を控える", values: { Beta: 0.2 } },
+      { name: "早く治す", values: { Gamma: 0.2 } },
+    ]);
+    const r2 = setScenarios(m, [{ name: "早く治す", values: { Beta: 0.3, gamma: 0.25 } }, { name: "接触を減らす", description: null, values: { Beta: null } }]);
+    expect(r2.updated).toEqual(["早く治す", "接触を減らす"]);
+    expect(m.scenarios![1]!.values).toEqual({ Beta: 0.3, Gamma: 0.25 });
+    expect(m.scenarios![0]).toEqual({ name: "接触を減らす", values: {} });
+    expect(r2.notes.join("\n")).toMatch(/何もしない場合/);
+  });
+
+  test("名前を変える、消す、すべて置き換える", () => {
+    const m = sir();
+    setScenarios(m, [{ name: "a", values: { Beta: 0.2 } }, { name: "b", values: { Beta: 0.3 } }]);
+    const r = setScenarios(m, [{ name: "A", rename_to: "対策 A" }], { remove: ["b"] });
+    expect(r.removed).toEqual(["b"]);
+    expect(m.scenarios).toEqual([{ name: "対策 A", values: { Beta: 0.2 } }]);
+    setScenarios(m, [{ name: "c", values: { S: 500 } }], { replace: true });
+    expect(m.scenarios).toEqual([{ name: "c", values: { S: 500 } }]);
+    setScenarios(m, [], { remove: ["c"] });
+    expect(m.scenarios).toBeUndefined();
+  });
+
+  test("ない要素、値を変えられない要素、使えない名前はエラー", () => {
+    const m = sir();
+    expect(() => setScenarios(m, [{ name: "x", values: { Bta: 1 } }])).toThrow(/もしかして "Beta"/);
+    m.elements.push({ type: "CONVERTER", name: "Table", behavior: { input: "TIME", data: [[0, 1]] } });
+    expect(() => setScenarios(m, [{ name: "x", values: { Table: 1 } }])).toThrow(/CONVERTER/);
+    expect(() => setScenarios(m, [{ name: "何もしない場合", values: { Beta: 1 } }])).toThrow(/何もしない場合/);
+    setScenarios(m, [{ name: "x", values: { Beta: 1 } }, { name: "y", values: { Beta: 2 } }]);
+    expect(() => setScenarios(m, [{ name: "y", rename_to: "X" }])).toThrow(/すでにあります/);
+    expect(() => setScenarios(m, [{ name: "z", rename_to: "w" }])).toThrow(/見つかりません/);
+    expect(() => setScenarios(m, [], { remove: ["nothing"] })).toThrow(/見つかりません/);
   });
 });
 
