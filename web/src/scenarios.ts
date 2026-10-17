@@ -1,11 +1,11 @@
-// 施策（シナリオ）を重ねて比べるときと、画面で施策を直すときの、React に依存しない計算。
+// シナリオを重ねて比べるときと、画面でシナリオを直すときの、React に依存しない計算。
 import type { Equation, ModelElement, ModelJSON, RunResult, Scenario, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
 import { halfWidthEquation, parseEquation } from "./editing.js";
 
 /** 何も変えない実行の名前（サーバーの BASELINE_SCENARIO と同じ） */
-export const BASELINE_NAME = "何もしない場合";
+export const BASELINE_NAME = "元のモデル";
 
-/** グラフに重ねる実行 1 つ分。baseline は「何もしない場合」 */
+/** グラフに重ねる実行 1 つ分。baseline は「元のモデル」 */
 export interface CompareRun {
   name: string;
   description?: string;
@@ -15,15 +15,15 @@ export interface CompareRun {
 }
 
 export interface CompareRuns {
-  /** 先頭が「何もしない場合」。続けて、実行できた施策をモデルの並び順で */
+  /** 先頭が「元のモデル」。続けて、実行できたシナリオをモデルの並び順で */
   runs: CompareRun[];
-  /** 実行できなかった施策 */
+  /** 実行できなかったシナリオ */
   failed: { name: string; error: string }[];
-  /** 色が足りないため出さない施策 */
+  /** 色が足りないため出さないシナリオ */
   omitted: string[];
 }
 
-/** 「何もしない場合」と施策を、重ねて出す順に並べる。施策は色の数（max）まで */
+/** 「元のモデル」とシナリオを、重ねて出す順に並べる。シナリオは色の数（max）まで */
 export function compareRuns(run: RunResult, scenarios: ScenarioRunResult[], max: number): CompareRuns {
   const out: CompareRuns = {
     runs: [{ name: BASELINE_NAME, values: {}, series: run.series, baseline: true }],
@@ -48,14 +48,14 @@ export function compareRuns(run: RunResult, scenarios: ScenarioRunResult[], max:
   return out;
 }
 
-/** 施策の説明（凡例にカーソルを乗せたときに出す）。説明と、変える値 */
+/** シナリオの説明（凡例にカーソルを乗せたときに出す）。説明と、変える値 */
 export function describeRun(r: CompareRun): string {
   if (r.baseline) return "モデルの値を何も変えずに実行した結果です";
   const values = Object.entries(r.values).map(([k, v]) => `${k} = ${String(v)}`);
   return [r.description, values.length ? `変える値：${values.join("、")}` : "値を変えていません"].filter(Boolean).join("\n");
 }
 
-// ここから、施策の凡例を開いたときの表（施策の中身）の計算。列は compareRuns の runs と同じ並び
+// ここから、シナリオの凡例を開いたときの表（シナリオの中身）の計算。列は compareRuns の runs と同じ並び
 
 /** 数として読める値なら数。式（数でない文字）なら undefined */
 export function numberOf(v: Equation | undefined): number | undefined {
@@ -68,7 +68,7 @@ export function numberOf(v: Equation | undefined): number | undefined {
 const MINUS = "−";
 
 /**
- * 「何もしない場合」の値から、施策の値への変化の添え書き。
+ * 「元のモデル」の値から、シナリオの値への変化の添え書き。
  * 率にできれば +50% / −25%（10% 未満は小数 1 桁まで、それ以上は整数に丸める）。
  * 0 からの変化など率にできなければ差（+0.5）。どちらかが数でなければ空文字
  */
@@ -88,28 +88,28 @@ export function changeLabel(base: number | null | undefined, value: number | nul
 /** 表のマス 1 つ。value は値の書き方のまま（変えていなければ undefined） */
 export interface MatrixCell {
   value?: string;
-  /** 施策で値を変えたか（「何もしない場合」の列はいつも false） */
+  /** シナリオで値を変えたか（「元のモデル」の列はいつも false） */
   changed: boolean;
-  /** 「何もしない場合」からの変化（+50% など）。式のときや変えていないときは空文字 */
+  /** 「元のモデル」からの変化（+50% など）。式のときや変えていないときは空文字 */
   change: string;
 }
 
-/** 変えた値の行。cells は runs と同じ並び（先頭が「何もしない場合」） */
+/** 変えた値の行。cells は runs と同じ並び（先頭が「元のモデル」） */
 export interface MatrixRow {
   element: string;
-  /** ストックの行（「何もしない場合」の値は初期値） */
+  /** ストックの行（「元のモデル」の値は初期値） */
   initial: boolean;
   cells: MatrixCell[];
 }
 
 /**
- * 変えた値の行。どれかの施策で変えた要素だけを、モデルの並び順で（モデルにない要素は最後に）。
- * added（表で足した行の要素）は、どの施策でも変えていなくても出す（施策で値を変えられない要素や、モデルにない要素は出さない）。
- * 「何もしない場合」の列はいまの値（ストックは初期値、変数とフローは式）
+ * 変えた値の行。どれかのシナリオで変えた要素だけを、モデルの並び順で（モデルにない要素は最後に）。
+ * added（表で足した行の要素）は、どのシナリオでも変えていなくても出す（シナリオで値を変えられない要素や、モデルにない要素は出さない）。
+ * 「元のモデル」の列はいまの値（ストックは初期値、変数とフローは式）
  */
 export function valueRows(model: ModelJSON, runs: CompareRun[], added: string[] = []): MatrixRow[] {
   const scenarios = runs.filter((r) => !r.baseline);
-  // 施策の値は、要素名の大文字と小文字を区別せずに引く
+  // シナリオの値は、要素名の大文字と小文字を区別せずに引く
   const lookup = scenarios.map((r) => new Map(Object.entries(r.values).map(([k, v]) => [nameKey(k), v])));
   const extra = new Set(added.map(nameKey));
   const changed = new Map<string, string>();
@@ -135,7 +135,7 @@ export function valueRows(model: ModelJSON, runs: CompareRun[], added: string[] 
   });
 }
 
-/** 結果の行。cells は runs と同じ並び。施策の列の change は「何もしない場合」からの変化 */
+/** 結果の行。cells は runs と同じ並び。シナリオの列の change は「元のモデル」からの変化 */
 export interface ResultRow {
   element: string;
   /** 値を読んだ時点 */
@@ -167,28 +167,28 @@ export function resultRows(runs: CompareRun[], times: number[], elements: string
   });
 }
 
-// ここから、施策の編集欄（ScenarioEditor）の計算。送る変更は MCP の set_scenarios と同じ形にする
+// ここから、シナリオの編集欄（ScenarioEditor）の計算。送る変更は MCP の set_scenarios と同じ形にする
 
 /** 名前は大文字と小文字、前後の空白を区別しない（サーバーの sameName と同じ） */
 export const nameKey = (name: string) => name.trim().toLowerCase();
 
-/** 施策の名前。名前のない施策は、サーバーと同じく「scenario 1」のように呼ぶ */
+/** シナリオの名前。名前のないシナリオは、サーバーと同じく「scenario 1」のように呼ぶ */
 export const scenarioName = (s: Scenario, i: number) => s.name ?? `scenario ${i + 1}`;
 
-/** モデルに保存した施策を名前で探す */
+/** モデルに保存したシナリオを名前で探す */
 export function findScenario(model: ModelJSON, name: string): Scenario | undefined {
   return (model.scenarios ?? []).find((s, i) => nameKey(scenarioName(s, i)) === nameKey(name));
 }
 
-/** 施策で値を変えられる要素の種類。画面で選べるのはストック・変数・フロー */
+/** シナリオで値を変えられる要素の種類。画面で選べるのはストック・変数・フロー */
 const VALUE_TYPES = new Set<ModelElement["type"]>(["STOCK", "VARIABLE", "FLOW"]);
 
-/** 施策で値を変えられる要素（モデルの並び順） */
+/** シナリオで値を変えられる要素（モデルの並び順） */
 export function valueTargets(model: ModelJSON): ModelElement[] {
   return model.elements.filter((e) => e.name && VALUE_TYPES.has(e.type));
 }
 
-/** いまのモデルの値（何もしない場合）。ストックは初期値、変数とフローは式。要素がなければ undefined */
+/** いまのモデルの値（元のモデル）。ストックは初期値、変数とフローは式。要素がなければ undefined */
 export function currentValueOf(model: ModelJSON, name: string): string | undefined {
   const el = model.elements.find((e) => e.type !== "LINK" && e.name && nameKey(e.name) === nameKey(name));
   const v = el?.type === "STOCK" ? el.behavior?.initial_value : el?.behavior?.value;
@@ -208,7 +208,7 @@ export interface ScenarioForm {
 }
 
 /**
- * 施策の編集欄のはじめの中身。施策がなければ（足すとき）空。
+ * シナリオの編集欄のはじめの中身。シナリオがなければ（足すとき）空。
  * model を渡すと、行の要素名をモデルの表記にそろえる（手で書いたファイルの "rate" を "Rate" に。要素を選ぶ欄で選べるように）
  */
 export function scenarioFormOf(s: Scenario | undefined, name = "", model?: ModelJSON): ScenarioForm {
@@ -230,7 +230,7 @@ function checkRows(rows: ValueRow[]): ValueRow[] {
     if (!element && !value) continue;
     if (!element) throw new Error(`${i + 1} 行目の要素を選んでください。`);
     if (!value) throw new Error(`「${element}」の値が空です。変えないなら、その行を消してください。`);
-    if (seen.has(nameKey(element))) throw new Error(`「${element}」が 2 行あります。1 つの施策の中で、同じ要素は 1 行にしてください。`);
+    if (seen.has(nameKey(element))) throw new Error(`「${element}」が 2 行あります。1 つのシナリオの中で、同じ要素は 1 行にしてください。`);
     seen.add(nameKey(element));
     out.push({ element, value });
   }
@@ -238,20 +238,20 @@ function checkRows(rows: ValueRow[]): ValueRow[] {
 }
 
 /**
- * 施策の名前に使えない理由。空、「何もしない場合」、ほかの施策（others）と同じ名前。使えれば undefined。
+ * シナリオの名前に使えない理由。空、「元のモデル」、ほかのシナリオ（others）と同じ名前。使えれば undefined。
  * 比べ方はサーバーの setScenarios と同じ（大文字と小文字、前後の空白を区別しない）
  */
 export function scenarioNameProblem(name: string, others: string[]): string | undefined {
   const n = name.trim();
-  if (!n) return "施策の名前が空です。";
-  if (nameKey(n) === nameKey(BASELINE_NAME)) return `「${BASELINE_NAME}」は何も変えない実行の名前なので、施策には使えません。`;
-  if (others.some((o) => nameKey(o) === nameKey(n))) return `「${n}」という名前の施策がすでにあります。`;
+  if (!n) return "シナリオの名前が空です。";
+  if (nameKey(n) === nameKey(BASELINE_NAME)) return `「${BASELINE_NAME}」は何も変えない実行の名前なので、シナリオには使えません。`;
+  if (others.some((o) => nameKey(o) === nameKey(n))) return `「${n}」という名前のシナリオがすでにあります。`;
   return undefined;
 }
 
 /**
  * 編集欄の中身から、送る変更を組み立てる。変えた項目だけにする（値は変えた行だけ、消した行は null）。
- * original は直す施策の名前（足すときは undefined）。others はほかの施策の名前（名前の重なりを確かめる）。
+ * original は直すシナリオの名前（足すときは undefined）。others はほかのシナリオの名前（名前の重なりを確かめる）。
  * 何も変えていなければ undefined。誤りがあれば例外を投げる
  */
 export function scenarioPatchOf(original: string | undefined, before: ScenarioForm, after: ScenarioForm, others: string[]): ScenarioPatch | undefined {
@@ -283,17 +283,17 @@ export function scenarioPatchOf(original: string | undefined, before: ScenarioFo
   return Object.keys(patch).length > 1 ? patch : undefined;
 }
 
-// ここから、施策に注目している間（凡例にカーソルを乗せている・左の欄で直している）に、図の変えた要素に付ける札の計算
+// ここから、シナリオに注目している間（凡例にカーソルを乗せている・左の欄で直している）に、図の変えた要素に付ける札の計算
 
 /** 図の札 1 つ分 */
 export interface ScenarioBadge {
   /** 要素の名前（モデルの表記） */
   element: string;
-  /** ストック（いまの値・施策の値は初期値） */
+  /** ストック（いまの値・シナリオの値は初期値） */
   initial: boolean;
-  /** いまの値（何もしない場合）。値のない要素なら空文字 */
+  /** いまの値（元のモデル）。値のない要素なら空文字 */
   current: string;
-  /** 施策の値 */
+  /** シナリオの値 */
   value: string;
   /** 札に出す文字（「20 → 80」。長い式は省略する） */
   text: string;
@@ -310,8 +310,8 @@ function badgeValue(text: string): string {
 }
 
 /**
- * 施策で変えた要素の札。要素名（nameKey）→ 札。
- * 値は施策に保存してある値（編集欄で入れている途中の値ではない）。モデルにない要素は図に出ないので除く
+ * シナリオで変えた要素の札。要素名（nameKey）→ 札。
+ * 値はシナリオに保存してある値（編集欄で入れている途中の値ではない）。モデルにない要素は図に出ないので除く
  */
 export function scenarioBadges(model: ModelJSON, values: Record<string, Equation>): Map<string, ScenarioBadge> {
   const out = new Map<string, ScenarioBadge>();
@@ -322,21 +322,21 @@ export function scenarioBadges(model: ModelJSON, values: Record<string, Equation
     const current = currentValueOf(model, el.name) ?? "";
     const value = String(v).trim();
     const text = `${badgeValue(current) || "—"} → ${badgeValue(value)}`;
-    const title = [`${el.name}${initial ? "の初期値" : ""}`, `いまの値：${current.trim() || "—"}`, `施策の値：${value}`].join("\n");
+    const title = [`${el.name}${initial ? "の初期値" : ""}`, `いまの値：${current.trim() || "—"}`, `シナリオの値：${value}`].join("\n");
     out.set(nameKey(el.name), { element: el.name, initial, current, value, text, title });
   }
   return out;
 }
 
-// ここから、施策の中身の表のマスで、施策の値をその場で直すときの計算。送る変更は施策の編集欄と同じ形（値 1 つだけ）
+// ここから、シナリオの中身の表のマスで、シナリオの値をその場で直すときの計算。送る変更はシナリオの編集欄と同じ形（値 1 つだけ）
 
-/** 施策に保存してある要素の値（書き方のまま）。施策がないか、その値を変えていなければ undefined */
+/** シナリオに保存してある要素の値（書き方のまま）。シナリオがないか、その値を変えていなければ undefined */
 export function scenarioValueOf(model: ModelJSON, scenario: string, element: string): string | undefined {
   const v = Object.entries(findScenario(model, scenario)?.values ?? {}).find(([k]) => nameKey(k) === nameKey(element))?.[1];
   return v === undefined ? undefined : String(v);
 }
 
-/** 表のマスで直せる値か。モデルにあり、施策で値を変えられる要素（ストック・変数・フロー）だけ。ほかは保存できない */
+/** 表のマスで直せる値か。モデルにあり、シナリオで値を変えられる要素（ストック・変数・フロー）だけ。ほかは保存できない */
 export function canEditValue(model: ModelJSON, element: string): boolean {
   return valueTargets(model).some((e) => nameKey(e.name!) === nameKey(element));
 }
@@ -360,7 +360,7 @@ function valueProblem(model: ModelJSON, text: string): string | undefined {
 
 /**
  * 表のマスに入れた文字から、送る変更を組み立てる（MCP の set_scenarios と同じ形）。
- * 空なら、その施策ではその値を変えない（null。「何もしない場合」と同じ値に戻る）。全角の数字と記号は半角にする。
+ * 空なら、そのシナリオではその値を変えない（null。「元のモデル」と同じ値に戻る）。全角の数字と記号は半角にする。
  * 保存してある値と同じなら（何も変えていなければ）undefined。書けない値なら例外を投げる
  */
 export function cellPatchOf(model: ModelJSON, scenario: string, element: string, text: string): ScenarioPatch | undefined {
@@ -373,7 +373,7 @@ export function cellPatchOf(model: ModelJSON, scenario: string, element: string,
   return { name: scenario, values: { [element]: parseEquation(value) } };
 }
 
-// ここから、施策の中身の表の見出しで、施策を足す・複製するときの計算。送る変更は施策の編集欄で足すときと同じ形
+// ここから、シナリオの中身の表の見出しで、シナリオを足す・複製するときの計算。送る変更はシナリオの編集欄で足すときと同じ形
 
 /** 複製するときに最初に入れておく名前。「人を増やさない（2）」のように、まだ使っていない番号を付ける */
 export function copyNameOf(name: string, others: string[]): string {
@@ -386,32 +386,32 @@ export function copyNameOf(name: string, others: string[]): string {
 }
 
 /**
- * 表の見出しで足す施策の変更。source（複製元の施策の名前）があれば、その値と説明を写す。
- * 値のない施策も送る（サーバーは受け付け、「何もしない場合」と同じ結果の列になる）。名前が使えなければ例外を投げる
+ * 表の見出しで足すシナリオの変更。source（複製元のシナリオの名前）があれば、その値と説明を写す。
+ * 値のないシナリオも送る（サーバーは受け付け、「元のモデル」と同じ結果の列になる）。名前が使えなければ例外を投げる
  */
 export function newScenarioPatchOf(model: ModelJSON, name: string, source?: string): ScenarioPatch {
   const problem = scenarioNameProblem(name, (model.scenarios ?? []).map(scenarioName));
   if (problem) throw new Error(problem);
   const from = source === undefined ? undefined : findScenario(model, source);
-  if (source !== undefined && !from) throw new Error(`複製する施策「${source}」が見つかりません。ほかのところ（AI など）で名前が変わったか、消された可能性があります。`);
+  if (source !== undefined && !from) throw new Error(`複製するシナリオ「${source}」が見つかりません。ほかのところ（AI など）で名前が変わったか、消された可能性があります。`);
   const patch: ScenarioPatch = { name: name.trim(), values: { ...(from?.values ?? {}) } };
-  // 説明は、施策の編集欄と同じく、空でなければ送る
+  // 説明は、シナリオの編集欄と同じく、空でなければ送る
   const description = from?.description?.trim();
   if (description) patch.description = description;
   return patch;
 }
 
-// ここから、施策の中身の表で、行（変える値）を足す・消すときの計算
+// ここから、シナリオの中身の表で、行（変える値）を足す・消すときの計算
 
-/** 表に足せる値。施策で値を変えられる要素のうち、まだ行にないもの（モデルの並び順） */
+/** 表に足せる値。シナリオで値を変えられる要素のうち、まだ行にないもの（モデルの並び順） */
 export function addableValues(model: ModelJSON, rows: MatrixRow[]): ModelElement[] {
   const shown = new Set(rows.map((r) => nameKey(r.element)));
   return valueTargets(model).filter((e) => !shown.has(nameKey(e.name!)));
 }
 
 /**
- * 行を消すときの変更。その値を変えている施策ごとに値を null にする（すべての施策でその値を変えない）。
- * 重ねていない施策（実行できなかった・色が足りない）も含める。1 回の保存で送ると、元に戻すも 1 回で済む。変えている施策がなければ空
+ * 行を消すときの変更。その値を変えているシナリオごとに値を null にする（すべてのシナリオでその値を変えない）。
+ * 重ねていないシナリオ（実行できなかった・色が足りない）も含める。1 回の保存で送ると、元に戻すも 1 回で済む。変えているシナリオがなければ空
  */
 export function clearValuePatches(model: ModelJSON, element: string): ScenarioPatch[] {
   return (model.scenarios ?? []).flatMap((s, i) => {

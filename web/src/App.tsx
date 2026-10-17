@@ -16,9 +16,9 @@ import { draggedResultsRatio, parseResultsRatio, RESULTS_RATIO } from "./split.j
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
-// 画面からの編集（式などの変更、位置の変更、施策の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
+// 画面からの編集（式などの変更、位置の変更、シナリオの変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
 // 図の形を変える操作（配置のドラッグ、要素を足す・消す、線を引く・消す）は、図の左上の「図を編集」をオンにしたときだけできる。
-// 値（詳細欄の「編集」）や施策は、「図を編集」に関係なく、いつでも直せる（入力欄に打ち込む操作で、元に戻すでも戻せるため）。
+// 値（詳細欄の「編集」）やシナリオは、「図を編集」に関係なく、いつでも直せる（入力欄に打ち込む操作で、元に戻すでも戻せるため）。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
@@ -106,12 +106,12 @@ export function App() {
   const [selected, setSelected] = useState<string>();
   // 図で線を押して選んだリンク。要素を選ぶと外す
   const [selectedLink, setSelectedLink] = useState<LinkEnds>();
-  // 左の欄で直している施策。name がなければ、施策を足している
+  // 左の欄で直しているシナリオ。name がなければ、シナリオを足している
   const [scenario, setScenario] = useState<{ name?: string }>();
-  // 保存を待つあいだに、ほかのモデルや要素、施策を開いたかを確かめるため
+  // 保存を待つあいだに、ほかのモデルや要素、シナリオを開いたかを確かめるため
   const scenarioRef = useRef(scenario);
   scenarioRef.current = scenario;
-  // グラフの上の施策の凡例にカーソルを乗せている施策
+  // グラフの上のシナリオの凡例にカーソルを乗せているシナリオ
   const [hoveredScenario, setHoveredScenario] = useState<string>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
   // いま出している版で名前の変わった要素（画面で名前を変えた・元に戻したとき）。グラフに出す要素を新しい名前に合わせる
@@ -122,7 +122,7 @@ export function App() {
   const [editMode, setEditMode] = useState(false);
   // 画面で要素を足した・消した・名前を変えた（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
   const [keepView, setKeepView] = useState<string>();
-  // 要素や、施策の中身の表の行を消したときの知らせ。元に戻したら閉じる
+  // 要素や、シナリオの中身の表の行を消したときの知らせ。元に戻したら閉じる
   const removedNotice = useRef<string>(undefined);
   const [modelsOpen, setModelsOpen] = useState(loadModelsOpen);
   const toggleModels = () =>
@@ -343,7 +343,7 @@ export function App() {
     [applyWrite, enqueueWrite],
   );
 
-  /** 施策を足す・直す・消す（MCP の set_scenarios と同じ形） */
+  /** シナリオを足す・直す・消す（MCP の set_scenarios と同じ形） */
   const editScenarios = useCallback(
     (patches: ScenarioPatch[], remove?: string[]): Promise<string | undefined> =>
       enqueueWrite<string | undefined>(async () => {
@@ -363,18 +363,18 @@ export function App() {
     },
     [editScenarios],
   );
-  /** 施策の中身の表で、施策の値をその場で直す。編集欄は開かない */
+  /** シナリオの中身の表で、シナリオの値をその場で直す。編集欄は開かない */
   const saveScenarioValue = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
   /**
-   * 施策の中身の表で、行（変える値）を消す。すべての施策でその値を変えないことにする。
-   * 確かめずに消す代わりに、すべての施策の変更を 1 回の保存にし（Ctrl+Z 1 回で戻せる）、戻せることを知らせの帯に出す
+   * シナリオの中身の表で、行（変える値）を消す。すべてのシナリオでその値を変えないことにする。
+   * 確かめずに消す代わりに、すべてのシナリオの変更を 1 回の保存にし（Ctrl+Z 1 回で戻せる）、戻せることを知らせの帯に出す
    */
   const removeScenarioValue = useCallback(
     async (element: string) => {
       const err = await enqueueWrite<string | undefined>(async () => {
         const d = dataRef.current;
         if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
-        // 変えている施策は、順番が来たときの最新の内容で決める。どの施策も変えていなければ（続けて押したときなど）何もしない
+        // 変えているシナリオは、順番が来たときの最新の内容で決める。どのシナリオも変えていなければ（続けて押したときなど）何もしない
         const patches = clearValuePatches(d.model, element);
         if (!patches.length) return undefined;
         const result = await postScenarios(d.name, d.version, patches);
@@ -399,13 +399,13 @@ export function App() {
     },
     [editScenarios],
   );
-  /** 図で要素を選ぶと、施策の編集欄を閉じて、その要素を出す */
+  /** 図で要素を選ぶと、シナリオの編集欄を閉じて、その要素を出す */
   const selectElement = useCallback((name: string | undefined) => {
     setScenario(undefined);
     setSelected(name);
     setSelectedLink(undefined);
   }, []);
-  /** 図で線を押してリンクを選ぶ。要素を選んだときと同じく、施策の編集欄を閉じる */
+  /** 図で線を押してリンクを選ぶ。要素を選んだときと同じく、シナリオの編集欄を閉じる */
   const selectLink = useCallback((link: LinkEnds) => {
     setScenario(undefined);
     setSelected(undefined);
@@ -473,7 +473,7 @@ export function App() {
 
   /**
    * 編集モードで、要素を消す（つながるリンクも消える）。つながっていたフローは残して、端を雲にする。
-   * 消したことでほかに変わったこと（フローの端、式に残った参照、施策の値）は、知らせの帯に出す
+   * 消したことでほかに変わったこと（フローの端、式に残った参照、シナリオの値）は、知らせの帯に出す
    */
   const removeElement = useCallback(
     async (name: string) => {
@@ -558,14 +558,14 @@ export function App() {
     for (const [k, v] of Object.entries(data?.run?.series ?? {})) out[k] = formatValue(v.at(-1));
     return out;
   }, [data]);
-  // 図の札：注目している施策（凡例にカーソルを乗せている施策、なければ左の欄で直している施策）で変えた要素に、保存してある値を出す
-  // 乗せたまま AI などが施策を消したり名前を変えたりして見つからなければ、直している施策に戻す
+  // 図の札：注目しているシナリオ（凡例にカーソルを乗せているシナリオ、なければ左の欄で直しているシナリオ）で変えた要素に、保存してある値を出す
+  // 乗せたまま AI などがシナリオを消したり名前を変えたりして見つからなければ、直しているシナリオに戻す
   const scenarioMarks = useMemo<ScenarioMarks | undefined>(() => {
     if (!data) return undefined;
     const name = [hoveredScenario, scenario?.name].find((n) => n !== undefined && findScenario(data.model, n));
     const s = name !== undefined ? findScenario(data.model, name) : undefined;
     if (name === undefined || !s) return undefined;
-    // 色は施策の線の色。直している施策が実行できなかった・色が足りずに出していないときは、線がないので灰色にする
+    // 色はシナリオの線の色。直しているシナリオが実行できなかった・色が足りずに出していないときは、線がないので灰色にする
     const color = (data.run && scenarioColor(data.run, data.scenarios ?? [], name)) ?? "var(--text-secondary)";
     return { badges: scenarioBadges(data.model, s.values), color };
   }, [data, hoveredScenario, scenario?.name]);
@@ -574,7 +574,7 @@ export function App() {
   // 選んでいるリンク（AI などが消していれば、ない）
   const selectedLinkEl = selectedLink && data ? findLink(data.model, selectedLink.from, selectedLink.to) : undefined;
   // 編集モードで消せる要素（足せる種類と同じく、状態と遷移は消さない）か、リンク。
-  // 施策の編集欄を開いている間は、左に出ていない要素を消さないよう、消せないことにする
+  // シナリオの編集欄を開いている間は、左に出ていない要素を消さないよう、消せないことにする
   const removableName =
     editMode && !scenario && selectedEl && selectedEl.type !== "STATE" && selectedEl.type !== "TRANSITION" ? selectedEl.name : undefined;
   // 先の要素の式が使っているなど、消せないリンクの理由（左の欄に出し、「削除」は押せなくする）
@@ -633,10 +633,10 @@ export function App() {
         </header>
 
         <section className="panel">
-          <h2>{scenario ? "施策" : selectedLink ? "選んだ線" : "選んだ要素"}</h2>
+          <h2>{scenario ? "シナリオ" : selectedLink ? "選んだ線" : "選んだ要素"}</h2>
           {scenario && data ? (
             <ScenarioEditor
-              key={scenario.name?.toLowerCase() ?? "（新しい施策）"}
+              key={scenario.name?.toLowerCase() ?? "（新しいシナリオ）"}
               model={data.model}
               name={scenario.name}
               onSave={saveScenario}

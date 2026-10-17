@@ -72,7 +72,7 @@ export function formOf(el: ModelElement): Form {
 export function patchOf(el: ModelElement, before: Form, after: Form): ElementPatch | undefined {
   const behavior: Record<string, unknown> = {};
   const patch: ElementPatch = { name: el.name! };
-  // 名前を変えると、サーバーが式・施策・実際のデータの列名などの参照も書き換える
+  // 名前を変えると、サーバーが式・シナリオ・実際のデータの列名などの参照も書き換える
   if (after.name.trim() !== before.name.trim()) {
     if (!after.name.trim()) throw new Error("名前が空です。");
     patch.rename_to = after.name.trim();

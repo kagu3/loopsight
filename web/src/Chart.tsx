@@ -26,10 +26,10 @@ import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 // 実行結果の時系列グラフと表。
 // 色は検証済みの 8 色を順に使う。色は要素ごとに決め、ほかの要素を出し入れしても変えない。
 // 9 色目は作らないので、同時に出せるのは 8 本まで。
-// モデルに施策（シナリオ）が保存されていれば、要素ごとに小さなグラフを並べ、「何もしない場合」（灰色の点線）と施策を重ねる。
-// このときの色は施策ごとに決める（施策も 8 つまで）。
+// モデルにシナリオが保存されていれば、要素ごとに小さなグラフを並べ、「元のモデル」（灰色の点線）とシナリオを重ねる。
+// このときの色はシナリオごとに決める（シナリオも 8 つまで）。
 // 実際のデータ（<モデル名>.data.csv）がある要素は、同じ色の白抜きの丸を線に重ねる（線の上の、塗りつぶした丸と見分けるため）。
-// 施策を重ねているときは、施策の色と見分けられるよう、文字の色の白抜きの丸にする。
+// シナリオを重ねているときは、シナリオの色と見分けられるよう、文字の色の白抜きの丸にする。
 
 export const MAX_SERIES = 8;
 const SLOTS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
@@ -117,7 +117,7 @@ function saveScale(scale: Scale) {
 
 const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 
-/** 施策の凡例を開いて、施策の中身の表にしているか（縦軸と同じく、ブラウザに覚えておく） */
+/** シナリオの凡例を開いて、シナリオの中身の表にしているか（縦軸と同じく、ブラウザに覚えておく） */
 const MATRIX_KEY = "viewer.scenarioMatrix";
 function loadMatrixOpen(): boolean {
   try {
@@ -138,37 +138,37 @@ export interface ChartProps {
   modelName: string;
   model: ModelJSON;
   run: RunResult;
-  /** 保存した施策の実行結果 */
+  /** 保存したシナリオの実行結果 */
   scenarios?: ScenarioRunResult[];
   /** 実際のデータ。あれば点で重ねる */
   actual?: ActualDataResult;
   /** いまの版で名前の変わった要素の [前の名前, 新しい名前]。グラフに出している要素を新しい名前で出し続ける */
   renamed?: [string, string][];
-  /** 左の欄で直している施策の名前（凡例で目立たせる） */
+  /** 左の欄で直しているシナリオの名前（凡例で目立たせる） */
   editingScenario?: string;
-  /** 施策の編集欄を開く。name がなければ施策を足す */
+  /** シナリオの編集欄を開く。name がなければシナリオを足す */
   onEditScenario?(name?: string): void;
-  /** 施策を直す（MCP の set_scenarios と同じ形）。失敗したらエラーの文を返す。あれば、施策の中身の表で値をその場で直せる */
+  /** シナリオを直す（MCP の set_scenarios と同じ形）。失敗したらエラーの文を返す。あれば、シナリオの中身の表で値をその場で直せる */
   onSaveScenario?(patch: ScenarioPatch): Promise<string | undefined>;
-  /** すべての施策で、その要素の値を変えないことにする（施策の中身の表の行を消す）。失敗したらエラーの文を返す */
+  /** すべてのシナリオで、その要素の値を変えないことにする（シナリオの中身の表の行を消す）。失敗したらエラーの文を返す */
   onRemoveScenarioValue?(element: string): Promise<string | undefined>;
-  /** 施策の凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「何もしない場合」では呼ばない */
+  /** シナリオの凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「元のモデル」では呼ばない */
   onFocusScenario?(name: string | undefined): void;
 }
 
-/** 「何もしない場合」の線の色と点線 */
+/** 「元のモデル」の線の色と点線 */
 const BASELINE_COLOR = "var(--text-muted)";
 const BASELINE_DASH = "4 4";
 const runColor = (r: CompareRun, k: number) => (r.baseline ? BASELINE_COLOR : `var(${SLOTS[(k - 1) % SLOTS.length]})`);
 
-/** 施策の線の色（凡例と同じ）。実行できなかった施策と、色が足りずに出さない施策は undefined */
+/** シナリオの線の色（凡例と同じ）。実行できなかったシナリオと、色が足りずに出さないシナリオは undefined */
 export function scenarioColor(run: RunResult, scenarios: ScenarioRunResult[], name: string): string | undefined {
   const runs = compareRuns(run, scenarios, MAX_SERIES).runs;
   const k = runs.findIndex((r) => !r.baseline && r.name.toLowerCase() === name.toLowerCase());
   return k > 0 ? runColor(runs[k]!, k) : undefined;
 }
 
-/** 施策を重ねているときの、実際のデータの点の色 */
+/** シナリオを重ねているときの、実際のデータの点の色 */
 const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
 export function Chart({ modelName, model, run, scenarios, actual, renamed, editingScenario, onEditScenario, onSaveScenario, onRemoveScenarioValue, onFocusScenario }: ChartProps) {
@@ -182,12 +182,12 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
   const slots = useMemo(() => (renamed?.length ? renamedKeys(chosenSlots, renamed) : chosenSlots), [chosenSlots, renamed]);
   const [view, setView] = useState<"chart" | "table">("chart");
   const [scale, setScaleState] = useState<Scale>(loadScale);
-  // 施策を重ねるか。施策が保存されていれば、はじめは重ねる
+  // シナリオを重ねるか。シナリオが保存されていれば、はじめは重ねる
   const [overlay, setOverlay] = useState(true);
   const compare = useMemo(() => compareRuns(run, scenarios ?? [], MAX_SERIES), [run, scenarios]);
   const hasScenarios = (scenarios?.length ?? 0) > 0;
   const comparing = overlay && hasScenarios;
-  // 施策を重ねたグラフにカーソルを乗せている時点（施策の中身の表の、結果の行に出す）
+  // シナリオを重ねたグラフにカーソルを乗せている時点（シナリオの中身の表の、結果の行に出す）
   const [hoverTime, setHoverTime] = useState<number | undefined>();
   // マウスが出ないままグラフが消えたり（要素を外す・表にする）、別のモデルを開いたりしたら、時点を忘れる
   useEffect(() => setHoverTime(undefined), [modelName, view, visible]);
@@ -275,15 +275,15 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
           </button>
         </div>
         {hasScenarios && (
-          <div className="segmented" role="radiogroup" aria-label="施策">
+          <div className="segmented" role="radiogroup" aria-label="シナリオ">
             <button
               role="radio"
               aria-checked={comparing}
               className={comparing ? "on" : ""}
               onClick={() => setOverlay(true)}
-              title={`要素ごとにグラフを分け、「${BASELINE_NAME}」とモデルに保存した施策を重ねます`}
+              title={`要素ごとにグラフを分け、「${BASELINE_NAME}」とモデルに保存したシナリオを重ねます`}
             >
-              施策を重ねる
+              シナリオを重ねる
             </button>
             <button
               role="radio"
@@ -296,10 +296,10 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
             </button>
           </div>
         )}
-        {/* 施策の凡例を出していないとき（施策がない・重ねない）の、施策を足す入口 */}
+        {/* シナリオの凡例を出していないとき（シナリオがない・重ねない）の、シナリオを足す入口 */}
         {!comparing && onEditScenario && (
-          <button className="toolbar-button" onClick={() => onEditScenario()} title={`値を変えた施策を足し、「${BASELINE_NAME}」と重ねて比べます`}>
-            ＋ 施策を足す
+          <button className="toolbar-button" onClick={() => onEditScenario()} title={`値を変えたシナリオを足し、「${BASELINE_NAME}」と重ねて比べます`}>
+            ＋ シナリオを足す
           </button>
         )}
         {view === "chart" && (
@@ -320,7 +320,7 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
               onClick={() => setScale("normalized")}
               title={
                 comparing
-                  ? "要素ごとに、どの施策も通した最小を 0%、最大を 100% にそろえます"
+                  ? "要素ごとに、どのシナリオも通した最小を 0%、最大を 100% にそろえます"
                   : "要素ごとに、最小を 0%、最大を 100% にそろえます。大きさの違う要素の、変わり方の形を比べられます"
               }
             >
@@ -329,7 +329,7 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
           </div>
         )}
         <SeriesPicker candidates={candidates} visible={visible} colorOf={colorOf} plain={comparing} onToggle={toggle} />
-        {/* 凡例を兼ねる。出している要素だけを色つきで出し、× で外せる。施策を重ねているときの色は施策のものなので、要素には色を付けない */}
+        {/* 凡例を兼ねる。出している要素だけを色つきで出し、× で外せる。シナリオを重ねているときの色はシナリオのものなので、要素には色を付けない */}
         <ul className="series-legend" aria-label="表示している要素">
           {visible.map((n) => (
             <li key={n} className="legend-chip" title={n}>
@@ -492,14 +492,14 @@ function yAxis(scale: Scale) {
   );
 }
 
-/** 施策の中身の表で、はじめから出す「変えた値」の行の数。超えたぶんは畳んで「ほか N 件」で開く */
+/** シナリオの中身の表で、はじめから出す「変えた値」の行の数。超えたぶんは畳んで「ほか N 件」で開く */
 const MATRIX_ROWS = 6;
 
 /**
- * 施策の凡例。「何もしない場合」は灰色の点線。実行できなかった施策と、色が足りずに出さない施策も知らせる。
- * onEdit があれば、施策の名前を押すと左の欄で直せる。最後に「＋ 施策を足す」を置く。
- * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、施策ごとに変えた値と結果（グラフで選んでいる要素の値）を並べる。
- * onSave があれば、表の施策の値をその場で直せる。onRemoveValue があれば、表の行（変える値）を消せる
+ * シナリオの凡例。「元のモデル」は灰色の点線。実行できなかったシナリオと、色が足りずに出さないシナリオも知らせる。
+ * onEdit があれば、シナリオの名前を押すと左の欄で直せる。最後に「＋ シナリオを足す」を置く。
+ * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、シナリオごとに変えた値と結果（グラフで選んでいる要素の値）を並べる。
+ * onSave があれば、表のシナリオの値をその場で直せる。onRemoveValue があれば、表の行（変える値）を消せる
  */
 function ScenarioLegend({
   compare,
@@ -536,14 +536,14 @@ function ScenarioLegend({
     setOpenState(o);
     saveMatrixOpen(o);
   };
-  // 重ねている施策がない（どれも実行できなかった・出していない）ときは、表にしても空なので開かない
+  // 重ねているシナリオがない（どれも実行できなかった・出していない）ときは、表にしても空なので開かない
   const canOpen = compare.runs.length > 1;
   const isOpen = open && canOpen;
   const isEditing = (n: string) => editing !== undefined && editing.toLowerCase() === n.toLowerCase();
-  // 実行できなかった施策と、出していない施策の名前も、押すと直せる
+  // 実行できなかったシナリオと、出していないシナリオの名前も、押すと直せる
   const nameButton = (n: string) =>
     onEdit ? (
-      <button className="link inline-link" onClick={() => onEdit(n)} title={`施策「${n}」を左の欄で直します`}>
+      <button className="link inline-link" onClick={() => onEdit(n)} title={`シナリオ「${n}」を左の欄で直します`}>
         {n}
       </button>
     ) : (
@@ -561,7 +561,7 @@ function ScenarioLegend({
         <LineSwatch color={runColor(r, k)} dashed={r.baseline} />
         <span className="legend-name">{r.name}</span>
         {!r.baseline && (
-          <span className="scenario-count" title="この施策で変えた値の数">
+          <span className="scenario-count" title="このシナリオで変えた値の数">
             <span aria-hidden="true">{Object.keys(r.values).length}</span>
             <span className="visually-hidden">（変えた値 {Object.keys(r.values).length} 件）</span>
           </span>
@@ -579,12 +579,12 @@ function ScenarioLegend({
     );
   };
   const addButton = onEdit && (
-    <button className="link" onClick={() => onEdit()} title={`値を変えた施策を足し、「${BASELINE_NAME}」と重ねて比べます`}>
-      ＋ 施策を足す
+    <button className="link" onClick={() => onEdit()} title={`値を変えたシナリオを足し、「${BASELINE_NAME}」と重ねて比べます`}>
+      ＋ シナリオを足す
     </button>
   );
   const toggle = (
-    <button className="link scenario-toggle" aria-expanded={open} onClick={() => setOpen(!open)} title="施策ごとに、変えた値と結果を表で比べます">
+    <button className="link scenario-toggle" aria-expanded={open} onClick={() => setOpen(!open)} title="シナリオごとに、変えた値と結果を表で比べます">
       {open ? "▾ 中身を閉じる" : "▸ 中身を見る"}
     </button>
   );
@@ -606,7 +606,7 @@ function ScenarioLegend({
             onRemoveValue={onRemoveValue}
           />
         ) : (
-          <ul className="scenario-legend" aria-label="重ねている施策">
+          <ul className="scenario-legend" aria-label="重ねているシナリオ">
             {compare.runs.map((r, k) => (
               <li key={k} className="scenario-chip" title={`${r.name}\n${describeRun(r)}`}>
                 {chip(r, k)}
@@ -622,12 +622,12 @@ function ScenarioLegend({
       </div>
       {compare.failed.map((f) => (
         <p key={f.name} className="scenario-note error-text" title={f.error}>
-          施策「{nameButton(f.name)}」は実行できませんでした: {f.error}
+          シナリオ「{nameButton(f.name)}」は実行できませんでした: {f.error}
         </p>
       ))}
       {compare.omitted.length > 0 && (
         <p className="scenario-note">
-          同時に重ねられる施策は {MAX_SERIES} つまでです。
+          同時に重ねられるシナリオは {MAX_SERIES} つまでです。
           {compare.omitted.map((n) => (
             <span key={n}>「{nameButton(n)}」</span>
           ))}
@@ -639,12 +639,12 @@ function ScenarioLegend({
 }
 
 /**
- * 施策の中身の表。列は凡例と同じ並び（「何もしない場合」と、重ねている施策）。
- * 行は、どれかの施策で変えた値と、結果（グラフで選んでいる要素の、ある時点の値）。
- * onSave があれば、変えた値の行の施策の列（「—」も）をその場で直せる。「何もしない場合」の列と結果の行は直せない。
- * また、見出しの右端の「＋」で施策を足し、施策の見出しの「複製」で同じ値の施策を作れる（名前を付けて Enter で保存する）。
- * 変えた値の行の下の「＋ 値を追加」で、どの施策でも変えていない値の行（全部「—」）を足せる。足した行は消すまで残す（モデルには保存しない）。
- * onRemoveValue があれば、行の名前にカーソルを乗せると出る × で、すべての施策でその値を変えないことにして行を消せる
+ * シナリオの中身の表。列は凡例と同じ並び（「元のモデル」と、重ねているシナリオ）。
+ * 行は、どれかのシナリオで変えた値と、結果（グラフで選んでいる要素の、ある時点の値）。
+ * onSave があれば、変えた値の行のシナリオの列（「—」も）をその場で直せる。「元のモデル」の列と結果の行は直せない。
+ * また、見出しの右端の「＋」でシナリオを足し、シナリオの見出しの「複製」で同じ値のシナリオを作れる（名前を付けて Enter で保存する）。
+ * 変えた値の行の下の「＋ 値を追加」で、どのシナリオでも変えていない値の行（全部「—」）を足せる。足した行は消すまで残す（モデルには保存しない）。
+ * onRemoveValue があれば、行の名前にカーソルを乗せると出る × で、すべてのシナリオでその値を変えないことにして行を消せる
  */
 function ScenarioMatrix({
   compare,
@@ -672,7 +672,7 @@ function ScenarioMatrix({
   onRemoveValue?(element: string): Promise<string | undefined>;
 }) {
   const runs = compare.runs;
-  // 「＋ 値を追加」で足した行の要素（モデルの表記）。値を入れて施策で変えた行になっても、消すまで残す
+  // 「＋ 値を追加」で足した行の要素（モデルの表記）。値を入れてシナリオで変えた行になっても、消すまで残す
   const [added, setAdded] = useState<string[]>([]);
   // 足した行の要素がモデルから消えたら（名前が変わったときも）、その行も外す
   useEffect(() => setAdded((a) => (a.every((n) => canEditValue(model, n)) ? a : a.filter((n) => canEditValue(model, n)))), [model]);
@@ -680,7 +680,7 @@ function ScenarioMatrix({
   const results = resultRows(runs, times, visible, at);
   const folding = rows.length > MATRIX_ROWS;
   const shown = folding && !showAll ? rows.slice(0, MATRIX_ROWS) : rows;
-  // 名前を付けている途中の、足す施策の列。source は複製元の施策の名前（「＋」で足すときは undefined）
+  // 名前を付けている途中の、足すシナリオの列。source は複製元のシナリオの名前（「＋」で足すときは undefined）
   const [adding, setAdding] = useState<{ source?: string; initial: string }>();
   const tableRef = useRef<HTMLTableElement>(null);
   // 仮の列を閉じたら、キーボードで続けられるようフォーカスを移す。保存したら表に、取りやめたら押した「＋」か「複製」に戻す。
@@ -704,14 +704,14 @@ function ScenarioMatrix({
   const extraCol = onSave ? 1 : 0;
   const colSpan = runs.length + 1 + extraCol;
   const sourceIndex = adding?.source === undefined ? -1 : runs.findIndex((r) => !r.baseline && r.name === adding.source);
-  // 施策はグラフに重ねられる数（色の数）まで。名前のない施策や実行できなかった施策も 1 つに数える
+  // シナリオはグラフに重ねられる数（色の数）まで。名前のないシナリオや実行できなかったシナリオも 1 つに数える
   const savedNames = (model.scenarios ?? []).map(scenarioName);
   const full = savedNames.length >= MAX_SERIES;
-  const fullNote = `グラフに重ねられる施策は ${MAX_SERIES} つまでです。凡例の施策を押して、左の欄で使わない施策を消すと足せます`;
+  const fullNote = `グラフに重ねられるシナリオは ${MAX_SERIES} つまでです。凡例のシナリオを押して、左の欄で使わないシナリオを消すと足せます`;
   const startAdding = (source?: string) => setAdding({ source, initial: source === undefined ? "" : copyNameOf(source, savedNames) });
-  // 名前を決めたら、施策を足して保存する。保存できたら仮の列を閉じ（足した施策の列に替わる）、表にフォーカスを移す
+  // 名前を決めたら、シナリオを足して保存する。保存できたら仮の列を閉じ（足したシナリオの列に替わる）、表にフォーカスを移す
   const saveNew = async (name: string): Promise<string | undefined> => {
-    // 名前を付けているあいだに、ほかのところ（AI など）で施策が足されて上限に達したら送らない
+    // 名前を付けているあいだに、ほかのところ（AI など）でシナリオが足されて上限に達したら送らない
     if (full) return fullNote;
     let patch: ScenarioPatch;
     try {
@@ -730,7 +730,7 @@ function ScenarioMatrix({
     refocus.current = { cancel: true, source: adding?.source };
     setAdding(undefined);
   };
-  // 「＋ 値を追加」で選んでいる途中か。足したら、その行の最初の施策のマスにフォーカスを移す（そのまま Enter で値を入れられる）
+  // 「＋ 値を追加」で選んでいる途中か。足したら、その行の最初のシナリオのマスにフォーカスを移す（そのまま Enter で値を入れられる）
   const [picking, setPicking] = useState(false);
   // 選び欄で選んでいる要素（まだ足していない）。閉じた選び欄で ↓ ↑ や頭文字を押すと、その場で change が起きる（Windows）ので、
   // キーで選んでいる間は足さず、Enter で決める。マウスで一覧から選んだときは、そのまま足す。欄から外れたら取りやめる
@@ -760,14 +760,14 @@ function ScenarioMatrix({
     focusRow.current = element;
     setAdded(next);
   };
-  // 行を消す。すべての施策でその値を変えないことにし（保存は App が 1 回にまとめる）、足した行なら外す
+  // 行を消す。すべてのシナリオでその値を変えないことにし（保存は App が 1 回にまとめる）、足した行なら外す
   const removeRow = (element: string) => {
     setAdded((a) => a.filter((n) => nameKey(n) !== nameKey(element)));
     // 押した × は行ごと消えるので、キーボードで続けられるよう表にフォーカスを移しておく
     tableRef.current?.focus({ preventScroll: true });
     void onRemoveValue?.(element);
   };
-  // マスに入れた文字を、その施策の変更にして送る。書けない値ならエラーの文を返す（送らない）
+  // マスに入れた文字を、そのシナリオの変更にして送る。書けない値ならエラーの文を返す（送らない）
   const saveValue = (r: CompareRun, element: string) => async (text: string) => {
     let patch: ScenarioPatch | undefined;
     try {
@@ -779,7 +779,7 @@ function ScenarioMatrix({
   };
   return (
     <div className="scenario-matrix-scroll">
-      <table className="scenario-matrix" aria-label="施策の中身" tabIndex={-1} ref={tableRef}>
+      <table className="scenario-matrix" aria-label="シナリオの中身" tabIndex={-1} ref={tableRef}>
         <thead>
           <tr>
             <th scope="col" className="matrix-corner">
@@ -795,8 +795,8 @@ function ScenarioMatrix({
                       data-scenario={r.name}
                       onClick={() => !full && startAdding(r.name)}
                       aria-disabled={full}
-                      aria-label={`施策「${r.name}」を複製`}
-                      title={full ? fullNote : "同じ値の施策を作ります"}
+                      aria-label={`シナリオ「${r.name}」を複製`}
+                      title={full ? fullNote : "同じ値のシナリオを作ります"}
                     >
                       複製
                     </button>
@@ -809,7 +809,7 @@ function ScenarioMatrix({
             ) : (
               onSave && (
                 <th scope="col" className="matrix-add">
-                  <button onClick={() => !full && startAdding()} aria-disabled={full} aria-label="施策を足す" title={full ? fullNote : "施策を足します（名前を付けて Enter）"}>
+                  <button onClick={() => !full && startAdding()} aria-disabled={full} aria-label="シナリオを足す" title={full ? fullNote : "シナリオを足します（名前を付けて Enter）"}>
                     ＋
                   </button>
                 </th>
@@ -821,7 +821,7 @@ function ScenarioMatrix({
           {rows.length === 0 && runs.length > 1 && (
             <tr>
               <td colSpan={colSpan} className="matrix-empty">
-                どの施策も値を変えていません
+                どのシナリオも値を変えていません
               </td>
             </tr>
           )}
@@ -836,13 +836,13 @@ function ScenarioMatrix({
                     className="matrix-remove-row"
                     onClick={() => removeRow(row.element)}
                     aria-label={`「${row.element}」の行を消す`}
-                    title="すべての施策で、この値を変えないことにして行を消します（Ctrl+Z で戻せます）"
+                    title="すべてのシナリオで、この値を変えないことにして行を消します（Ctrl+Z で戻せます）"
                   >
                     ×
                   </button>
                 )}
               </th>
-              {/* マスの key は施策の名前（施策の列が減っても、入力している途中の状態が隣の列に移らないように） */}
+              {/* マスの key はシナリオの名前（シナリオの列が減っても、入力している途中の状態が隣の列に移らないように） */}
               {row.cells.map((c, k) =>
                 k === 0 ? (
                   <td key={runs[k]!.name} className="matrix-base" title={c.value}>
@@ -856,7 +856,7 @@ function ScenarioMatrix({
                     {c.change && <small className="matrix-change">{c.change}</small>}
                   </td>
                 ) : (
-                  <td key={runs[k]!.name} className="matrix-same" title="この施策では変えていません">
+                  <td key={runs[k]!.name} className="matrix-same" title="このシナリオでは変えていません">
                     —
                   </td>
                 ),
@@ -912,7 +912,7 @@ function ScenarioMatrix({
                     className="link"
                     onClick={() => addables.length > 0 && setPicking(true)}
                     aria-disabled={addables.length === 0}
-                    title={addables.length ? "どの施策でも変えていない値を、比べる行に足します" : "施策で変えられる値は、すべて表にあります"}
+                    title={addables.length ? "どのシナリオでも変えていない値を、比べる行に足します" : "シナリオで変えられる値は、すべて表にあります"}
                   >
                     ＋ 値を追加
                   </button>
@@ -934,7 +934,7 @@ function ScenarioMatrix({
                   {c.change && <small className="matrix-change">{c.change}</small>}
                 </td>
               ))}
-              {/* 足す施策の結果は、保存して実行するまでわからない */}
+              {/* 足すシナリオの結果は、保存して実行するまでわからない */}
               {adding ? <td className="matrix-same" /> : extraCol > 0 && <td />}
             </tr>
           ))}
@@ -945,7 +945,7 @@ function ScenarioMatrix({
 }
 
 /**
- * 施策の中身の表で、足す施策の列の見出し。名前を入れて Enter（か欄から外れる）で保存し、Esc で取りやめる。
+ * シナリオの中身の表で、足すシナリオの列の見出し。名前を入れて Enter（か欄から外れる）で保存し、Esc で取りやめる。
  * 名前が空のまま欄から外れたときも取りやめる。名前が使えない・保存に失敗したときは、その場で知らせて列を残す（保存しない）
  */
 function NewScenarioHeader({ initial, copy, onSave, onCancel }: { initial: string; copy: boolean; onSave(name: string): Promise<string | undefined>; onCancel(): void }) {
@@ -961,7 +961,7 @@ function NewScenarioHeader({ initial, copy, onSave, onCancel }: { initial: strin
     setSaving(true);
     const err = await onSave(name);
     busy.current = false;
-    // 保存できたら、この列は消える（足した施策の列に替わる）
+    // 保存できたら、この列は消える（足したシナリオの列に替わる）
     if (err) {
       setSaving(false);
       setError(err);
@@ -978,7 +978,7 @@ function NewScenarioHeader({ initial, copy, onSave, onCancel }: { initial: strin
         className="matrix-input matrix-name"
         value={name}
         size={Math.min(Math.max(name.length + 2, 12), 28)}
-        placeholder={copy ? "複製した施策の名前" : "新しい施策の名前"}
+        placeholder={copy ? "複製したシナリオの名前" : "新しいシナリオの名前"}
         onChange={(e) => {
           setName(e.target.value);
           setError(undefined);
@@ -1001,7 +1001,7 @@ function NewScenarioHeader({ initial, copy, onSave, onCancel }: { initial: strin
         onFocus={(e) => e.currentTarget.select()}
         readOnly={saving}
         autoFocus
-        aria-label={copy ? "複製した施策の名前" : "足す施策の名前"}
+        aria-label={copy ? "複製したシナリオの名前" : "足すシナリオの名前"}
         aria-invalid={!!error}
         title="Enter で決める、Esc でやめる"
       />
@@ -1014,10 +1014,10 @@ function NewScenarioHeader({ initial, copy, onSave, onCancel }: { initial: strin
   );
 }
 
-/** 足す施策の列の、変えた値のマス。複製なら複製元の値、「＋」で足すなら「—」。名前を決めて保存してから直せる */
+/** 足すシナリオの列の、変えた値のマス。複製なら複製元の値、「＋」で足すなら「—」。名前を決めて保存してから直せる */
 function NewScenarioCell({ value }: { value?: string }) {
   return value === undefined ? (
-    <td className="matrix-same" title="この施策では変えていません">
+    <td className="matrix-same" title="このシナリオでは変えていません">
       —
     </td>
   ) : (
@@ -1028,8 +1028,8 @@ function NewScenarioCell({ value }: { value?: string }) {
 }
 
 /**
- * 施策の中身の表の、施策の値のマス。押す（Enter）と入力欄になり、Enter か欄から外れると保存し、Esc で取りやめる。
- * 空にして確定するか × を押すと、その施策ではその値を変えない（「—」に戻る）。
+ * シナリオの中身の表の、シナリオの値のマス。押す（Enter）と入力欄になり、Enter か欄から外れると保存し、Esc で取りやめる。
+ * 空にして確定するか × を押すと、そのシナリオではその値を変えない（「—」に戻る）。
  * × はカーソルを乗せたとき（フォーカスしたとき）だけ出す。普段の見た目は、直せないマスと同じ
  */
 function ScenarioValueCell({ cell, color, label, onSave }: { cell: MatrixCell; color: string; label: string; onSave(text: string): Promise<string | undefined> }) {
@@ -1111,7 +1111,7 @@ function ScenarioValueCell({ cell, color, label, onSave }: { cell: MatrixCell; c
       setError(err);
     } else close(focusCell);
   };
-  // × で、この施策ではこの値を変えないことにする
+  // × で、このシナリオではこの値を変えないことにする
   const clear = async () => {
     if (busy.current) return;
     refocus.current = true;
@@ -1149,7 +1149,7 @@ function ScenarioValueCell({ cell, color, label, onSave }: { cell: MatrixCell; c
           autoFocus
           aria-label={label}
           aria-invalid={!!error}
-          title="Enter で保存、Esc でやめる。空にすると、この施策ではこの値を変えません"
+          title="Enter で保存、Esc でやめる。空にすると、このシナリオではこの値を変えません"
         />
         {errorNote}
       </td>
@@ -1161,7 +1161,7 @@ function ScenarioValueCell({ cell, color, label, onSave }: { cell: MatrixCell; c
       className={`matrix-editable ${cell.changed ? "matrix-changed" : "matrix-same"} ${error ? "matrix-editing" : ""}`}
       style={style}
       tabIndex={0}
-      title={cell.changed ? `${cell.value}\n押すと直せます` : "この施策では変えていません。押すと値を変えられます"}
+      title={cell.changed ? `${cell.value}\n押すと直せます` : "このシナリオでは変えていません。押すと値を変えられます"}
       aria-label={`${label}：${cell.changed ? cell.value : "変えていません"}`}
       onClick={start}
       onKeyDown={(e) => {
@@ -1186,7 +1186,7 @@ function ScenarioValueCell({ cell, color, label, onSave }: { cell: MatrixCell; c
             }}
             disabled={saving}
             aria-label={`${label}を変えないことにする`}
-            title="この施策ではこの値を変えない（「—」に戻す）"
+            title="このシナリオではこの値を変えない（「—」に戻す）"
           >
             ×
           </button>
@@ -1211,8 +1211,8 @@ function LineSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
 }
 
 /**
- * 1 つの要素について、「何もしない場合」と施策を重ねた小さなグラフ。
- * カーソルを乗せている時点を onHover で知らせる（施策の中身の表に出す）。知らせるたびにほかのグラフを描き直さないよう memo にする
+ * 1 つの要素について、「元のモデル」とシナリオを重ねた小さなグラフ。
+ * カーソルを乗せている時点を onHover で知らせる（シナリオの中身の表に出す）。知らせるたびにほかのグラフを描き直さないよう memo にする
  */
 const CompareChart = memo(function CompareChart({
   name,
@@ -1232,7 +1232,7 @@ const CompareChart = memo(function CompareChart({
   onHover(t: number | undefined): void;
 }) {
   // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
-  // 実際のデータの点も同じ行に入れる（キーは a）。正規化するときは、どの施策も通した最小と最大を目盛りにする
+  // 実際のデータの点も同じ行に入れる（キーは a）。正規化するときは、どのシナリオも通した最小と最大を目盛りにする
   const data = useMemo(() => {
     const raw = runs.map((r) => r.series[name] ?? []);
     const series = scale === "normalized" ? normalizeTogether(raw) : raw;
@@ -1309,7 +1309,7 @@ const CompareChart = memo(function CompareChart({
   );
 });
 
-/** 施策を重ねたグラフのツールチップ。正規化していても実際の値を出す */
+/** シナリオを重ねたグラフのツールチップ。正規化していても実際の値を出す */
 function CompareTooltip(p: TooltipContentProps & { unit: string; name: string; runs: CompareRun[]; actual?: ActualDataResult }) {
   if (!p.active || !p.payload?.length) return null;
   const row = p.payload[0]!.payload as Record<string, number | null>;
@@ -1353,7 +1353,7 @@ function SeriesPicker({
   candidates: SeriesCandidate[];
   visible: string[];
   colorOf(n: string): string;
-  /** 要素に色を付けない（施策を重ねているとき） */
+  /** 要素に色を付けない（シナリオを重ねているとき） */
   plain?: boolean;
   onToggle(n: string): void;
 }) {

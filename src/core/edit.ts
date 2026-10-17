@@ -282,8 +282,8 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
   return report;
 }
 
-/** 何も変えない実行の名前。保存したシナリオ（施策）と並べて比べる基準にする */
-export const BASELINE_SCENARIO = "何もしない場合";
+/** 何も変えない実行の名前。保存したシナリオと並べて比べる基準にする */
+export const BASELINE_SCENARIO = "元のモデル";
 
 /** シナリオで値を変えられる要素の種類（実行時の上書きと同じ） */
 const SCENARIO_TYPES: readonly ElementType[] = ["STOCK", "VARIABLE", "FLOW", "STATE", "TRANSITION"];
@@ -318,7 +318,7 @@ function checkScenarioName(name: string, scenarios: Scenario[], self?: Scenario)
 }
 
 /**
- * シナリオ（施策）をまとめて追加・更新・削除する。モデルはその場で書き換える。
+ * シナリオをまとめて追加・更新・削除する。モデルはその場で書き換える。
  * 名前で既存のシナリオを探し、あれば重ね、なければ追加する。replace なら今のシナリオを捨ててから足す。
  * 値の名前は要素の表記にそろえる（ない要素や、値を変えられない要素はエラー）。
  */

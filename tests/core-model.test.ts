@@ -258,7 +258,7 @@ describe("要素の編集", () => {
   });
 });
 
-describe("シナリオ（施策）の保存", () => {
+describe("シナリオの保存", () => {
   test("追加し、名前で探して値を重ねる。値の名前は要素の表記にそろえる", () => {
     const m = sir();
     const r = setScenarios(m, [
@@ -274,7 +274,7 @@ describe("シナリオ（施策）の保存", () => {
     expect(r2.updated).toEqual(["早く治す", "接触を減らす"]);
     expect(m.scenarios![1]!.values).toEqual({ Beta: 0.3, Gamma: 0.25 });
     expect(m.scenarios![0]).toEqual({ name: "接触を減らす", values: {} });
-    expect(r2.notes.join("\n")).toMatch(/何もしない場合/);
+    expect(r2.notes.join("\n")).toMatch(/元のモデル/);
   });
 
   test("値を直しても、変える値の並び順は変えない。表記の違うキーは元の位置で要素の表記にそろえる", () => {
@@ -311,7 +311,7 @@ describe("シナリオ（施策）の保存", () => {
     expect(() => setScenarios(m, [{ name: "x", values: { Bta: 1 } }])).toThrow(/もしかして "Beta"/);
     m.elements.push({ type: "CONVERTER", name: "Table", behavior: { input: "TIME", data: [[0, 1]] } });
     expect(() => setScenarios(m, [{ name: "x", values: { Table: 1 } }])).toThrow(/CONVERTER/);
-    expect(() => setScenarios(m, [{ name: "何もしない場合", values: { Beta: 1 } }])).toThrow(/何もしない場合/);
+    expect(() => setScenarios(m, [{ name: "元のモデル", values: { Beta: 1 } }])).toThrow(/元のモデル/);
     setScenarios(m, [{ name: "x", values: { Beta: 1 } }, { name: "y", values: { Beta: 2 } }]);
     expect(() => setScenarios(m, [{ name: "y", rename_to: "X" }])).toThrow(/すでにあります/);
     expect(() => setScenarios(m, [{ name: "z", rename_to: "w" }])).toThrow(/見つかりません/);

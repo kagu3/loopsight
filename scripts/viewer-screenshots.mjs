@@ -171,7 +171,7 @@ try {
   await sleep(500);
   await shot("live-update");
 
-  // AI が施策を保存して、「何もしない場合」と重ねたところ（MCP の set_scenarios と同じ処理でファイルを書き換える）。
+  // AI がシナリオを保存して、「元のモデル」と重ねたところ（MCP の set_scenarios と同じ処理でファイルを書き換える）。
   // 開いている画面のまま撮る（ページを開き直すたびにビューアへのつながりが残り、ブラウザの同時接続の上限に近づくため）
   core.setScenarios(m, [
     { name: "移民を増やす", description: "受け入れを毎年 50 人にする", values: { Immigrants: 50 } },
@@ -186,7 +186,7 @@ try {
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("scenarios", ".results");
 
-  // 施策の凡例にカーソルを乗せて、図の変えた要素に札が付いたところ（4 つ目の「組み合わせる」）。
+  // シナリオの凡例にカーソルを乗せて、図の変えた要素に札が付いたところ（4 つ目の「組み合わせる」）。
   // 前の場面で変わった要素の枠が消えてから撮る（札の枠と紛らわしくないように）
   await b.waitFor("!document.querySelector('.is-changed')");
   await sleep(300);
@@ -196,9 +196,9 @@ try {
   await sleep(200);
   await shot("scenario-badges");
 
-  // 施策の凡例を押して、左の欄で施策を直しているところ（保存せずに閉じる）
+  // シナリオの凡例を押して、左の欄でシナリオを直しているところ（保存せずに閉じる）
   await b.hover(W - 4, H - 4);
-  // 施策名の横に変えた値の数も出るので、名前の部分で探す
+  // シナリオ名の横に変えた値の数も出るので、名前の部分で探す
   await b.evaluate("[...document.querySelectorAll('.scenario-chip-button')].find((e) => e.querySelector('.legend-name')?.textContent === '移民を増やす').click()");
   await b.waitFor("document.querySelector('.scenario-table input')");
   await b.evaluate("(() => { const t = document.querySelector('.scenario-table input'); t.focus(); t.select(); })()");
@@ -207,12 +207,13 @@ try {
   await shot("scenario-edit");
   await b.clickText(".form-buttons button", "やめる");
 
-  // 施策の凡例を開いて、施策の中身（変えた値と結果）の表にしたところ。グラフにカーソルを乗せ、その時点の結果を出す（撮ったら閉じておく）
+  // シナリオの凡例を開いて、シナリオの中身（変えた値と結果）の表にしたところ。グラフにカーソルを乗せ、その時点の結果を出す（撮ったら閉じておく）
   await b.clickText(".scenario-toggle", "▸ 中身を見る");
   await b.waitFor("document.querySelector('.scenario-matrix')");
   await sleep(300);
   const matrixCell = await b.rectOf(".compare-chart");
-  await b.hover(matrixCell.x + matrixCell.width * 0.7, matrixCell.y + matrixCell.height * 0.5);
+  // 表が高くなるとグラフの下半分が画面の外に出るので、画面に見えている部分の真ん中に乗せる
+  await b.hover(matrixCell.x + matrixCell.width * 0.7, matrixCell.y + Math.min(matrixCell.height, H - matrixCell.y) * 0.5);
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("scenario-matrix", ".results");
   await b.hover(W - 4, H - 4);
@@ -227,7 +228,7 @@ try {
         {
           kind: "compare",
           title: "50 年後の人口を比べる",
-          message: "どちらの施策でも人口は増えます。移民を増やすほうが、50 年後の人口は多くなります。",
+          message: "どちらのシナリオでも人口は増えます。移民を増やすほうが、50 年後の人口は多くなります。",
           scenarios: ["移民を増やす", "死亡率を下げる"],
           elements: ["Population"],
           at: 50,

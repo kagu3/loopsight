@@ -24,7 +24,7 @@ export function normalizeLike(values: (number | null)[], reference: (number | nu
 }
 
 /**
- * いくつかの系列を、まとめて同じ物差しで正規化する（施策を重ねて比べるとき）。
+ * いくつかの系列を、まとめて同じ物差しで正規化する（シナリオを重ねて比べるとき）。
  * 全部の系列を通した最小を 0、最大を 1 にするので、系列どうしの高さの違いは残る
  */
 export function normalizeTogether(list: (number | null)[][]): (number | null)[][] {

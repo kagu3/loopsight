@@ -12,13 +12,13 @@ Issue にしないのは、Issue をまとめて片付けるときに一緒に�
 
 - **要素の名前に `[` や `]` などを入れても通る。** サーバーの `renameElement` と `upsert_elements` に、名前の文字の確かめがないため。`[a]b` のような名前にすると、ほかの式から `[名前]` で参照できなくなる。MCP からは前から起きうるが、詳細欄で名前を変えられるようになって起こりやすくなった。サーバー側で断る。出どころ：#34 のレビュー（[Issue #34](https://github.com/suda0033/sd-modeler/issues/34)）
 
-## 施策（シナリオ）
+## シナリオ
 
-- **ほかの施策が 1 つでも実行できないと、`set_scenarios` 全体が失敗して何も保存されない。** 要素を消して施策 A が壊れると、関係のない施策 B の説明を直すこともできない。保存はして、比較の結果に施策ごとのエラーを入れる形（`runScenarios` と同じやり方）のほうが扱いやすい。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)
-- **実行できなかった施策があると、ほかの施策の色がずれる。** 色を、実行できた施策の中での位置で決めているため。モデルの中の並び順で決めれば変わらない。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)
+- **ほかのシナリオが 1 つでも実行できないと、`set_scenarios` 全体が失敗して何も保存されない。** 要素を消してシナリオ A が壊れると、関係のないシナリオ B の説明を直すこともできない。保存はして、比較の結果にシナリオごとのエラーを入れる形（`runScenarios` と同じやり方）のほうが扱いやすい。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)
+- **実行できなかったシナリオがあると、ほかのシナリオの色がずれる。** 色を、実行できたシナリオの中での位置で決めているため。モデルの中の並び順で決めれば変わらない。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)
 - **名前のないシナリオの仮の名前（scenario N）が、前のシナリオを消すとずれる。** 配列の位置で作っているため。名前のないシナリオは取り込んだモデルでしか起きない。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)
-- **施策の上限（8）が 3 か所に分かれている。** `src/core/slides.ts` の `MAX_SLIDE_SCENARIOS`、`src/viewer/server.ts` の `MAX_SCENARIOS`、web の `MAX_SERIES`。中核から 1 つの定数で出せば、ずれる心配がなくなる。「何もしない場合」の名前も web 側に写しがある。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)、[#23](https://github.com/suda0033/sd-modeler/pull/23)
-- **ビューアで要素を消したときの黄色の帯が、中核（`removeElements`）の知らせをそのまま並べている。** `FLOW "Births" の to は "Population" を指していたので空（モデルの外）にしました。` や `シナリオ "…" から "…" の値を消しました。` のように、MCP 向けの書き方（英語の種類名、「シナリオ」）で、作業者には読みにくい。画面では「Births の行き先をモデルの外にしました」「施策「…」から … の値を消しました」のように言い換えるか、要点だけにする。出どころ：#35
+- **シナリオの上限（8）が 3 か所に分かれている。** `src/core/slides.ts` の `MAX_SLIDE_SCENARIOS`、`src/viewer/server.ts` の `MAX_SCENARIOS`、web の `MAX_SERIES`。中核から 1 つの定数で出せば、ずれる心配がなくなる。「元のモデル」の名前も web 側に写しがある。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)、[#23](https://github.com/suda0033/sd-modeler/pull/23)
+- **ビューアで要素を消したときの黄色の帯が、中核（`removeElements`）の知らせをそのまま並べている。** `FLOW "Births" の to は "Population" を指していたので空（モデルの外）にしました。` や `シナリオ "…" から "…" の値を消しました。` のように、MCP 向けの書き方（英語の種類名）で、作業者には読みにくい。画面では「Births の行き先をモデルの外にしました」「シナリオ「…」から … の値を消しました」のように言い換えるか、要点だけにする。出どころ：#35
 
 ## 実際のデータ（CSV）
 
@@ -33,8 +33,8 @@ Issue にしないのは、Issue をまとめて片付けるときに一緒に�
 ## 筋書きと発表モード
 
 - **極性が決まっていない原因スライドがあると、編集のたびに同じ警告が `slides_issues` と「問題」欄に出る。** 自動で足すリンクには極性が付かないので、brooks_law のようなモデルではスライドの枚数分の警告が毎回返る。警告は `set_slides` と `view_slides` のときだけにし、編集のあとは食い違い（errors）だけを返す、などを検討する。出どころ：[#24](https://github.com/suda0033/sd-modeler/pull/24)
-- **`set_scenarios` の `replace: true` で施策の名前を付け直すと、筋書きは追従しない。** `slides_issues` で知らせるので実害は小さい。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
-- **比較スライドで、施策名の重複（大文字小文字違い）を除いていない。** 同じ線が 2 本出て、React の key も重なる。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
+- **`set_scenarios` の `replace: true` でシナリオの名前を付け直すと、筋書きは追従しない。** `slides_issues` で知らせるので実害は小さい。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
+- **比較スライドで、シナリオ名の重複（大文字小文字違い）を除いていない。** 同じ線が 2 本出て、React の key も重なる。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
 - **比較スライドの値が `2,691.59` のように小数 2 桁で出る。** 会議資料としては、桁を丸めたほうが読みやすい。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
 - **例の population の B ループは、R より見分けにくい。** Population → Deaths のリンクがフローの線に沿って、細いレンズ形になる。Death Rate と Deaths の位置を少しずらす。出どころ：[#24](https://github.com/suda0033/sd-modeler/pull/24)
 - **図の R / B の札は px 指定なので、全画面の発表では見出しに比べて小さく見える。** 出どころ：[#24](https://github.com/suda0033/sd-modeler/pull/24)

@@ -45,7 +45,7 @@ export const postEdit = (name: string, version: string, elements: ElementPatch[]
 export const postRemove = (name: string, version: string, elements: RemoveTarget[]) =>
   post(`/api/models/${encodeURIComponent(name)}/remove`, { version, elements });
 
-/** 施策を足す・直す・消す。scenarios と remove は MCP の set_scenarios と同じ形 */
+/** シナリオを足す・直す・消す。scenarios と remove は MCP の set_scenarios と同じ形 */
 export const postScenarios = (name: string, version: string, scenarios: ScenarioPatch[], remove?: string[]) =>
   post(`/api/models/${encodeURIComponent(name)}/scenarios`, remove?.length ? { version, scenarios, remove } : { version, scenarios });
 

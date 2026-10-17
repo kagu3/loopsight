@@ -492,7 +492,7 @@ button.link.danger-link {
   font-size: 13px;
 }
 
-/* 施策の編集欄：変える値の表（要素・この施策の値・何もしない場合） */
+/* シナリオの編集欄：変える値の表（要素・このシナリオの値・元のモデル） */
 .scenario-values {
   display: flex;
   flex-direction: column;
@@ -778,7 +778,7 @@ button.link.danger-link {
 .node-cloud.is-dimmed .cloud-shape {
   stroke: color-mix(in srgb, var(--text-muted) 25%, var(--surface-1));
 }
-/* 施策に注目している間（凡例にカーソルを乗せている・左の欄で直している）：変えた要素に、施策の線の色（--scenario）の点線の枠と札を付ける。
+/* シナリオに注目している間（凡例にカーソルを乗せている・左の欄で直している）：変えた要素に、シナリオの線の色（--scenario）の点線の枠と札を付ける。
    枠は選んだときの枠や変わったときの枠（box-shadow）より外に、点線で描く（重なっても見分けられるように）。
    札は要素の上に出す。色を自分で決めるので、要素が薄くなっていても読める。
    札はマウスを通す（札が覆う下の要素や背景も、いつもどおり押せる・ドラッグできる） */
@@ -1253,7 +1253,7 @@ button.legend-remove:hover {
   border-radius: 2px;
   flex: none;
 }
-/* 施策を重ねるときの凡例。「何もしない場合」は灰色の点線 */
+/* シナリオを重ねるときの凡例。「元のモデル」は灰色の点線 */
 .scenario-bar {
   flex: none;
   padding: 0 16px 4px;
@@ -1304,7 +1304,7 @@ button.legend-remove:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 施策名の横の、変えた値の数 */
+/* シナリオ名の横の、変えた値の数 */
 .scenario-count {
   flex: none;
   min-width: 16px;
@@ -1332,7 +1332,7 @@ button.legend-remove:hover {
   gap: 6px;
   min-width: 0;
 }
-/* 凡例を開いたときの、施策の中身の表。幅が足りなければ横に流し、高さはグラフの欄の半分まで */
+/* 凡例を開いたときの、シナリオの中身の表。幅が足りなければ横に流し、高さはグラフの欄の半分まで */
 .scenario-bar.open {
   display: flex;
   flex-direction: column;
@@ -1402,7 +1402,7 @@ button.legend-remove:hover {
 .scenario-matrix .matrix-base {
   color: var(--text-secondary);
 }
-/* 施策で変えた値。施策の線の色の帯を左に付ける（文字の色は読みやすさのため変えない） */
+/* シナリオで変えた値。シナリオの線の色の帯を左に付ける（文字の色は読みやすさのため変えない） */
 .scenario-matrix .matrix-changed {
   font-weight: 600;
   color: var(--text-primary);
@@ -1418,7 +1418,7 @@ button.legend-remove:hover {
   font-weight: 400;
   color: var(--text-secondary);
 }
-/* 施策の値のマスは、その場で直せる。普段の見た目は変えず、カーソルを乗せたときだけ枠と × を出す */
+/* シナリオの値のマスは、その場で直せる。普段の見た目は変えず、カーソルを乗せたときだけ枠と × を出す */
 .scenario-matrix td.matrix-editable {
   position: relative;
   cursor: text;
@@ -1534,7 +1534,7 @@ button.matrix-copy:hover:not([aria-disabled="true"]),
   opacity: 0.5;
   cursor: not-allowed;
 }
-/* 名前を付けている途中の、足す施策の列 */
+/* 名前を付けている途中の、足すシナリオの列 */
 .scenario-matrix thead th.matrix-new {
   max-width: none;
   overflow: visible;
@@ -1614,7 +1614,7 @@ button.matrix-remove-row:hover {
 .scenario-note.error-text {
   color: var(--error);
 }
-/* 施策の名前を押すと、左の欄で直せる */
+/* シナリオの名前を押すと、左の欄で直せる */
 button.scenario-chip-button {
   display: inline-flex;
   align-items: center;
@@ -1649,7 +1649,7 @@ button.scenario-chip-button.on {
   flex: none;
   display: block;
 }
-/* 施策を重ねるとき：要素ごとの小さなグラフを並べる。入りきらないぶんは縦にスクロールする */
+/* シナリオを重ねるとき：要素ごとの小さなグラフを並べる。入りきらないぶんは縦にスクロールする */
 .compare-grid {
   flex: 1;
   min-height: 0;
@@ -1728,7 +1728,7 @@ button.scenario-chip-button.on {
   align-items: center;
   gap: 6px;
 }
-/* 施策を重ねた表の見出し。要素名の下に施策名を出す */
+/* シナリオを重ねた表の見出し。要素名の下にシナリオ名を出す */
 .table-area .th-sub {
   display: block;
   font-weight: 400;

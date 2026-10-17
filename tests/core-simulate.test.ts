@@ -142,7 +142,7 @@ describe("比較", () => {
     expect(c.rows[1]!.results.Pop!.series).toHaveLength(2);
   });
 
-  test("「何もしない場合」と保存したシナリオの全時系列をまとめて返す", () => {
+  test("「元のモデル」と保存したシナリオの全時系列をまとめて返す", () => {
     const m = growth();
     m.scenarios = [
       { name: "fast", description: "速く増やす", values: { Rate: 0.2 } },
@@ -157,7 +157,7 @@ describe("比較", () => {
     // 実行できないシナリオは、ほかを止めずに error に入れる
     expect(scenarios[1]!.data).toBeUndefined();
     expect(scenarios[1]!.error).toBeInstanceOf(ModelError);
-    expect(withBaseline(modelScenarios(m)).map((s) => s.name)).toEqual(["何もしない場合", "fast", "broken"]);
+    expect(withBaseline(modelScenarios(m)).map((s) => s.name)).toEqual(["元のモデル", "fast", "broken"]);
     // limit を超えたシナリオは実行せず、名前だけ返す
     const limited = runScenarios(m, { limit: 1 }).scenarios;
     expect(limited[1]).toMatchObject({ name: "broken", skipped: true });

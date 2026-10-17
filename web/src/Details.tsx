@@ -110,7 +110,7 @@ export function Details({ el, value, onSave }: DetailsProps) {
           <label>
             <span>名前</span>
             <input value={form.name} onChange={(e) => set("name", e.target.value)} />
-            <small className="muted">変えると、ほかの要素の式や施策の中の名前も書き換えます。</small>
+            <small className="muted">変えると、ほかの要素の式やシナリオの中の名前も書き換えます。</small>
           </label>
           {el.type === "CONVERTER" ? (
             <label>

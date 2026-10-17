@@ -41,7 +41,7 @@ function story(): SlideDeck {
       { kind: "problem", title: "増えている", message: "このままだと増え続ける", elements: ["population"], data: ["POPULATION"], now: 30 },
       { kind: "cause", title: "原因", message: "増えるほど生まれる", loop: { elements: ["Population", "births"], polarity: "R" } },
       { kind: "solution", title: "支援", message: "支援する", scenario: "支援" },
-      { kind: "compare", title: "比べる", message: "4 割減る", scenarios: ["何もしない場合", "支援"], elements: ["Population"], at: 50 },
+      { kind: "compare", title: "比べる", message: "4 割減る", scenarios: ["元のモデル", "支援"], elements: ["Population"], at: 50 },
       { kind: "conclusion", title: "結論", message: "支援を進める" },
     ],
   });
@@ -67,7 +67,7 @@ describe("会議資料の筋書きを読む", () => {
 });
 
 describe("筋書きをモデルと照らし合わせる", () => {
-  test("合う名前はモデルとデータの表記にそろえ、「何もしない場合」は比べる施策から外す", () => {
+  test("合う名前はモデルとデータの表記にそろえ、「元のモデル」は比べるシナリオから外す", () => {
     const deck = story();
     expect(checkSlides(population(), deck, data())).toEqual({ errors: [], warnings: [] });
     expect(deck.slides[0]).toMatchObject({ elements: ["Population"], data: ["Population"] });
@@ -75,13 +75,13 @@ describe("筋書きをモデルと照らし合わせる", () => {
     expect(deck.slides[3]).toMatchObject({ scenarios: ["支援"] });
   });
 
-  test("ない要素、施策、データの列は、何枚目かと「もしかして」を添えて返す", () => {
+  test("ない要素、シナリオ、データの列は、何枚目かと「もしかして」を添えて返す", () => {
     const deck = toSlideDeck({
       slides: [
         { kind: "problem", title: "a", message: "b", elements: ["Populaton"], data: ["Births"] },
         { kind: "cause", title: "a", message: "b", loop: { elements: ["Population"], polarity: "B" } },
         { kind: "solution", title: "a", message: "b", scenario: "支縁" },
-        { kind: "compare", title: "a", message: "b", scenarios: ["何もしない場合"], elements: ["Population"], at: 80 },
+        { kind: "compare", title: "a", message: "b", scenarios: ["元のモデル"], elements: ["Population"], at: 80 },
         { kind: "conclusion", title: "", message: "" },
       ],
     });
@@ -90,8 +90,8 @@ describe("筋書きをモデルと照らし合わせる", () => {
     expect(text).toMatch(/^1: 1 枚目（問題）: 注目する要素 "Populaton" がモデルにありません。 もしかして "Population"/m);
     expect(text).toMatch(/^1: .*実際のデータに列 "Births" がありません/m);
     expect(text).toMatch(/^2: .*ループを作る要素が 1 つだけ/m);
-    expect(text).toMatch(/^3: .*施策 "支縁" がモデルにありません。 もしかして "支援"/m);
-    expect(text).toMatch(/^4: .*比べる施策がありません/m);
+    expect(text).toMatch(/^3: .*シナリオ "支縁" がモデルにありません。 もしかして "支援"/m);
+    expect(text).toMatch(/^4: .*比べるシナリオがありません/m);
     expect(text).toMatch(/^5: .*見出し/m);
     expect(warnings.map((w) => w.message).join("\n")).toMatch(/注目する時点（80）がシミュレーションの期間（0 から 50）の外/);
   });
@@ -142,7 +142,7 @@ describe("原因のスライドのループをモデルで確かめる", () => {
 });
 
 describe("名前を変えたら筋書きの中も直す", () => {
-  test("要素と施策の名前を変える（大文字と小文字は区別しない）", () => {
+  test("要素とシナリオの名前を変える（大文字と小文字は区別しない）", () => {
     const deck = story();
     checkSlides(population(), deck, data());
     expect(renameInSlides(deck, { elements: [["population", "人口"]], scenarios: [["支援", "家族計画の支援"]] })).toBe(true);
@@ -153,7 +153,7 @@ describe("名前を変えたら筋書きの中も直す", () => {
     expect(renameInSlides(deck, { elements: [["Nope", "x"]] })).toBe(false);
   });
 
-  test("施策の名前を変えたかを調べる", () => {
+  test("シナリオの名前を変えたかを調べる", () => {
     const m = population();
     const before = namesByScenario(m);
     setScenarios(m, [{ name: "支援", rename_to: "家族計画の支援" }]);

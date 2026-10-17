@@ -266,11 +266,11 @@ function ProblemBody({ slide, data, scale }: { slide: Extract<Slide, { kind: "pr
   );
 }
 
-/** 解決案：施策の名前と説明、変える値 */
+/** 解決案：シナリオの名前と説明、変える値 */
 function SolutionBody({ slide, data }: { slide: Extract<Slide, { kind: "solution" }>; data: ModelResponse }) {
   const scenario = data.scenarios?.find((s) => sameName(s.name, slide.scenario));
   const changes = scenarioChanges(data.model, scenario);
-  if (!scenario) return <BodyNote text={`施策「${slide.scenario}」がモデルにありません。`} />;
+  if (!scenario) return <BodyNote text={`シナリオ「${slide.scenario}」がモデルにありません。`} />;
   return (
     <div className="slide-body solution-body">
       <div className="solution-card">
@@ -283,7 +283,7 @@ function SolutionBody({ slide, data }: { slide: Extract<Slide, { kind: "solution
             <tr>
               <th>変えるもの</th>
               <th>いま</th>
-              <th>この施策</th>
+              <th>このシナリオ</th>
             </tr>
           </thead>
           <tbody>
@@ -308,7 +308,7 @@ function showValue(v: unknown): string {
   return Number.isFinite(n) ? formatValue(n) : "計算で決まる";
 }
 
-/** 比較：要素ごとに「何もしない場合」と施策を重ね、注目する時点の値を並べる */
+/** 比較：要素ごとに「元のモデル」とシナリオを重ね、注目する時点の値を並べる */
 function CompareBody({ slide, data, scale }: { slide: Extract<Slide, { kind: "compare" }>; data: ModelResponse; scale: number }) {
   const run = data.run;
   const runs = useMemo(() => {

@@ -63,7 +63,7 @@ describe("ビューアのサーバー", () => {
     expect(body.run!.series.Rate!.every((v) => v === 0.1)).toBe(true);
   });
 
-  test("保存した施策（シナリオ）も実行して、全時系列を返す", async () => {
+  test("保存したシナリオも実行して、全時系列を返す", async () => {
     const m = population();
     m.scenarios = [
       { name: "高い", description: "増える割合を上げる", values: { Rate: 0.2 } },
@@ -78,7 +78,7 @@ describe("ビューアのサーバー", () => {
     expect(body.scenarios![0]!.series!.Population!.at(-1)).toBeCloseTo(100 * 1.2 ** 10, 6);
     expect(body.scenarios![1]!.series).toBeUndefined();
     expect(body.scenarios![1]!.error).toBeTruthy();
-    // 画面で重ねられる 8 つを超えた施策は実行せず、skipped で知らせる
+    // 画面で重ねられる 8 つを超えたシナリオは実行せず、skipped で知らせる
     const many = population();
     many.scenarios = Array.from({ length: 9 }, (_, i) => ({ name: `s${i + 1}`, values: { Rate: 0.1 + i / 100 } }));
     await new ModelStore(dir).write("pop", many);
@@ -86,7 +86,7 @@ describe("ビューアのサーバー", () => {
     expect(nine.filter((s) => s.series)).toHaveLength(8);
     expect(nine[8]).toMatchObject({ name: "s9", skipped: true });
     expect(nine[8]!.series).toBeUndefined();
-    // 施策がなければ scenarios は付けない
+    // シナリオがなければ scenarios は付けない
     await new ModelStore(dir).write("pop", population());
     expect((await get<ModelResponse>("/api/models/pop")).body.scenarios).toBeUndefined();
   });
@@ -420,8 +420,8 @@ describe("ビューアからの編集", () => {
   });
 });
 
-describe("ビューアからの施策の編集", () => {
-  test("施策を足し、直し、消す。保存した内容はモデルの scenarios に入り、グラフの実行結果も返す", async () => {
+describe("ビューアからのシナリオの編集", () => {
+  test("シナリオを足し、直し、消す。保存した内容はモデルの scenarios に入り、グラフの実行結果も返す", async () => {
     const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
     const add = await post<EditResponse>("/api/models/pop/scenarios", {
       version: v0,
@@ -449,7 +449,7 @@ describe("ビューアからの施策の編集", () => {
     expect(remove.body.model.undo_available).toBe(3);
   });
 
-  test("施策の変更も元に戻せる", async () => {
+  test("シナリオの変更も元に戻せる", async () => {
     const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
     const add = await post<EditResponse>("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "高い", values: { Rate: 0.2 } }] });
     const u = await post<EditResponse>("/api/models/pop/undo", { version: add.body.model.version });
@@ -478,7 +478,7 @@ describe("ビューアからの施策の編集", () => {
     expect(u2.body.model.model.scenarios).toEqual([{ name: "高い", values: { Rate: 0.2 } }]);
   });
 
-  test("表の見出しで、値を変えない施策を足す・複製する。表とグラフの列になり、どちらも 1 回の「元に戻す」で足す前に戻る", async () => {
+  test("表の見出しで、値を変えないシナリオを足す・複製する。表とグラフの列になり、どちらも 1 回の「元に戻す」で足す前に戻る", async () => {
     const store = new ModelStore(dir);
     const m = population();
     m.scenarios = [{ name: "高い", description: "増える割合を上げる", values: { Rate: 0.2 } }];
@@ -488,7 +488,7 @@ describe("ビューアからの施策の編集", () => {
     const add = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: [newScenarioPatchOf(v0.model, "広告を増やす")] });
     expect(add.status).toBe(200);
     expect(add.body.model.model.scenarios).toEqual([m.scenarios[0], { name: "広告を増やす", values: {} }]);
-    // 値を変えない施策も実行し、「何もしない場合」と同じ結果を返す（グラフと表の列になる）
+    // 値を変えないシナリオも実行し、「元のモデル」と同じ結果を返す（グラフと表の列になる）
     expect(add.body.model.scenarios!.map((s) => s.name)).toEqual(["高い", "広告を増やす"]);
     expect(add.body.model.scenarios![1]!.series).toEqual(add.body.model.run!.series);
     const u1 = await post<EditResponse>("/api/models/pop/undo", { version: add.body.model.version });
@@ -504,7 +504,7 @@ describe("ビューアからの施策の編集", () => {
     expect(u2.body.model.model.scenarios).toEqual(m.scenarios);
   });
 
-  test("表の行を消す（すべての施策でその値を変えない）は、複数の施策をまとめた 1 回の保存で、1 回の「元に戻す」で全部戻る", async () => {
+  test("表の行を消す（すべてのシナリオでその値を変えない）は、複数のシナリオをまとめた 1 回の保存で、1 回の「元に戻す」で全部戻る", async () => {
     const store = new ModelStore(dir);
     const m = population();
     m.scenarios = [
@@ -531,7 +531,7 @@ describe("ビューアからの施策の編集", () => {
     expect(u.body.model.model.scenarios).toEqual(m.scenarios);
   });
 
-  test("表の行を消すとき、名前のない施策（scenario N）や表記の違う名前（rate）にも当たる", async () => {
+  test("表の行を消すとき、名前のないシナリオ（scenario N）や表記の違う名前（rate）にも当たる", async () => {
     const store = new ModelStore(dir);
     const m = population();
     m.scenarios = [{ name: "高い", values: { Population: 200 } }, { values: { rate: 0.3, Population: 50 } }];
@@ -544,7 +544,7 @@ describe("ビューアからの施策の編集", () => {
     expect(removed.body.model.model.scenarios).toEqual([{ name: "高い", values: { Population: 200 } }, { values: { Population: 50 } }]);
   });
 
-  test("施策の名前を変えると筋書きの中も直し、元に戻すと筋書きも戻す", async () => {
+  test("シナリオの名前を変えると筋書きの中も直し、元に戻すと筋書きも戻す", async () => {
     const store = new ModelStore(dir);
     const m = population();
     m.scenarios = [{ name: "支援", values: { Rate: 0.2 } }];
@@ -561,19 +561,19 @@ describe("ビューアからの施策の編集", () => {
     expect(u.body.model.slides!.deck!.slides[0]).toMatchObject({ scenario: "支援" });
   });
 
-  test("版が違えば書き込まず、最新を返す（AI などが先に施策を変えた場合）", async () => {
+  test("版が違えば書き込まず、最新を返す（AI などが先にシナリオを変えた場合）", async () => {
     const before = (await get<ModelResponse>("/api/models/pop")).body;
     const m = population();
-    m.scenarios = [{ name: "AI の施策", values: { Rate: 0.3 } }];
+    m.scenarios = [{ name: "AI のシナリオ", values: { Rate: 0.3 } }];
     await new ModelStore(dir).write("pop", m);
     const { status, body } = await post<EditErrorResponse>("/api/models/pop/scenarios", { version: before.version, scenarios: [{ name: "高い", values: { Rate: 0.2 } }] });
     expect(status).toBe(409);
     expect(body.conflict).toBe(true);
-    expect(body.current!.model.scenarios).toEqual([{ name: "AI の施策", values: { Rate: 0.3 } }]);
-    expect((await new ModelStore(dir).read("pop")).scenarios).toEqual([{ name: "AI の施策", values: { Rate: 0.3 } }]);
+    expect(body.current!.model.scenarios).toEqual([{ name: "AI のシナリオ", values: { Rate: 0.3 } }]);
+    expect((await new ModelStore(dir).read("pop")).scenarios).toEqual([{ name: "AI のシナリオ", values: { Rate: 0.3 } }]);
   });
 
-  test("施策の誤り（名前の重なり、「何もしない場合」、値を変えられない要素など）は 400 で、ファイルは変えない", async () => {
+  test("シナリオの誤り（名前の重なり、「元のモデル」、値を変えられない要素など）は 400 で、ファイルは変えない", async () => {
     const store = new ModelStore(dir);
     const m = population();
     m.scenarios = [{ name: "高い", values: { Rate: 0.2 } }];
@@ -581,9 +581,9 @@ describe("ビューアからの施策の編集", () => {
     const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
     const bad = async (body: unknown) => (await post<EditErrorResponse>("/api/models/pop/scenarios", { version: v0, ...(body as object) })).body.error;
     expect(await bad({ scenarios: [{ name: "低い" }, { name: "低い", rename_to: "高い" }] })).toMatch(/すでにあります/);
-    expect(await bad({ scenarios: [{ name: "何もしない場合", values: { Rate: 0 } }] })).toMatch(/何も変えない実行/);
+    expect(await bad({ scenarios: [{ name: "元のモデル", values: { Rate: 0 } }] })).toMatch(/何も変えない実行/);
     expect(await bad({ scenarios: [{ name: "低い", values: { Rat: 0 } }] })).toMatch(/Rate/);
-    expect(await bad({ scenarios: [], remove: ["ない施策"] })).toMatch(/見つかりません/);
+    expect(await bad({ scenarios: [], remove: ["ないシナリオ"] })).toMatch(/見つかりません/);
     // 形の誤り
     expect((await post("/api/models/pop/scenarios", { version: v0 })).status).toBe(400);
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [] })).status).toBe(400);
@@ -604,7 +604,7 @@ describe("ビューアからの要素の削除", () => {
     const { status, body } = await post<EditResponse>("/api/models/pop/remove", { version: v0, elements: [{ name: "Rate" }] });
     expect(status).toBe(200);
     expect(body.report!.removed).toEqual(['VARIABLE "Rate"', "LINK Rate → Births"]);
-    // 式に残った参照と、施策から消した値を知らせる
+    // 式に残った参照と、シナリオから消した値を知らせる
     expect(body.report!.notes.join("\n")).toMatch(/\[Rate\]/);
     expect(body.report!.notes).toContain('シナリオ "高い" から "Rate" の値を消しました。');
     expect(body.model.undo_available).toBe(1);

@@ -90,7 +90,7 @@ function toNumber(v: unknown): number | null {
   return null;
 }
 
-/** 画面で重ねられる施策の数（web/src/Chart.tsx の MAX_SERIES）。これより後の施策は実行しない */
+/** 画面で重ねられるシナリオの数（web/src/Chart.tsx の MAX_SERIES）。これより後のシナリオは実行しない */
 const MAX_SCENARIOS = 8;
 
 function seriesOf(data: RunData): RunResult["series"] {
@@ -110,7 +110,7 @@ async function modelResponse(store: ModelStore, name: string, model: ModelJSON, 
   const res: ModelResponse = { name, modified, version, undo_available: undoAvailable, model, validation };
   if (validation.ok) {
     try {
-      // 「何もしない場合」と、保存したシナリオ（施策）をまとめて実行する
+      // 「元のモデル」と、保存したシナリオをまとめて実行する
       const { baseline, scenarios } = runScenarios(model, { limit: MAX_SCENARIOS });
       res.run = { time_units: baseline.timeUnits, times: baseline.times, series: seriesOf(baseline) };
       if (scenarios.length) {
@@ -216,7 +216,7 @@ function keepCloudsInPlace(model: ModelJSON): () => void {
 }
 /**
  * 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版。
- * renamed は変えた要素の名前（実際のデータの列名と筋書きの中の名前も戻すため）、renamedScenarios は変えた施策の名前（筋書きの中の名前も戻すため）
+ * renamed は変えた要素の名前（実際のデータの列名と筋書きの中の名前も戻すため）、renamedScenarios は変えたシナリオの名前（筋書きの中の名前も戻すため）
  */
 interface HistoryEntry {
   before: string;
@@ -383,10 +383,10 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         if (action === "scenarios") {
           if (!Array.isArray(body.scenarios)) throw new HttpError(400, "scenarios がありません。");
           if (!body.scenarios.every((s) => s && typeof s === "object" && !Array.isArray(s) && typeof s.name === "string")) {
-            throw new HttpError(400, "scenarios の中身は、name のある施策の変更（オブジェクト）にしてください。");
+            throw new HttpError(400, "scenarios の中身は、name のあるシナリオの変更（オブジェクト）にしてください。");
           }
           if (body.remove !== undefined && !(Array.isArray(body.remove) && body.remove.every((r) => typeof r === "string"))) {
-            throw new HttpError(400, "remove は消す施策の名前の並びにしてください。");
+            throw new HttpError(400, "remove は消すシナリオの名前の並びにしてください。");
           }
           if (body.scenarios.length === 0 && !body.remove?.length) throw new HttpError(400, "scenarios か remove を指定してください。");
           const names = namesByScenario(current.model);

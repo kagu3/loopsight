@@ -126,12 +126,12 @@ const slide = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("solution").describe("解決案"),
     ...slideText,
-    scenario: z.string().describe("施策（set_scenarios で保存したシナリオ）の名前。説明と変える値はシナリオから出す"),
+    scenario: z.string().describe("set_scenarios で保存したシナリオの名前。説明と変える値はシナリオから出す"),
   }),
   z.object({
     kind: z.literal("compare").describe("比較"),
     ...slideText,
-    scenarios: z.array(z.string()).describe(`比べる施策の名前。「${BASELINE_SCENARIO}」はいつも重ねるので並べなくてよい`),
+    scenarios: z.array(z.string()).describe(`比べるシナリオの名前。「${BASELINE_SCENARIO}」はいつも重ねるので並べなくてよい`),
     elements: slideNames("比べる要素の名前"),
     at: z.number().optional().describe("注目する時点（モデルの時刻）。その時点の値を並べて出す"),
   }),
@@ -232,18 +232,18 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 1. create_model か import_model でモデルを用意する
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
-4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せる施策は set_scenarios でモデルに保存する（ビューアのグラフに「何もしない場合」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
+4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
 7. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
 「会議資料を作って」と頼まれたら（SD を知らない人に、問題と解決案を順に見せる資料）:
-a. get_model と run_simulation でモデルの振る舞いを確かめる。実際のデータ（実績）があれば import_data で取り込む。比べる施策がなければ set_scenarios で保存する（description に、どんな施策かを書く）
+a. get_model と run_simulation でモデルの振る舞いを確かめる。実際のデータ（実績）があれば import_data で取り込む。比べるシナリオがなければ set_scenarios で保存する（description に、どんなシナリオかを書く）
 b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 比較 → 結論 の順に並べ、どのスライドにも見出しと「言いたいこと」の 1 文を書く。式や SD の用語は使わず、グラフから読み取れることを書く
    - 問題（problem）：注目する要素、実際のデータ、「今」の時点。モデルの線に実際のデータの点が重なり、モデルが問題を再現していることを見せる
    - 原因（cause）：問題を生むループを作る要素の名前と、強めるループ（R）か釣り合わせるループ（B）か。ループごとに 1 枚。find_loops で探したループの elements を loop.elements に、kind を loop.polarity に使う（set_slides は、ループになっているか、R / B がリンクの極性と合うかを確かめる。極性が決まっていなければ upsert_elements で入れる）
-   - 解決案（solution）：施策の名前。施策ごとに 1 枚
-   - 比較（compare）：比べる施策と要素、注目する時点。「何もしない場合」はいつも重なる
+   - 解決案（solution）：シナリオの名前。シナリオごとに 1 枚
+   - 比較（compare）：比べるシナリオと要素、注目する時点。「元のモデル」はいつも重なる
    - 結論（conclusion）：文章だけ
 c. view_slides でスライドを画像にして 1 枚ずつ確かめ、言いたいことがグラフから読み取れなければ直す。人はビューアの発表モード（http://localhost:5180/?view=present#<モデル名>）で ← → を押して見せる
 d. 資料を送るときは export_slides で PDF に書き出す（1 スライド 1 ページ。中身は止まった絵で、受け取った人は値を変えられない）
@@ -273,7 +273,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
   }
 
   /**
-   * 要素や施策を消したり、期間や実際のデータを変えたりしたあと、筋書きがモデルに合わなくなっていれば slides_issues で知らせる。
+   * 要素やシナリオを消したり、期間や実際のデータを変えたりしたあと、筋書きがモデルに合わなくなっていれば slides_issues で知らせる。
    * 直さないと見せられないもの（errors）と、確かめたほうがよいもの（warnings。時点が期間の外など）の両方を入れる
    */
   async function slidesAfterEdit(name: string, model: ModelJSON): Promise<{ slides_issues?: unknown[] }> {
@@ -633,9 +633,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
   server.registerTool(
     "set_scenarios",
     {
-      title: "施策（シナリオ）を保存する",
+      title: "シナリオを保存する",
       description:
-        "施策（シナリオ）をモデルの scenarios に保存する。シナリオは名前、説明、変える値の組 { 要素名: 値 }（STOCK は初期値、VARIABLE と FLOW は式を置き換える）。" +
+        "シナリオをモデルの scenarios に保存する。シナリオは名前、説明、変える値の組 { 要素名: 値 }（STOCK は初期値、VARIABLE と FLOW は式を置き換える）。" +
         `名前で既存のシナリオを探し、あれば説明と値を重ね（値を null にするとその要素は変えない）、なければ追加する。remove で消し、replace: true で今のシナリオをすべて置き換える。` +
         `何も変えない実行は「${BASELINE_SCENARIO}」として扱う（保存しなくてよい）。ビューアのグラフでは「${BASELINE_SCENARIO}」と各シナリオが重なって出る。` +
         `結果に、「${BASELINE_SCENARIO}」と各シナリオの初期値・最終値・最小・最大の比較を付ける。`,
@@ -646,7 +646,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
             z.object({
               name: z.string().describe("シナリオ名。既存の名前なら更新、なければ追加"),
               rename_to: z.string().optional().describe("既存のシナリオの名前を変える"),
-              description: z.string().nullable().optional().describe("どんな施策か（null で消す）"),
+              description: z.string().nullable().optional().describe("どんなシナリオか（null で消す）"),
               values: z.record(z.string(), equation.nullable()).optional().describe("変える値 { 要素名: 値 }。既存の値に重ねる（null でその要素は変えない）"),
             }),
           )
@@ -669,7 +669,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         extra.comparison = { targets: names, time_units, rows };
       }
       const result = await saveAndCheck(a.model, m, extra);
-      // 施策の名前を変えたら、筋書きの中の名前も直す（モデルはもう保存してあるので、直せなくても知らせだけ添える）
+      // シナリオの名前を変えたら、筋書きの中の名前も直す（モデルはもう保存してあるので、直せなくても知らせだけ添える）
       const slides = await store.renameSlideNames(a.model, { scenarios: scenarioRenamesSince(m, before) });
       if (slides.note) report.notes.push(slides.note);
       if (slides.warning) report.notes.push(slides.warning);
@@ -755,7 +755,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
           .array(z.object({ name: z.string(), overrides: z.record(z.string(), equation) }))
           .optional()
           .describe("[{name:'高成長', overrides:{'Birth Rate':0.05}}, ...]"),
-        overrides: overrides.optional().describe("すべての組に共通で当てる上書き（保存したシナリオと比べるときの「何もしない場合」には当てない）"),
+        overrides: overrides.optional().describe("すべての組に共通で当てる上書き（保存したシナリオと比べるときの「元のモデル」には当てない）"),
         elements: targets,
         samples: z.number().int().min(0).max(50).optional().describe("組ごとに返す時系列の点数（既定 0）"),
         simulation: simulation.optional(),
@@ -788,7 +788,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
           throw new ModelError("比べるものがありません。parameter か scenarios を指定してください（モデルにもシナリオが保存されていません）。", []);
         }
         const withBase = scenarios.map((s) => ({ name: s.name, overrides: { ...(a.overrides ?? {}), ...s.overrides } }));
-        // 保存したシナリオと比べるときの「何もしない場合」は、名前どおり何も変えない（overrides も当てない）
+        // 保存したシナリオと比べるときの「元のモデル」は、名前どおり何も変えない（overrides も当てない）
         return { model: a.model, ...compareScenarios(m, fromModel ? withBaseline(withBase) : withBase, opts) };
       },
     ),
@@ -838,9 +838,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       description:
         "会議資料の筋書きを作業フォルダの <モデル名>.slides.json に保存する（今の筋書きはすべて置き換える）。ビューアの発表モードで、スライドを順に見せる。" +
         "スライドの種類は problem（問題）、cause（原因）、solution（解決案）、compare（比較）、conclusion（結論）で、この順に並べる。どのスライドにも title（見出し）と message（言いたいこと 1 文）を書く。" +
-        "要素名、施策の名前、実際のデータの列名が実在するかを確かめ、合わなければ保存せずに issues（何枚目の何が合わないか、「もしかして」）を返す。" +
+        "要素名、シナリオの名前、実際のデータの列名が実在するかを確かめ、合わなければ保存せずに issues（何枚目の何が合わないか、「もしかして」）を返す。" +
         "原因のスライドは、loop.elements がつながる順のループになっているか、polarity がリンクの極性から決まる R / B と合うかも確かめる（極性が決まっていなければ warnings で知らせて保存する）。" +
-        "要素や施策の名前を upsert_elements や set_scenarios で変えると、筋書きの中の名前も直す。保存したら view_slides で画像を見て確かめる。",
+        "要素やシナリオの名前を upsert_elements や set_scenarios で変えると、筋書きの中の名前も直す。保存したら view_slides で画像を見て確かめる。",
       inputSchema: {
         model: modelName,
         title: z.string().optional().describe("資料の題"),

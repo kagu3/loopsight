@@ -274,7 +274,7 @@ export function modelScenarios(model: ModelJSON): ScenarioInput[] {
   return (model.scenarios ?? []).map((s, i) => ({ name: s.name ?? `scenario ${i + 1}`, overrides: s.values }));
 }
 
-/** 「何もしない場合」（何も変えない実行）を先頭に足したシナリオの並び */
+/** 「元のモデル」（何も変えない実行）を先頭に足したシナリオの並び */
 export function withBaseline(scenarios: ScenarioInput[]): ScenarioInput[] {
   return [{ name: BASELINE_SCENARIO, overrides: {} }, ...scenarios];
 }
@@ -291,8 +291,8 @@ export interface ScenarioRun {
 }
 
 /**
- * 「何もしない場合」と、モデルに保存したシナリオすべてを実行して、全時系列を返す。
- * 「何もしない場合」が実行できなければ例外にする。シナリオごとの失敗は、そのシナリオの error に入れる。
+ * 「元のモデル」と、モデルに保存したシナリオすべてを実行して、全時系列を返す。
+ * 「元のモデル」が実行できなければ例外にする。シナリオごとの失敗は、そのシナリオの error に入れる。
  * limit を付けると、先頭からその数までだけ実行する（残りは skipped にして名前だけ返す）。
  */
 export function runScenarios(

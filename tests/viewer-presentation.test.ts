@@ -41,7 +41,7 @@ describe("発表モード", () => {
     expect(valueAt(times, undefined, 1)).toBeNull();
   });
 
-  test("「何もしない場合」と比べた変化", () => {
+  test("「元のモデル」と比べた変化", () => {
     expect(changeFrom(200, 122)).toBe("−39%");
     expect(changeFrom(200, 230)).toBe("+15%");
     expect(changeFrom(200, 200.4)).toBe("±0%");
@@ -49,7 +49,7 @@ describe("発表モード", () => {
     expect(changeFrom(null, 1)).toBe("");
   });
 
-  test("解決案に出す、施策で変える値といまの値", () => {
+  test("解決案に出す、シナリオで変える値といまの値", () => {
     const m = emptyModel("m");
     upsertElements(m, [
       { type: "STOCK", name: "Population", behavior: { initial_value: 100 } },

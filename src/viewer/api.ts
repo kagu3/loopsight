@@ -38,8 +38,8 @@ export interface SlidesResult {
 }
 
 /**
- * 保存したシナリオ（施策）1 つ分の実行結果。時刻は「何もしない場合」（RunResult）と同じ。
- * 実行できなかったときは series の代わりに error が入る。画面で重ねられる数を超えた施策は実行せず、skipped にする
+ * 保存したシナリオ 1 つ分の実行結果。時刻は「元のモデル」（RunResult）と同じ。
+ * 実行できなかったときは series の代わりに error が入る。画面で重ねられる数を超えたシナリオは実行せず、skipped にする
  */
 export interface ScenarioRunResult {
   name: string;
@@ -60,9 +60,9 @@ export interface ModelResponse {
   undo_available: number;
   model: ModelJSON;
   validation: { ok: boolean; errors: Issue[]; warnings: Issue[] };
-  /** 実行できたときの結果（何も変えない実行。「何もしない場合」） */
+  /** 実行できたときの結果（何も変えない実行。「元のモデル」） */
   run?: RunResult;
-  /** モデルにシナリオ（施策）が保存されていれば、その実行結果。モデルの並び順 */
+  /** モデルにシナリオが保存されていれば、その実行結果。モデルの並び順 */
   scenarios?: ScenarioRunResult[];
   /** 実行できなかったときの理由 */
   run_error?: { message: string; issues: Issue[] };
@@ -88,7 +88,7 @@ export interface EditRequest {
 export interface ScenariosRequest {
   version: string;
   scenarios: ScenarioPatch[];
-  /** 消す施策の名前 */
+  /** 消すシナリオの名前 */
   remove?: string[];
 }
 
@@ -105,7 +105,7 @@ export interface UndoRequest {
 
 /** 書き込みの結果。成功すると新しいモデルを返す */
 export interface EditResponse {
-  /** 要素の編集なら EditReport、施策の編集なら ScenarioReport */
+  /** 要素の編集なら EditReport、シナリオの編集なら ScenarioReport */
   report?: EditReport | ScenarioReport;
   model: ModelResponse;
   /** 書き込めたが、知らせたいこと（実際のデータの列名を直せなかったときなど） */

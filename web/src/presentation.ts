@@ -54,7 +54,7 @@ export function valueAt(times: number[], values: (number | null)[] | undefined, 
   return a + ((b - a) * (t - times[j - 1]!)) / (times[j]! - times[j - 1]!);
 }
 
-/** 「何もしない場合」と比べた変化（+12% / −39%）。比べられなければ空文字 */
+/** 「元のモデル」と比べた変化（+12% / −39%）。比べられなければ空文字 */
 export function changeFrom(base: number | null, value: number | null): string {
   if (base === null || value === null || base === 0) return "";
   const p = ((value - base) / Math.abs(base)) * 100;
@@ -63,7 +63,7 @@ export function changeFrom(base: number | null, value: number | null): string {
   return `${r > 0 ? "+" : "−"}${Math.abs(r)}%`;
 }
 
-/** 施策で変える値と、いまのモデルの値の組（解決案のスライドに出す） */
+/** シナリオで変える値と、いまのモデルの値の組（解決案のスライドに出す） */
 export function scenarioChanges(model: ModelJSON, scenario: ScenarioRunResult | undefined): { name: string; before: Equation | undefined; after: Equation }[] {
   if (!scenario) return [];
   return Object.entries(scenario.values).map(([name, after]) => {

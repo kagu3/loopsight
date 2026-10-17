@@ -36,7 +36,7 @@ import { nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
-// badge：施策に注目している間、その施策で変えた要素に付ける札（いまの値 → 施策の値）
+// badge：シナリオに注目している間、そのシナリオで変えた要素に付ける札（いまの値 → シナリオの値）
 // linkable：編集モードで、縁からドラッグしてリンクを引ける（雲はモデルの要素でないので引けない）。linkFrom：[＋線] で元に選んだ要素
 type NodeData = {
   g: GraphNode;
@@ -202,7 +202,7 @@ export interface DiagramProps {
    * 要素を選んでいても、こちらを優先する
    */
   loop?: LoopView;
-  /** 注目している施策（凡例にカーソルを乗せている・左の欄で直している）。変えた要素に札を付け、枠を施策の線の色にする */
+  /** 注目しているシナリオ（凡例にカーソルを乗せている・左の欄で直している）。変えた要素に札を付け、枠をシナリオの線の色にする */
   scenario?: ScenarioMarks;
   /** 編集モード。オンのときだけ要素を動かせて、図の上に編集の道具の場所を出す。選ぶ・薄くするなどの見るための操作はいつでもできる */
   editable?: boolean;
@@ -230,7 +230,7 @@ export type LinkEnds = { from: string; to: string };
 export interface ScenarioMarks {
   /** 要素名（nameKey）→ 札 */
   badges: Map<string, ScenarioBadge>;
-  /** 施策の線の色（CSS の色） */
+  /** シナリオの線の色（CSS の色） */
   color: string;
 }
 
@@ -432,7 +432,7 @@ export function Diagram(props: DiagramProps) {
       colorMode="system"
       // ループの線の色（--loop）を R / B で変える。要素を足す場所を選んでいる間は、十字のカーソルにする（線の両端を選んでいる間は、要素の上だけ）
       className={[props.loop ? `loop-${props.loop.kind.toLowerCase()}` : "", placing === "LINK" ? "is-linking" : placing ? "is-placing" : ""].join(" ").trim() || undefined}
-      // 札と枠の色（--scenario）は、注目している施策の線の色
+      // 札と枠の色（--scenario）は、注目しているシナリオの線の色
       style={scenario ? ({ "--scenario": scenario.color } as React.CSSProperties) : undefined}
       onNodesChange={onNodesChange}
       onNodeDragStop={onNodeDragStop}
@@ -538,7 +538,7 @@ function EditTools({
         title={
           editable
             ? "図の編集を終えます。オンの間は、要素をドラッグで動かしたり、要素の縁からドラッグして別の要素の上で離し、線（リンク）を引いたりできます"
-            : "図の形を変えられるようにします（要素を動かす・足す・消す、線を引く）。値や施策は、オフのままでもいつでも直せます"
+            : "図の形を変えられるようにします（要素を動かす・足す・消す、線を引く）。値やシナリオは、オフのままでもいつでも直せます"
         }
       >
         ✎ 図を編集

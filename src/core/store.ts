@@ -126,7 +126,7 @@ export class ModelStore {
   }
 
   /**
-   * 要素や施策の名前を変えたときに、筋書きの中の名前も直す。例外は投げず、知らせる文を返す（renameDataColumns と同じ）。
+   * 要素やシナリオの名前を変えたときに、筋書きの中の名前も直す。例外は投げず、知らせる文を返す（renameDataColumns と同じ）。
    * 筋書きがないときや、合う名前がないときは何も返さない
    */
   async renameSlideNames(name: string, renames: { elements?: [string, string][]; scenarios?: [string, string][] }): Promise<{ note?: string; warning?: string }> {

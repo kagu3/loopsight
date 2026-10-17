@@ -169,7 +169,7 @@ describe("MCP server", () => {
     expect(await callError("set_simulation", { model: "m", time_step: -1 })).toMatch(/time_step/);
   });
 
-  test("施策を保存し、「何もしない場合」と比べる。要素の名前を変えると施策の中も変わる", async () => {
+  test("シナリオを保存し、「元のモデル」と比べる。要素の名前を変えるとシナリオの中も変わる", async () => {
     await call("create_model", { model: "s" });
     await call("upsert_elements", { model: "s", elements: SIR });
     const saved = await call("set_scenarios", {
@@ -182,15 +182,15 @@ describe("MCP server", () => {
     });
     expect(saved.changes.added).toEqual(["外出を控える", "早く治す"]);
     expect(saved.validation.ok).toBe(true);
-    expect(saved.comparison.rows.map((r: any) => r.scenario)).toEqual(["何もしない場合", "外出を控える", "早く治す"]);
+    expect(saved.comparison.rows.map((r: any) => r.scenario)).toEqual(["元のモデル", "外出を控える", "早く治す"]);
     const peaks = saved.comparison.rows.map((r: any) => r.results.Infected.max);
     expect(peaks[1]).toBeLessThan(peaks[0]);
     expect(peaks[2]).toBeLessThan(peaks[0]);
 
-    // 保存した施策は sweep_parameter でも「何もしない場合」と並べて比べられる
+    // 保存したシナリオは sweep_parameter でも「元のモデル」と並べて比べられる
     const sweep = await call("sweep_parameter", { model: "s", overrides: { "Recovery Rate": 0.3 }, elements: ["Infected"] });
-    expect(sweep.rows.map((r: any) => r.scenario)).toEqual(["何もしない場合", "外出を控える", "早く治す"]);
-    // 「何もしない場合」には overrides を当てない
+    expect(sweep.rows.map((r: any) => r.scenario)).toEqual(["元のモデル", "外出を控える", "早く治す"]);
+    // 「元のモデル」には overrides を当てない
     expect(sweep.rows[0].overrides).toEqual({});
     expect(sweep.rows[0].results.Infected.max).toBe(peaks[0]);
     expect(sweep.rows[1].overrides).toEqual({ "Contact Rate": 0.2, "Recovery Rate": 0.3 });
@@ -202,7 +202,7 @@ describe("MCP server", () => {
       { name: "治療を早める", values: { "Recovery Rate": 0.2 } },
     ]);
 
-    // 実行できない施策は保存しない
+    // 実行できないシナリオは保存しない
     expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "壊れた", values: { 接触率: "[Nope]" } }] })).toMatch(/壊れた/);
     expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "x", values: { Contact: 1 } }] })).toMatch(/見つかりません/);
     expect(await callError("set_scenarios", { model: "s" })).toMatch(/scenarios か remove/);
@@ -300,7 +300,7 @@ describe("MCP server", () => {
     // 表記はモデルにそろえて保存する
     expect(viewed.slides[0].elements).toEqual(["Infected"]);
 
-    // 要素と施策の名前を変えると、筋書きの中も直す
+    // 要素とシナリオの名前を変えると、筋書きの中も直す
     const renamed = await call("upsert_elements", { model: "sir", elements: [{ name: "Infected", rename_to: "感染者" }] });
     expect(renamed.changes.notes.join("\n")).toMatch(/sir\.slides\.json/);
     const scenario = await call("set_scenarios", { model: "sir", scenarios: [{ name: "外出を控える", rename_to: "外出の自粛" }] });
@@ -320,7 +320,7 @@ describe("MCP server", () => {
     expect(replaced.slides_issues.map((i: any) => i.message).join("\n")).toMatch(/1 枚目.*列 "感染者" がありません/);
     expect((await call("import_data", { model: "sir", content: "Day,感染者\n0,10\n" })).slides_issues).toBeUndefined();
 
-    // 筋書きが使っている施策を消すと、そのことを知らせる
+    // 筋書きが使っているシナリオを消すと、そのことを知らせる
     const removed = await call("set_scenarios", { model: "sir", remove: ["外出の自粛"] });
     expect(removed.slides_issues.map((i: any) => i.slide)).toEqual([3, 4]);
     // 合わないところがあれば、PDF に書き出さない

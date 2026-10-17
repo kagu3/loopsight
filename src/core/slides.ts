@@ -30,7 +30,7 @@ export type LoopPolarity = (typeof LOOP_POLARITIES)[number];
 export const MAX_SLIDE_ELEMENTS = 4;
 /** 原因のスライドのループの要素の数の上限（図と、右に並べる名前が収まる数） */
 export const MAX_LOOP_ELEMENTS = 10;
-/** 比較のスライドで重ねる施策の数の上限（グラフの色の数。「何もしない場合」はほかに出す） */
+/** 比較のスライドで重ねるシナリオの数の上限（グラフの色の数。「元のモデル」はほかに出す） */
 export const MAX_SLIDE_SCENARIOS = 8;
 
 interface SlideBase {
@@ -55,13 +55,13 @@ export interface CauseSlide extends SlideBase {
   loop: { elements: string[]; polarity: LoopPolarity };
 }
 
-/** 解決案：施策（シナリオ）の名前。説明と変える値はモデルの施策から出す */
+/** 解決案：シナリオの名前。説明と変える値はモデルのシナリオから出す */
 export interface SolutionSlide extends SlideBase {
   kind: "solution";
   scenario: string;
 }
 
-/** 比較：「何もしない場合」と施策を、要素ごとに重ねる。at は注目する時点 */
+/** 比較：「元のモデル」とシナリオを、要素ごとに重ねる。at は注目する時点 */
 export interface CompareSlide extends SlideBase {
   kind: "compare";
   scenarios: string[];
@@ -135,7 +135,7 @@ export function toSlideDeck(value: unknown): SlideDeck {
         return { kind, ...base, loop: { elements: [...loop.elements], polarity: loop.polarity as LoopPolarity } };
       }
       case "solution":
-        if (typeof s.scenario !== "string") throw new ImportError(`${at}（解決案）には scenario（施策の名前）が必要です。`);
+        if (typeof s.scenario !== "string") throw new ImportError(`${at}（解決案）には scenario（シナリオの名前）が必要です。`);
         return { kind, ...base, scenario: s.scenario };
       case "compare": {
         const slide: CompareSlide = { kind, ...base, scenarios: names("scenarios", true)!, elements: names("elements", true)! };
@@ -166,7 +166,7 @@ function scenarioNameOf(s: Scenario, i: number): string {
 }
 
 /**
- * 筋書きがモデルに合うか確かめる。要素名、施策の名前、実際のデータの列名が実在するか。
+ * 筋書きがモデルに合うか確かめる。要素名、シナリオの名前、実際のデータの列名が実在するか。
  * 合う名前はモデル（とデータ）の表記にそろえる（deck をその場で書き換える）。
  * errors は直さないと見せられないもの、warnings は見せられるが確かめたほうがよいもの
  */
@@ -201,18 +201,18 @@ export function checkSlides(model: ModelJSON, deck: SlideDeck, data?: ActualData
         return name;
       });
     };
-    /** 施策の名前をモデルの表記にそろえる。なければエラー */
+    /** シナリオの名前をモデルの表記にそろえる。なければエラー */
     const scenario = (name: string): string => {
       if (sameName(name, BASELINE_SCENARIO)) return BASELINE_SCENARIO;
       const k = scenarios.findIndex((sc, j) => sameName(scenarioNameOf(sc, j), name));
       if (k < 0) {
         error(
-          `施策 "${name}" がモデルにありません。`,
-          didYouMean(name, scenarioNames) || (scenarioNames.length ? `ある施策: ${scenarioNames.join("、")}` : "先に set_scenarios で施策を保存してください。"),
+          `シナリオ "${name}" がモデルにありません。`,
+          didYouMean(name, scenarioNames) || (scenarioNames.length ? `あるシナリオ: ${scenarioNames.join("、")}` : "先に set_scenarios でシナリオを保存してください。"),
         );
         return name;
       }
-      if (k >= MAX_SLIDE_SCENARIOS) warning(`施策 "${scenarioNames[k]}" は ${k + 1} 番目に保存されているため、ビューアで実行されません。`, `ビューアが実行する施策は先頭の ${MAX_SLIDE_SCENARIOS} つまでです。`);
+      if (k >= MAX_SLIDE_SCENARIOS) warning(`シナリオ "${scenarioNames[k]}" は ${k + 1} 番目に保存されているため、ビューアで実行されません。`, `ビューアが実行するシナリオは先頭の ${MAX_SLIDE_SCENARIOS} つまでです。`);
       return scenarioNames[k]!;
     };
     const time = (t: number | undefined, what: string) => {
@@ -270,14 +270,14 @@ export function checkSlides(model: ModelJSON, deck: SlideDeck, data?: ActualData
       }
       case "solution":
         s.scenario = scenario(s.scenario);
-        if (s.scenario === BASELINE_SCENARIO) error(`「${BASELINE_SCENARIO}」は施策ではありません。`, "set_scenarios で保存した施策の名前にしてください。");
+        if (s.scenario === BASELINE_SCENARIO) error(`「${BASELINE_SCENARIO}」はシナリオではありません。`, "set_scenarios で保存したシナリオの名前にしてください。");
         break;
       case "compare": {
         s.elements = elements(s.elements, "比べる要素");
-        // 「何もしない場合」はいつも重ねるので、並べなくてよい
+        // 「元のモデル」はいつも重ねるので、並べなくてよい
         s.scenarios = s.scenarios.map(scenario).filter((name) => name !== BASELINE_SCENARIO);
-        if (s.scenarios.length === 0) error("比べる施策がありません。", `「${BASELINE_SCENARIO}」はいつも重ねます。ほかに施策の名前を 1 つ以上並べてください。`);
-        if (s.scenarios.length > MAX_SLIDE_SCENARIOS) error(`比べる施策は ${MAX_SLIDE_SCENARIOS} つまでにしてください。`);
+        if (s.scenarios.length === 0) error("比べるシナリオがありません。", `「${BASELINE_SCENARIO}」はいつも重ねます。ほかにシナリオの名前を 1 つ以上並べてください。`);
+        if (s.scenarios.length > MAX_SLIDE_SCENARIOS) error(`比べるシナリオは ${MAX_SLIDE_SCENARIOS} つまでにしてください。`);
         time(s.at, "注目する時点");
         break;
       }
@@ -288,7 +288,7 @@ export function checkSlides(model: ModelJSON, deck: SlideDeck, data?: ActualData
   return { errors, warnings };
 }
 
-/** 要素や施策の名前を変えたときに、筋書きの中の名前も変える。変えたら true */
+/** 要素やシナリオの名前を変えたときに、筋書きの中の名前も変える。変えたら true */
 export function renameInSlides(deck: SlideDeck, renames: { elements?: [string, string][]; scenarios?: [string, string][] }): boolean {
   let changed = false;
   const rename = (list: [string, string][] | undefined, name: string): string => {
@@ -323,12 +323,12 @@ export function renameInSlides(deck: SlideDeck, renames: { elements?: [string, s
   return changed;
 }
 
-/** 施策 → いまの名前。名前を変えたかどうかを、あとで scenarioRenamesSince で調べるために取っておく */
+/** シナリオ → いまの名前。名前を変えたかどうかを、あとで scenarioRenamesSince で調べるために取っておく */
 export function namesByScenario(model: ModelJSON): Map<Scenario, string> {
   return new Map((model.scenarios ?? []).map((s, i) => [s, scenarioNameOf(s, i)]));
 }
 
-/** namesByScenario を取ってから名前の変わった施策の [前の名前, 新しい名前] */
+/** namesByScenario を取ってから名前の変わったシナリオの [前の名前, 新しい名前] */
 export function scenarioRenamesSince(model: ModelJSON, before: Map<Scenario, string>): [string, string][] {
   const out: [string, string][] = [];
   const now = model.scenarios ?? [];
