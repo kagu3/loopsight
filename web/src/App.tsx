@@ -110,11 +110,26 @@ export function App() {
   // id は欄を開いた回ごとの番号。表で名前を変えても同じ欄のまま（書きかけの説明を残す）にするため、欄の key に使う
   const [scenario, setScenario] = useState<{ name: string; id: number }>();
   const scenarioSeq = useRef(0);
-  /** 左の欄でシナリオの説明を直す。同じシナリオの欄を開いていれば、そのままにする */
-  const editScenarioDescription = useCallback(
-    (name: string) => setScenario((s) => (s && sameName(s.name, name) ? s : { name, id: ++scenarioSeq.current })),
-    [],
-  );
+  // 左の欄を開いているか（たたむと、右の図とグラフを広く使える）。覚えておかず、開くたびに開いた状態から始める
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const collapseRef = useRef<HTMLButtonElement>(null);
+  const stripRef = useRef<HTMLButtonElement>(null);
+  // ボタンや帯で開け閉めしたら、押したものは隠れるので、もう一方にフォーカスを移す（自動で開いたときは移さない）
+  const moveSidebarFocus = useRef(false);
+  const toggleSidebar = (open: boolean) => {
+    moveSidebarFocus.current = true;
+    setSidebarOpen(open);
+  };
+  useEffect(() => {
+    if (!moveSidebarFocus.current) return;
+    moveSidebarFocus.current = false;
+    (sidebarOpen ? collapseRef : stripRef).current?.focus();
+  }, [sidebarOpen]);
+  /** 左の欄でシナリオの説明を直す。同じシナリオの欄を開いていれば、そのままにする。左の欄をたたんでいれば開く */
+  const editScenarioDescription = useCallback((name: string) => {
+    setScenario((s) => (s && sameName(s.name, name) ? s : { name, id: ++scenarioSeq.current }));
+    setSidebarOpen(true);
+  }, []);
   // グラフの上のシナリオの凡例にカーソルを乗せているシナリオ
   const [hoveredScenario, setHoveredScenario] = useState<string>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
@@ -124,6 +139,11 @@ export function App() {
   const [busy, setBusy] = useState(false);
   // 編集モード（図の左上の「図を編集」。図の形を変える操作をできるようにする）。うっかり動かさないよう、開くたびにオフから始める（ブラウザに覚えさせない）
   const [editMode, setEditMode] = useState(false);
+  // 図の形を変えるときは詳細欄を見ながら作業するので、オンにしたら左の欄を開く（オフにしてもたたみ直さない）
+  const changeEditMode = useCallback((on: boolean) => {
+    setEditMode(on);
+    if (on) setSidebarOpen(true);
+  }, []);
   // 画面で要素を足した・消した・名前を変えた（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
   const [keepView, setKeepView] = useState<string>();
   // 要素や、シナリオの中身の表の行・シナリオを消したときの知らせ。元に戻したら閉じる
@@ -650,14 +670,26 @@ export function App() {
   }
 
   return (
-    <div className="app">
-      <aside className="sidebar">
+    <div className={sidebarOpen ? "app" : "app sidebar-collapsed"}>
+      {/* たたんだ左の欄は消さずに隠す（書きかけの編集を残す） */}
+      <aside className="sidebar" id="sidebar">
         <header className="brand">
           <h1>SD Modeler ビューア</h1>
           <span className={`live ${connected ? "on" : ""}`} title={connected ? "ファイルの変更を見ています" : "サーバーにつながっていません"}>
             <span className="dot" />
             {connected ? "ライブ" : "未接続"}
           </span>
+          <button
+            className="sidebar-collapse"
+            ref={collapseRef}
+            onClick={() => toggleSidebar(false)}
+            title="左の欄をたたんで、図とグラフを広く使います"
+            aria-label="左の欄をたたむ"
+            aria-expanded={sidebarOpen}
+            aria-controls="sidebar"
+          >
+            ◀
+          </button>
         </header>
 
         <section className="panel">
@@ -716,6 +748,19 @@ export function App() {
           )}
         </section>
       </aside>
+      {/* たたんだときに左端に残す帯。押すと左の欄を開く */}
+      <button
+        className="sidebar-strip"
+        ref={stripRef}
+        onClick={() => toggleSidebar(true)}
+        title="左の欄（選んだ要素の詳細・問題・モデルの一覧）を開きます"
+        aria-label="左の欄を開く"
+        aria-expanded={sidebarOpen}
+        aria-controls="sidebar"
+      >
+        <span aria-hidden="true">▶</span>
+        <span className="sidebar-strip-label">左の欄</span>
+      </button>
 
       <main className="main" ref={mainRef}>
         <div className="toolbar">
@@ -779,7 +824,7 @@ export function App() {
                 onMove={move}
                 scenario={scenarioMarks}
                 editable={editMode}
-                onEditableChange={setEditMode}
+                onEditableChange={changeEditMode}
                 keepView={data.version === keepView}
                 holdView={resizing}
                 onAdd={addElement}

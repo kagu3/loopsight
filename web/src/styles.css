@@ -137,13 +137,58 @@ h2 {
 .brand {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
 }
 .brand h1 {
   font-size: 15px;
   font-weight: 600;
+  margin-right: auto;
+}
+/* 左の欄をたたむボタンと、たたんだときに左端に残す帯 */
+.sidebar-collapse {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.sidebar-collapse:hover,
+.sidebar-strip:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.sidebar-strip {
+  display: none;
+}
+.app.sidebar-collapsed {
+  grid-template-columns: 28px 1fr;
+}
+.app.sidebar-collapsed .sidebar {
+  display: none;
+}
+.app.sidebar-collapsed .sidebar-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sidebar-strip-label {
+  writing-mode: vertical-rl;
+  letter-spacing: 0.1em;
 }
 .live {
   display: inline-flex;
@@ -1734,6 +1779,17 @@ button.scenario-chip-button.on {
     border-right: none;
     border-bottom: 1px solid var(--border);
     max-height: 40vh;
+  }
+  /* 狭い画面では左の欄をたたまない（たたんだあとに狭くなっても出す） */
+  .app.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+  .app.sidebar-collapsed .sidebar {
+    display: flex;
+  }
+  .sidebar-collapse,
+  .app.sidebar-collapsed .sidebar-strip {
+    display: none;
   }
   .diagram {
     flex: none;
