@@ -274,7 +274,11 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
   for (const v of model.visualizations ?? []) v.elements = v.elements.filter((n) => !gone.has(nameKey(n)));
   if (model.visualizations) model.visualizations = model.visualizations.filter((v) => v.elements.length > 0);
   for (const s of model.scenarios ?? []) {
-    for (const key of Object.keys(s.values)) if (gone.has(nameKey(key))) delete s.values[key];
+    for (const key of Object.keys(s.values)) {
+      if (!gone.has(nameKey(key))) continue;
+      delete s.values[key];
+      report.notes.push(`シナリオ "${s.name}" から "${key}" の値を消しました。`);
+    }
   }
   return report;
 }

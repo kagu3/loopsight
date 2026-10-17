@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { ModelElement } from "../src/core/index.js";
-import { formOf, parseEquation, parseTable, patchOf } from "../web/src/editing.js";
+import { emptyModel, toGraph, upsertElements, type ModelElement } from "../src/core/index.js";
+import { addElementPatches, formOf, newElementName, parseEquation, parseTable, patchOf } from "../web/src/editing.js";
 
 describe("編集フォームの値", () => {
   test("数字だけなら数値、それ以外は式の文字列", () => {
@@ -54,5 +54,63 @@ describe("送る変更の組み立て", () => {
     const f = formOf(c);
     expect(f.table).toBe("0, 1");
     expect(patchOf(c, f, { ...f, table: "0, 1\n5, 2" })).toEqual({ name: "c", behavior: { data: [[0, 1], [5, 2]] } });
+  });
+});
+
+describe("編集モードで要素を足す", () => {
+  const model = () => {
+    const m = emptyModel("m");
+    upsertElements(m, [
+      { type: "STOCK", name: "人口", behavior: { initial_value: 100 }, display: { coordinates: [100, 100] } },
+      { type: "VARIABLE", name: "新しい変数", behavior: { value: 1 }, display: { coordinates: [300, 100] } },
+    ]);
+    return m;
+  };
+
+  test("仮の名前は「新しい○○」。重なれば番号を付ける（大文字と小文字は区別しない）", () => {
+    const m = model();
+    expect(newElementName(m, "STOCK")).toBe("新しいストック");
+    expect(newElementName(m, "VARIABLE")).toBe("新しい変数 2");
+    upsertElements(m, [{ type: "VARIABLE", name: "新しい変数 2", behavior: { value: 1 } }]);
+    expect(newElementName(m, "VARIABLE")).toBe("新しい変数 3");
+    expect(newElementName(m, "FLOW")).toBe("新しいフロー");
+  });
+
+  test("押した場所を中心に置き、値は 0。足した要素の位置だけを送る", () => {
+    const m = model();
+    const { name, patches } = addElementPatches(m, toGraph(m), "STOCK", { x: 400, y: 300 });
+    expect(name).toBe("新しいストック");
+    expect(patches[0]).toEqual({ type: "STOCK", name, behavior: { initial_value: 0 } });
+    expect(patches).toHaveLength(2);
+    upsertElements(m, patches);
+    const box = toGraph(m).nodes.find((n) => n.element === name)!;
+    // 座標は整数に丸めるので、半分までずれる
+    expect(Math.abs(box.x + box.width / 2 - 400)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(box.y + box.height / 2 - 300)).toBeLessThanOrEqual(0.5);
+  });
+
+  test("フローは両端を雲にして、押した場所に弁を置く", () => {
+    const m = model();
+    const { name, patches } = addElementPatches(m, toGraph(m), "FLOW", { x: 400, y: 300 });
+    upsertElements(m, patches);
+    const flow = m.elements.find((e) => e.name === name)!;
+    expect(flow).toMatchObject({ type: "FLOW", from: null, to: null, behavior: { value: 0 } });
+    expect(flow.display).toEqual({ from_coordinates: [330, 300], to_coordinates: [470, 300] });
+    const g = toGraph(m);
+    expect(g.missingCoordinates).toBe(false);
+    const valve = g.nodes.find((n) => n.kind === "VALVE" && n.element === name)!;
+    expect([valve.x + valve.width / 2, valve.y + valve.height / 2]).toEqual([400, 300]);
+  });
+
+  test("左や上にはみ出す場所に置くと、全体をずらしてまとめて保存する", () => {
+    const m = model();
+    const { patches } = addElementPatches(m, toGraph(m), "VARIABLE", { x: 0, y: 0 });
+    upsertElements(m, patches);
+    const g = toGraph(m);
+    expect(Math.min(...g.nodes.map((n) => n.x))).toBeGreaterThanOrEqual(20);
+    expect(Math.min(...g.nodes.map((n) => n.y))).toBeGreaterThanOrEqual(20);
+    // ほかの要素も同じだけずれる（並びは変わらない）
+    const [a, b] = ["人口", "新しい変数"].map((n) => m.elements.find((e) => e.name === n)!.display!.coordinates!);
+    expect(b![0] - a![0]).toBe(200);
   });
 });

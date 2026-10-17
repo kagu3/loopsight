@@ -243,8 +243,9 @@ describe("要素の編集", () => {
   test("消した要素の値はシナリオからも消える", () => {
     const m = sir();
     m.scenarios = [{ name: "high", values: { Beta: 0.5, Gamma: 0.2 } }];
-    removeElements(m, [{ name: "Gamma" }]);
+    const report = removeElements(m, [{ name: "Gamma" }]);
     expect(m.scenarios[0]!.values).toEqual({ Beta: 0.5 });
+    expect(report.notes).toContain('シナリオ "high" から "Gamma" の値を消しました。');
   });
 
   test("要約には式とつながりが入り、座標は入らない", () => {

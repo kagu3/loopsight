@@ -14,6 +14,7 @@ Issue にしないのは、Issue をまとめて片付けるときに一緒に�
 - **実行できなかった施策があると、ほかの施策の色がずれる。** 色を、実行できた施策の中での位置で決めているため。モデルの中の並び順で決めれば変わらない。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)
 - **名前のないシナリオの仮の名前（scenario N）が、前のシナリオを消すとずれる。** 配列の位置で作っているため。名前のないシナリオは取り込んだモデルでしか起きない。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)
 - **施策の上限（8）が 3 か所に分かれている。** `src/core/slides.ts` の `MAX_SLIDE_SCENARIOS`、`src/viewer/server.ts` の `MAX_SCENARIOS`、web の `MAX_SERIES`。中核から 1 つの定数で出せば、ずれる心配がなくなる。「何もしない場合」の名前も web 側に写しがある。出どころ：[#21](https://github.com/suda0033/sd-modeler/pull/21)、[#23](https://github.com/suda0033/sd-modeler/pull/23)
+- **ビューアで要素を消したときの黄色の帯が、中核（`removeElements`）の知らせをそのまま並べている。** `FLOW "Births" の to は "Population" を指していたので空（モデルの外）にしました。` や `シナリオ "…" から "…" の値を消しました。` のように、MCP 向けの書き方（英語の種類名、「シナリオ」）で、作業者には読みにくい。画面では「Births の行き先をモデルの外にしました」「施策「…」から … の値を消しました」のように言い換えるか、要点だけにする。出どころ：#35
 
 ## 実際のデータ（CSV）
 

@@ -21,11 +21,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
+import { NEW_ELEMENT_LABEL, type NewElementType } from "./editing.js";
 import { nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
 // 編集モードのときだけ、箱と雲をドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
+// 編集モードでは、左上の道具で要素を足す（種類を選んでから図の置きたい場所を押す）・選んだ要素を消すこともできる。
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
@@ -156,6 +158,13 @@ export interface DiagramProps {
   scenario?: ScenarioMarks;
   /** 編集モード。オンのときだけ要素を動かせて、図の上に編集の道具の場所を出す。選ぶ・薄くするなどの見るための操作はいつでもできる */
   editable?: boolean;
+  /** 画面で要素を足した・消した直後の図。要素が増減しても、見る場所を合わせ直さない（置いた位置と見た目がずれないように） */
+  keepView?: boolean;
+  /** 編集モードで、図の at（図の座標）に要素を足す */
+  onAdd?(type: NewElementType, at: Pos): void;
+  /** 編集モードで消せる、選んでいる要素の名前（なければ「削除」を押せない） */
+  removable?: string;
+  onRemove?(name: string): void;
 }
 
 export interface ScenarioMarks {
@@ -169,6 +178,20 @@ type Pos = { x: number; y: number };
 
 export function Diagram(props: DiagramProps) {
   const { graph, selected, changed, values, onMove, scenario, editable } = props;
+  const flow = useReactFlow();
+  // 足そうとしている要素の種類（ボタンを押してから、図の置きたい場所を押すまで）。編集モードを終えたり、別のモデルを開いたりしたらやめる
+  const [placing, setPlacing] = useState<NewElementType>();
+  useEffect(() => {
+    if (!editable) setPlacing(undefined);
+  }, [editable]);
+  useEffect(() => setPlacing(undefined), [props.modelName]);
+  // Esc で足すのをやめる
+  useEffect(() => {
+    if (!placing) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPlacing(undefined);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [placing]);
   // 要素が増えたり減ったりしたときも表示範囲を合わせ直す
   const nodeIds = useMemo(() => graph.nodes.map((n) => n.id).sort().join("|"), [graph]);
 
@@ -303,8 +326,8 @@ export function Diagram(props: DiagramProps) {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       colorMode="system"
-      // ループの線の色（--loop）を R / B で変える
-      className={props.loop ? `loop-${props.loop.kind.toLowerCase()}` : undefined}
+      // ループの線の色（--loop）を R / B で変える。要素を足す場所を選んでいる間は、十字のカーソルにする
+      className={[props.loop ? `loop-${props.loop.kind.toLowerCase()}` : "", placing ? "is-placing" : ""].join(" ").trim() || undefined}
       // 札と枠の色（--scenario）は、注目している施策の線の色
       style={scenario ? ({ "--scenario": scenario.color } as React.CSSProperties) : undefined}
       onNodesChange={onNodesChange}
@@ -319,12 +342,17 @@ export function Diagram(props: DiagramProps) {
       minZoom={0.1}
       proOptions={{ hideAttribution: true }}
       onNodeClick={(_, n) => props.onSelect(n.data.g.element)}
-      onPaneClick={() => props.onSelect(undefined)}
+      onPaneClick={(e) => {
+        if (placing && editable) {
+          setPlacing(undefined);
+          props.onAdd?.(placing, flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+        } else props.onSelect(undefined);
+      }}
     >
-      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} />
+      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} keepView={props.keepView} />
       <Background gap={20} size={1} />
       {props.loop && <LoopBadge loop={props.loop} />}
-      {editable && <EditTools />}
+      {editable && <EditTools placing={placing} onPlace={setPlacing} removable={props.removable} onRemove={props.onRemove} />}
       {!props.embed && <Controls showInteractive={false} fitViewOptions={VIEWER_FIT} />}
       {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
       {!props.embed && <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} ariaLabel="図の全体" style={{ width: 150, height: 90 }} />}
@@ -333,15 +361,36 @@ export function Diagram(props: DiagramProps) {
 }
 
 /**
- * 編集モードの道具の場所（図の左上）。いまは編集中であることと、できることだけを出す。
- * 要素を足す・消す、線を引くボタンは、ここに右へ並べる。
- * 図は真ん中に合わせるので、要素は角より真ん中の上にかかりやすい。左下の操作部品と右下のミニマップとも離れている
+ * 編集モードの道具の場所（図の左上）。要素を足すボタンと、選んだ要素を消すボタン。線を引くボタンは、ここに右へ並べる。
+ * 図は真ん中に合わせるので、要素は角より真ん中の上にかかりやすい。左下の操作部品と右下のミニマップとも離れている。
+ * 足す場所を選んでいる間だけ、何をすればよいかを添える（いつもは出さず、帯を小さく保つ）
  */
-function EditTools() {
+function EditTools({ placing, onPlace, removable, onRemove }: { placing?: NewElementType; onPlace(type: NewElementType | undefined): void; removable?: string; onRemove?(name: string): void }) {
   return (
     <Panel position="top-left" className="edit-tools">
-      <span className="edit-tools-label">編集モード</span>
-      <span className="edit-tools-hint">要素をドラッグで動かせます</span>
+      <span className="edit-tools-label" title="要素をドラッグで動かせます">
+        編集モード
+      </span>
+      {(Object.keys(NEW_ELEMENT_LABEL) as NewElementType[]).map((type) => (
+        <button
+          key={type}
+          className={`edit-tool ${placing === type ? "on" : ""}`}
+          aria-pressed={placing === type}
+          onClick={() => onPlace(placing === type ? undefined : type)}
+          title={`${NEW_ELEMENT_LABEL[type]}を足します。押してから、図の置きたい場所を押します`}
+        >
+          ＋{NEW_ELEMENT_LABEL[type]}
+        </button>
+      ))}
+      <button
+        className="edit-tool danger"
+        disabled={!removable}
+        onClick={() => removable && onRemove?.(removable)}
+        title={removable ? `「${removable}」を消します（つながるリンクも消えます。Delete キー）` : "図で要素を選ぶと、消せます"}
+      >
+        削除
+      </button>
+      {placing && <span className="edit-tools-hint">置きたい場所を押してください（Esc でやめる）</span>}
     </Panel>
   );
 }
@@ -373,20 +422,36 @@ const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stoc
 
 /**
  * 表示範囲を合わせ直す。別のモデルを開いたとき、配置を切り替えたとき、要素が増減したとき、図の欄の大きさが変わったとき。
- * 式や値が変わっただけのとき（AI が値を調整したなど）は動かさない。
+ * 式や値が変わっただけのとき（AI が値を調整したなど）は動かさない。画面で要素を足した・消したとき（keepView）も、増減では動かさない。
  * 全体が名前の読める大きさで入らないときは、ストックが入るように合わせる（ほかはドラッグやミニマップで見る）。
  */
-function FitOnChange({ modelName, layoutKey, nodes, embed, badge }: { modelName: string; layoutKey: string; nodes: GraphNode[]; embed?: boolean; badge?: boolean }) {
+function FitOnChange({
+  modelName,
+  layoutKey,
+  nodes,
+  embed,
+  badge,
+  keepView,
+}: {
+  modelName: string;
+  layoutKey: string;
+  nodes: GraphNode[];
+  embed?: boolean;
+  badge?: boolean;
+  keepView?: boolean;
+}) {
   const flow = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
-  const key = `${modelName}:${layoutKey}:${Math.round(width / 40)}:${Math.round(height / 40)}`;
-  const last = useRef(key);
+  // 要素の並び（layoutKey）と、それ以外（モデル、図の欄の大きさ）を分けて覚える
+  const view = `${modelName}:${Math.round(width / 40)}:${Math.round(height / 40)}`;
+  const last = useRef({ view, layoutKey });
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   useEffect(() => {
-    if (last.current === key) return;
-    last.current = key;
+    const prev = last.current;
+    last.current = { view, layoutKey };
+    if (prev.view === view && (prev.layoutKey === layoutKey || keepView)) return;
     if (embed) {
       const padding = badge ? { top: BADGE_SPACE, bottom: FIT_PADDING, x: FIT_PADDING } : FIT_PADDING;
       requestAnimationFrame(() => flow.fitView({ padding, maxZoom: 1.5, duration: 200 }));
@@ -396,6 +461,6 @@ function FitOnChange({ modelName, layoutKey, nodes, embed, badge }: { modelName:
     const fit = fitTargets(nodesRef.current, width, height, FIT_PADDING);
     const targets = fit.nodes.map((n) => ({ id: n.id }));
     requestAnimationFrame(() => flow.fitView({ nodes: targets, padding: FIT_PADDING, maxZoom: fit.maxZoom, minZoom: MIN_FIT_ZOOM, duration: 200 }));
-  }, [key, flow, embed, badge, width, height]);
+  }, [view, layoutKey, keepView, flow, embed, badge, width, height]);
   return null;
 }

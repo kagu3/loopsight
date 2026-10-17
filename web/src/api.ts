@@ -6,6 +6,7 @@ import {
   type ElementPatch,
   type ModelListResponse,
   type ModelResponse,
+  type RemoveTarget,
   type ScenarioPatch,
 } from "../../src/viewer/api.js";
 
@@ -39,6 +40,10 @@ async function post(url: string, body: unknown): Promise<WriteResult> {
 
 export const postEdit = (name: string, version: string, elements: ElementPatch[]) =>
   post(`/api/models/${encodeURIComponent(name)}/edit`, { version, elements });
+
+/** 要素を消す。elements は MCP の remove_elements と同じ形 */
+export const postRemove = (name: string, version: string, elements: RemoveTarget[]) =>
+  post(`/api/models/${encodeURIComponent(name)}/remove`, { version, elements });
 
 /** 施策を足す・直す・消す。scenarios と remove は MCP の set_scenarios と同じ形 */
 export const postScenarios = (name: string, version: string, scenarios: ScenarioPatch[], remove?: string[]) =>

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { ModelStore, emptyModel, upsertElements } from "../src/core/index.js";
+import { ModelStore, emptyModel, toGraph, upsertElements } from "../src/core/index.js";
 import type { ChangeEvent, EditErrorResponse, EditResponse, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
 import { tempDir } from "./helpers.js";
@@ -494,6 +494,81 @@ describe("ビューアからの施策の編集", () => {
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "x" }] }, { Origin: "https://evil.example" })).status).toBe(403);
     expect((await store.readVersioned("pop")).version).toBe(v0);
     expect((await get<ModelResponse>("/api/models/pop")).body.undo_available).toBe(0);
+  });
+});
+
+describe("ビューアからの要素の削除", () => {
+  test("要素とつながるリンクを消して保存し、知らせを返す。元に戻すと戻る", async () => {
+    const m = population();
+    m.scenarios = [{ name: "高い", values: { Rate: 0.2 } }];
+    await new ModelStore(dir).write("pop", m);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const { status, body } = await post<EditResponse>("/api/models/pop/remove", { version: v0, elements: [{ name: "Rate" }] });
+    expect(status).toBe(200);
+    expect(body.report!.removed).toEqual(['VARIABLE "Rate"', "LINK Rate → Births"]);
+    // 式に残った参照と、施策から消した値を知らせる
+    expect(body.report!.notes.join("\n")).toMatch(/\[Rate\]/);
+    expect(body.report!.notes).toContain('シナリオ "高い" から "Rate" の値を消しました。');
+    expect(body.model.undo_available).toBe(1);
+    const saved = await new ModelStore(dir).read("pop");
+    expect(saved.elements.some((e) => e.name === "Rate" || e.from === "Rate")).toBe(false);
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: body.model.version });
+    expect(u.body.model.version).toBe(v0);
+    expect((await new ModelStore(dir).read("pop")).elements.some((e) => e.name === "Rate")).toBe(true);
+  });
+
+  test("ストックを消すと、つながるフローは残し、端の雲を消したストックのあった場所に置く", async () => {
+    const m = population();
+    upsertElements(m, [
+      { name: "Population", display: { coordinates: [300, 100] } },
+      { name: "Rate", display: { coordinates: [100, 200] } },
+      { name: "Births", display: { from_coordinates: [100, 120] } },
+    ]);
+    await new ModelStore(dir).write("pop", m);
+    const box = toGraph(m).nodes.find((n) => n.element === "Population" && n.kind === "STOCK")!;
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const { status, body } = await post<EditResponse>("/api/models/pop/remove", { version: v0, elements: [{ name: "Population" }] });
+    expect(status).toBe(200);
+    const births = (await new ModelStore(dir).read("pop")).elements.find((e) => e.name === "Births")!;
+    expect(births.to).toBeNull();
+    expect(births.display!.to_coordinates).toEqual([Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2)]);
+    expect(births.display!.from_coordinates).toEqual([100, 120]);
+    // 雲の座標があるので、図は仮の並べ方にならない
+    expect(toGraph(body.model.model).missingCoordinates).toBe(false);
+  });
+
+  test("出入りするフローの雲が同じ場所に来るときは、それぞれのフローの向きに沿ってずらす", async () => {
+    const m = population();
+    upsertElements(m, [
+      { name: "Population", display: { coordinates: [300, 100] } },
+      { name: "Rate", display: { coordinates: [100, 200] } },
+      { name: "Births", display: { from_coordinates: [100, 120] } },
+      { type: "FLOW", name: "Deaths", from: "Population", behavior: { value: 1 }, display: { to_coordinates: [600, 120] } },
+    ]);
+    await new ModelStore(dir).write("pop", m);
+    const box = toGraph(m).nodes.find((n) => n.element === "Population" && n.kind === "STOCK")!;
+    const center = [box.x + box.width / 2, box.y + box.height / 2] as const;
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    expect((await post("/api/models/pop/remove", { version: v0, elements: [{ name: "Population" }] })).status).toBe(200);
+    const saved = await new ModelStore(dir).read("pop");
+    const into = saved.elements.find((e) => e.name === "Births")!.display!.to_coordinates!;
+    const out = saved.elements.find((e) => e.name === "Deaths")!.display!.from_coordinates!;
+    // 入ってくるフローの雲は出元の側（左）へ、出ていくフローの雲は行き先の側（右）へ
+    expect(into[0]).toBeLessThan(center[0] - 30);
+    expect(out[0]).toBeGreaterThan(center[0] + 30);
+    expect(Math.abs(into[1] - center[1])).toBeLessThan(10);
+  });
+
+  test("ない要素や、要素の指定でないものは 400 で、ファイルは変えない。版が違えば書き込まない", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const missing = await post<EditErrorResponse>("/api/models/pop/remove", { version: v0, elements: [{ name: "Rat" }] });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toMatch(/Rate/);
+    expect((await post("/api/models/pop/remove", { version: v0, elements: [] })).status).toBe(400);
+    expect((await post("/api/models/pop/remove", { version: v0, elements: [{ type: "STOCK" }] })).status).toBe(400);
+    expect((await post("/api/models/pop/remove", { version: v0, elements: [{ name: "Rate" }] }, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await post<EditErrorResponse>("/api/models/pop/remove", { version: "old", elements: [{ name: "Rate" }] })).status).toBe(409);
+    expect((await new ModelStore(dir).readVersioned("pop")).version).toBe(v0);
   });
 });
 

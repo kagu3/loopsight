@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue } from "../core/index.js";
+import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue } from "../core/index.js";
 
-export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue };
+export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue };
 
 /** GET /api/models */
 export interface ModelListResponse {
@@ -90,6 +90,12 @@ export interface ScenariosRequest {
   scenarios: ScenarioPatch[];
   /** 消す施策の名前 */
   remove?: string[];
+}
+
+/** POST /api/models/:name/remove の本文。elements は MCP の remove_elements と同じ形 */
+export interface RemoveRequest {
+  version: string;
+  elements: RemoveTarget[];
 }
 
 /** POST /api/models/:name/undo の本文 */

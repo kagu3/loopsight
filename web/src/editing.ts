@@ -1,5 +1,8 @@
-// 要素の編集フォームの中身と、送る変更の組み立て。React に依存しない（テストから直接使う）
-import type { ElementPatch, ModelElement } from "../../src/viewer/api.js";
+// 要素の編集フォームの中身と、送る変更の組み立て（編集モードで要素を足すときも）。React に依存しない（テストから直接使う）
+import type { ElementPatch, ModelElement, ModelJSON } from "../../src/viewer/api.js";
+import { positionPatches, shiftIntoView, type Graph, type GraphNode } from "../../src/core/diagram.js";
+import { boxLayout } from "../../src/core/geometry.js";
+import { nameKey } from "../../src/core/modeljson.js";
 
 /** 数字だけなら数値、それ以外は式の文字列 */
 export function parseEquation(text: string): string | number {
@@ -60,4 +63,42 @@ export function patchOf(el: ModelElement, before: Form, after: Form): ElementPat
   if (Object.keys(behavior).length) patch.behavior = behavior;
   if (after.description.trim() !== before.description.trim()) patch.description = after.description.trim() || null;
   return Object.keys(patch).length > 1 ? patch : undefined;
+}
+
+/** 編集モードで図に足せる要素の種類 */
+export type NewElementType = "STOCK" | "FLOW" | "VARIABLE";
+export const NEW_ELEMENT_LABEL: Record<NewElementType, string> = { STOCK: "ストック", FLOW: "フロー", VARIABLE: "変数" };
+
+/** フローの両端の雲を、置いた場所から左右にどれだけ離すか（雲の中心まで） */
+const FLOW_HALF = 70;
+
+/** 足す要素の仮の名前。「新しいストック」、重なれば「新しいストック 2」のように番号を付ける（大文字と小文字は区別しない） */
+export function newElementName(model: ModelJSON, type: NewElementType): string {
+  const base = `新しい${NEW_ELEMENT_LABEL[type]}`;
+  const taken = new Set(model.elements.filter((e) => e.type !== "LINK" && e.name).map((e) => nameKey(e.name!)));
+  if (!taken.has(nameKey(base))) return base;
+  for (let i = 2; ; i++) if (!taken.has(nameKey(`${base} ${i}`))) return `${base} ${i}`;
+}
+
+/**
+ * 図の at（図の座標）を中心に要素を足す変更。値は 0 で、名前や式はあとで詳細欄の「編集」で直す。フローは両端を雲にする。
+ * 図を動かしたときと同じく、座標のない要素を仮に並べているときや、左や上にはみ出すときは、見えている配置もまとめて保存する
+ */
+export function addElementPatches(model: ModelJSON, graph: Graph, type: NewElementType, at: { x: number; y: number }): { name: string; patches: ElementPatch[] } {
+  const name = newElementName(model, type);
+  const added: GraphNode[] = [];
+  if (type === "FLOW") {
+    const [w, h] = [36, 26]; // 図の雲と同じ大きさ（core/diagram.ts）
+    for (const [end, dx] of [["from", -FLOW_HALF], ["to", FLOW_HALF]] as const) {
+      added.push({ id: `new:${end}`, kind: "CLOUD", label: "", cloudOf: { flow: name, end }, x: at.x + dx - w / 2, y: at.y - h / 2, width: w, height: h, shape: "rect" });
+    }
+  } else {
+    const [w, h] = boxLayout(type, name).size;
+    added.push({ id: "new", kind: type, label: name, element: name, x: at.x - w / 2, y: at.y - h / 2, width: w, height: h, shape: "rect" });
+  }
+  const all = [...graph.nodes, ...added];
+  const shifted = shiftIntoView(all);
+  const ids = graph.missingCoordinates || shifted ? undefined : new Set(added.map((n) => n.id));
+  const behavior = type === "STOCK" ? { initial_value: 0 } : { value: 0 };
+  return { name, patches: [{ type, name, behavior }, ...positionPatches(shifted ?? all, ids)] };
 }

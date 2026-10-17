@@ -858,6 +858,36 @@ button.link.danger-link {
 .edit-tools-hint {
   color: var(--text-secondary);
 }
+/* 編集モードの道具のボタン。帯を小さく保つよう、上の帯のボタンより小さくする */
+button.edit-tool {
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+button.edit-tool:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+/* 足す場所を選んでいる間 */
+button.edit-tool.on,
+button.edit-tool.on:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+/* 削除は「足す」と少し離し、文字を赤くする（押す前に見分けられるように） */
+button.edit-tool.danger {
+  margin-left: 6px;
+  color: var(--error);
+}
+/* 要素を足す場所を選んでいる間は、十字のカーソルにする */
+.react-flow.is-placing .react-flow__pane {
+  cursor: crosshair;
+}
 .loop-badge {
   display: flex;
   align-items: center;

@@ -14,15 +14,19 @@ import {
   namesByScenario,
   parseDataCSV,
   parseSlides,
+  removeElements,
   renamesSince,
   runScenarios,
   scenarioRenamesSince,
   setScenarios,
+  toGraph,
   upsertElements,
   validateModel,
   versionOf,
   type ActualData,
+  type ModelElement,
   type ModelJSON,
+  type RemoveTarget,
   type RunData,
 } from "../core/index.js";
 import {
@@ -34,6 +38,7 @@ import {
   type EditResponse,
   type ModelListResponse,
   type ModelResponse,
+  type RemoveRequest,
   type RunResult,
   type ScenarioRunResult,
   type ScenariosRequest,
@@ -42,7 +47,7 @@ import {
 } from "./api.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
-// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、set_scenarios と同じ処理を通す）。
+// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios と同じ処理を通す）。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
 // 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
 
@@ -164,6 +169,51 @@ async function slidesResult(store: ModelStore, name: string, model: ModelJSON, d
   return res;
 }
 
+/** 同じ場所に来た雲をずらす距離（図の雲の幅ほど） */
+const CLOUD_SHIFT = 40;
+
+/**
+ * ストックなどを消して端が空（モデルの外）になったフローの雲を、消した要素のあった場所に置く。
+ * 端の座標がないと、図が仮の並べ方になってしまうため。removeElements の前に呼び、返した関数を後で呼ぶ。
+ * 同じ場所に 2 つ以上の雲が来るとき（ストックに出入りするフローがあったとき）は、重ならないよう、
+ * それぞれのフローの向きに沿って、もう一方の端の側へ雲の幅ほどずらす
+ */
+function keepCloudsInPlace(model: ModelJSON): () => void {
+  // 箱と雲の中心（座標のない要素は、図と同じ仮の並べ方の位置）
+  const centers = new Map<string, [number, number]>();
+  const clouds = new Map<string, [number, number]>();
+  for (const n of toGraph(model).nodes) {
+    const c: [number, number] = [n.x + n.width / 2, n.y + n.height / 2];
+    if (n.cloudOf) clouds.set(`${n.cloudOf.flow.toLowerCase()}:${n.cloudOf.end}`, c);
+    else if (n.element && n.kind !== "VALVE") centers.set(n.element.toLowerCase(), c);
+  }
+  /** フローの端の中心（つながる先の箱か、雲） */
+  const endCenter = (el: ModelElement, end: "from" | "to", name: string | null | undefined) =>
+    (name ? centers.get(name.toLowerCase()) : undefined) ?? clouds.get(`${el.name!.toLowerCase()}:${end}`);
+  const ends = model.elements.filter((e) => e.type === "FLOW" || e.type === "TRANSITION").map((el) => ({ el, from: el.from, to: el.to }));
+  return () => {
+    const placed: { el: ModelElement; end: "from" | "to"; at: [number, number]; toward?: [number, number] }[] = [];
+    for (const { el, ...before } of ends) {
+      if (!model.elements.includes(el)) continue;
+      for (const end of ["from", "to"] as const) {
+        const at = before[end] && el[end] === null ? centers.get(before[end]!.toLowerCase()) : undefined;
+        const other = end === "from" ? "to" : "from";
+        if (at) placed.push({ el, end, at, toward: endCenter(el, other, before[other]) });
+      }
+    }
+    for (const p of placed) {
+      let [x, y] = p.at;
+      // 同じ消した要素の中心（同じ配列）に置く雲がほかにもあるか
+      const shared = placed.filter((q) => q.at === p.at).length > 1;
+      if (shared && p.toward) {
+        const [dx, dy] = [p.toward[0] - x, p.toward[1] - y];
+        const len = Math.hypot(dx, dy);
+        if (len > 0) [x, y] = [x + (dx / len) * CLOUD_SHIFT, y + (dy / len) * CLOUD_SHIFT];
+      }
+      p.el.display = { ...p.el.display, [`${p.end}_coordinates`]: [Math.round(x), Math.round(y)] };
+    }
+  };
+}
 /**
  * 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版。
  * renamed は変えた要素の名前（実際のデータの列名と筋書きの中の名前も戻すため）、renamedScenarios は変えた施策の名前（筋書きの中の名前も戻すため）
@@ -301,10 +351,10 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     current: await loadModelResponse(store, name, historyOf(name).length),
   });
 
-  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "undo") => {
+  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "remove" | "undo") => {
     try {
       checkWriteRequest(req);
-      const body = await readBody<EditRequest & ScenariosRequest & UndoRequest>(req);
+      const body = await readBody<EditRequest & ScenariosRequest & RemoveRequest & UndoRequest>(req);
       if (typeof body?.version !== "string") throw new HttpError(400, "version がありません。");
       const result = await serial(name, async (): Promise<[number, EditResponse | EditErrorResponse]> => {
         const current = await store.readVersioned(name);
@@ -351,6 +401,24 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           const model = await modelResponse(store, name, current.model, version, hist.length);
           return [200, slides.warning ? { report, model, warning: slides.warning } : { report, model }];
         }
+        if (action === "remove") {
+          const targets: RemoveTarget[] = body.elements;
+          if (!Array.isArray(targets) || targets.length === 0) throw new HttpError(400, "elements がありません。");
+          const named = (t: RemoveTarget) => typeof t.name === "string" || (typeof t.from === "string" && typeof t.to === "string");
+          if (!targets.every((t) => t && typeof t === "object" && !Array.isArray(t) && named(t))) {
+            throw new HttpError(400, "elements の中身は、消す要素の name（LINK なら from と to）にしてください。");
+          }
+          // つながるフローは残して端を雲にする（MCP の remove_elements の既定と同じ）。雲は消した要素のあった場所に置く
+          const placeClouds = keepCloudsInPlace(current.model);
+          const report = removeElements(current.model, targets);
+          placeClouds();
+          const version = await store.writeVersioned(name, current.model);
+          // 実際のデータの列と筋書きはそのまま残す（合わなくなったところは「問題」に出る。元に戻せばまた合う）
+          hist.push({ before: current.text, after: version, renamed: [], renamedScenarios: [] });
+          if (hist.length > HISTORY_LIMIT) hist.shift();
+          const model = await modelResponse(store, name, current.model, version, hist.length);
+          return [200, { report, model }];
+        }
         const last = hist.at(-1);
         if (!last) throw new HttpError(400, "元に戻せる変更がありません。");
         if (last.after !== current.version) {
@@ -388,9 +456,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
       sendJSON(res, 200, body);
       return;
     }
-    const write = p.match(/^\/api\/models\/([^/]+)\/(edit|scenarios|undo)$/);
+    const write = p.match(/^\/api\/models\/([^/]+)\/(edit|scenarios|remove|undo)$/);
     if (write) {
-      await handleWrite(req, res, write[1]!, write[2] as "edit" | "scenarios" | "undo");
+      await handleWrite(req, res, write[1]!, write[2] as "edit" | "scenarios" | "remove" | "undo");
       return;
     }
     if (p.startsWith("/api/models/")) {

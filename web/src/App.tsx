@@ -1,10 +1,11 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
-import { fetchList, fetchModel, postEdit, postScenarios, postUndo, type WriteResult } from "./api.js";
+import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatValue, scenarioColor } from "./Chart.js";
 import { Details } from "./Details.js";
 import { Diagram, type ScenarioMarks } from "./Diagram.js";
+import { addElementPatches, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { Problems } from "./Problems.js";
@@ -14,7 +15,7 @@ import { findScenario, scenarioBadges } from "./scenarios.js";
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
 // 画面からの編集（式などの変更、位置の変更、施策の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
-// 図の形を変える操作（配置のドラッグなど）は、上の帯の「編集モード」をオンにしたときだけできる。
+// 図の形を変える操作（配置のドラッグ、要素を足す・消す）は、上の帯の「編集モード」をオンにしたときだけできる。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
@@ -89,6 +90,10 @@ export function App() {
   const [busy, setBusy] = useState(false);
   // 編集モード（図の形を変える操作をできるようにする）。うっかり動かさないよう、開くたびにオフから始める（ブラウザに覚えさせない）
   const [editMode, setEditMode] = useState(false);
+  // 画面で要素を足した・消した（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
+  const [keepView, setKeepView] = useState<string>();
+  // 要素を消したときの知らせ。元に戻したら閉じる
+  const removedNotice = useRef<string>(undefined);
   const [modelsOpen, setModelsOpen] = useState(loadModelsOpen);
   const toggleModels = () =>
     setModelsOpen((open) => {
@@ -323,8 +328,14 @@ export function App() {
       enqueueWrite<string | undefined>(async () => {
         const d = dataRef.current;
         if (!d || !d.undo_available || !sameModel(d.name, currentRef.current)) return undefined;
-        const err = applyWrite(await postUndo(d.name, d.version));
+        const result = await postUndo(d.name, d.version);
+        const err = applyWrite(result);
         if (err) setNotice(err);
+        else if (result.ok) {
+          // 足した・消した要素が戻っても、図の見る場所は動かさない。消したときの知らせは、戻したので閉じる
+          setKeepView(result.data.model.version);
+          setNotice((n) => (n !== undefined && n === removedNotice.current ? undefined : n));
+        }
         return err;
       }, SKIPPED_MESSAGE).then((err) => {
         if (err === SKIPPED_MESSAGE) setNotice(err);
@@ -343,6 +354,60 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [undo]);
+
+  /** 編集モードで、図の at（図の座標）に要素を足し、足した要素を選ぶ。名前は仮の名前で、詳細欄の「編集」で直す */
+  const addElement = useCallback(
+    async (type: NewElementType, at: { x: number; y: number }) => {
+      const model = currentRef.current;
+      let added: string | undefined;
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 仮の名前は、順番が来たときの最新の内容で決める（前の書き込みで足した名前と重ねない）
+        const { name, patches } = addElementPatches(d.model, toGraph(d.model), type, at);
+        const result = await postEdit(d.name, d.version, patches);
+        const err = applyWrite(result);
+        if (!err && result.ok) {
+          added = name;
+          setKeepView(result.data.model.version);
+        }
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+      // 書き込むあいだに別のモデルを開いていたら、選ばない
+      else if (added && currentRef.current === model) selectElement(added);
+    },
+    [applyWrite, enqueueWrite, selectElement],
+  );
+
+  /**
+   * 編集モードで、要素を消す（つながるリンクも消える）。つながっていたフローは残して、端を雲にする。
+   * 消したことでほかに変わったこと（フローの端、式に残った参照、施策の値）は、知らせの帯に出す
+   */
+  const removeElement = useCallback(
+    async (name: string) => {
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 同じ要素を続けて消そうとした（キーの押し直し、ボタンの二度押し）ときは、先に消えているので何もしない
+        if (!d.model.elements.some((e) => e.type !== "LINK" && e.name?.toLowerCase() === name.toLowerCase())) return undefined;
+        const result = await postRemove(d.name, d.version, [{ name }]);
+        const err = applyWrite(result);
+        if (!err && result.ok) {
+          setKeepView(result.data.model.version);
+          const notes = result.data.report?.notes;
+          if (notes?.length) {
+            removedNotice.current = `「${name}」を消しました。${notes.join(" ")}`;
+            setNotice(removedNotice.current);
+          }
+        }
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+      else setSelected((s) => (s && s.toLowerCase() === name.toLowerCase() ? undefined : s));
+    },
+    [applyWrite, enqueueWrite],
+  );
 
   /** 図で動かした位置を保存する */
   const move = useCallback(
@@ -373,6 +438,26 @@ export function App() {
   }, [data, hoveredScenario, scenario?.name]);
   // 名前は大文字と小文字を区別しない（AI が表記だけ変えても選んだままにする）
   const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
+  // 編集モードで消せる要素（足せる種類と同じく、状態と遷移は消さない）。
+  // 施策の編集欄を開いている間は、左に出ていない要素を消さないよう、消せないことにする
+  const removable =
+    editMode && !scenario && selectedEl && selectedEl.type !== "STATE" && selectedEl.type !== "TRANSITION" ? selectedEl.name : undefined;
+
+  // 編集モードで要素を選んでいるときは、Delete キーで消す。
+  // 文字を消すつもりで押されやすい Backspace は使わない。押しっぱなしの繰り返しは無視する。
+  // 入力欄で打っているときと、左の欄（詳細欄の編集のボタンなど）にいるときは消さない（打ちかけの内容を失わないように）
+  useEffect(() => {
+    if (!removable) return;
+    const onKey = (e: KeyboardEvent) => {
+      const inSidebar = e.target instanceof Element && !!e.target.closest(".sidebar");
+      if (e.key === "Delete" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target) && !inSidebar) {
+        e.preventDefault();
+        void removeElement(removable);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [removable, removeElement]);
   const title = data?.model.name || current;
 
   if (EMBED) {
@@ -466,7 +551,11 @@ export function App() {
                 className={`toolbar-button edit-toggle ${editMode ? "on" : ""}`}
                 onClick={() => setEditMode((on) => !on)}
                 aria-pressed={editMode}
-                title={editMode ? "編集モードを終えます（図の要素を動かせなくなります）" : "図の要素をドラッグで動かせるようにします。要素の中身は、左の「編集」でいつでも直せます"}
+                title={
+                  editMode
+                    ? "編集モードを終えます（図の要素を動かす・足す・消すことができなくなります）"
+                    : "図の要素を動かす・足す・消すことができるようにします。要素の中身は、左の「編集」でいつでも直せます"
+                }
               >
                 ✎ 編集モード
               </button>
@@ -518,6 +607,10 @@ export function App() {
                 onMove={move}
                 scenario={scenarioMarks}
                 editable={editMode}
+                keepView={data.version === keepView}
+                onAdd={addElement}
+                removable={removable}
+                onRemove={removeElement}
               />
             </ReactFlowProvider>
           ) : (
