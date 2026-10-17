@@ -1,5 +1,5 @@
 import { ReactFlowProvider } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
 import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatValue, scenarioColor } from "./Chart.js";
@@ -12,6 +12,7 @@ import { findLink, sameName } from "../../src/core/modeljson.js";
 import { Problems } from "./Problems.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
 import { findScenario, scenarioBadges } from "./scenarios.js";
+import { draggedResultsRatio, parseResultsRatio, RESULTS_RATIO } from "./split.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
@@ -77,6 +78,23 @@ function saveModelsOpen(open: boolean) {
   }
 }
 
+/** 下の欄（グラフ・表）の高さの割合。境界線のドラッグで変え、ブラウザに覚えておく（使えなければ毎回はじめの高さ） */
+const RESULTS_RATIO_KEY = "viewer.resultsRatio";
+function loadResultsRatio(): number {
+  try {
+    return parseResultsRatio(localStorage.getItem(RESULTS_RATIO_KEY));
+  } catch {
+    return RESULTS_RATIO;
+  }
+}
+function saveResultsRatio(ratio: number) {
+  try {
+    localStorage.setItem(RESULTS_RATIO_KEY, String(ratio));
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
 export function App() {
   const [list, setList] = useState<ModelListResponse>();
   const [current, setCurrent] = useState(nameFromHash());
@@ -111,6 +129,20 @@ export function App() {
       saveModelsOpen(!open);
       return !open;
     });
+  const [resultsRatio, setResultsRatio] = useState(loadResultsRatio);
+  // 境界線をドラッグしている間（図の欄の大きさが変わっても、図の見る場所を合わせ直さない）
+  const [resizing, setResizing] = useState(false);
+  const resultsRatioRef = useRef(resultsRatio);
+  const resizeStart = useRef<{ y: number; results: number; diagram: number; main: number }>(undefined);
+  const mainRef = useRef<HTMLElement>(null);
+  const diagramRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const endResize = () => {
+    if (!resizeStart.current) return;
+    resizeStart.current = undefined;
+    saveResultsRatio(resultsRatioRef.current);
+    setResizing(false);
+  };
   const dataRef = useRef<ModelResponse>(undefined);
   const currentRef = useRef(current);
   currentRef.current = current;
@@ -630,7 +662,7 @@ export function App() {
         </section>
       </aside>
 
-      <main className="main">
+      <main className="main" ref={mainRef}>
         {/* 色は切り替えボタンが出ているときだけ付ける（ボタンのない画面で、オフに戻せない色を残さない） */}
         <div className={`toolbar ${editMode && graph && data ? "is-editing" : ""}`}>
           <div className="title">
@@ -691,7 +723,7 @@ export function App() {
           </div>
         )}
 
-        <div className="diagram">
+        <div className="diagram" ref={diagramRef}>
           {graph && data ? (
             <ReactFlowProvider>
               <Diagram
@@ -705,6 +737,7 @@ export function App() {
                 scenario={scenarioMarks}
                 editable={editMode}
                 keepView={data.version === keepView}
+                holdView={resizing}
                 onAdd={addElement}
                 selectedLink={selectedLink}
                 onSelectLink={selectLink}
@@ -718,7 +751,35 @@ export function App() {
           )}
         </div>
 
-        <div className="results">
+        {/* 境界線。上下にドラッグして下の欄の高さを変える（狭い画面では出さない） */}
+        <div
+          className={`splitter ${resizing ? "dragging" : ""}`}
+          role="separator"
+          aria-orientation="horizontal"
+          title="上下にドラッグして、図とグラフの高さを変えます"
+          onPointerDown={(e) => {
+            const main = mainRef.current?.getBoundingClientRect();
+            const diagram = diagramRef.current?.getBoundingClientRect();
+            const results = resultsRef.current?.getBoundingClientRect();
+            if (e.button !== 0 || !main || !diagram || !results) return;
+            e.preventDefault();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            resizeStart.current = { y: e.clientY, results: results.height, diagram: diagram.height, main: main.height };
+            setResizing(true);
+          }}
+          onPointerMove={(e) => {
+            const start = resizeStart.current;
+            if (!start) return;
+            resultsRatioRef.current = draggedResultsRatio(start, e.clientY - start.y);
+            setResultsRatio(resultsRatioRef.current);
+          }}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+          // ほかの理由でキャプチャが外れたとき（狭い画面になって境界線が消えたなど）も終える
+          onLostPointerCapture={endResize}
+        />
+
+        <div className="results" ref={resultsRef} style={{ "--results-ratio": resultsRatio } as CSSProperties}>
           {data?.run ? (
             <Chart
               modelName={data.name}

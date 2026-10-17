@@ -1009,9 +1009,25 @@ button.edit-tool.danger {
   color: var(--text-secondary);
 }
 
-/* グラフと表 */
+/* 図と下の欄の境界線。上下にドラッグして下の欄の高さを変える。
+   場所はとらず、下の欄の上の線に重ねる（つかみやすいよう、上下に少し広く） */
+.splitter {
+  position: relative;
+  z-index: 5;
+  flex: none;
+  height: 7px;
+  margin: -3px 0 -4px;
+  cursor: row-resize;
+  touch-action: none;
+}
+.splitter:hover,
+.splitter.dragging {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* グラフと表。高さは右側の欄に対する割合（--results-ratio。境界線のドラッグで変わる） */
 .results {
-  flex: 0 0 38%;
+  flex: 0 1 calc(var(--results-ratio, 0.38) * 100%);
   min-height: 220px;
   background: var(--surface-1);
   border-top: 1px solid var(--border);
@@ -1538,6 +1554,9 @@ button.scenario-chip-button.on {
   .results {
     flex: none;
     height: 50vh;
+  }
+  .splitter {
+    display: none;
   }
   .toolbar {
     flex-direction: column;

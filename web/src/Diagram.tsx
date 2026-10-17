@@ -208,6 +208,8 @@ export interface DiagramProps {
   editable?: boolean;
   /** 画面で要素を足した・消した・名前を変えた直後の図。要素が増減しても（名前を変えるとノードの ID も変わる）、見る場所を合わせ直さない（置いた位置と見た目がずれないように） */
   keepView?: boolean;
+  /** 図と下の欄の境界線をドラッグしている間。図の欄の大きさが変わっても、見る場所を合わせ直さない */
+  holdView?: boolean;
   /** 編集モードで、図の at（図の座標）に要素を足す */
   onAdd?(type: NewElementType, at: Pos): void;
   /** 選んでいるリンク（図で線を押したとき）。選んだ要素と同じく、両端の要素とその線のほかを薄くする */
@@ -475,7 +477,7 @@ export function Diagram(props: DiagramProps) {
         if (placing !== "LINK") props.onAdd?.(placing, flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
       }}
     >
-      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} keepView={props.keepView} />
+      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} keepView={props.keepView} holdView={props.holdView} />
       <Background gap={20} size={1} />
       {props.loop && <LoopBadge loop={props.loop} />}
       {editable && <EditTools placing={placing} linkFrom={linkFrom} onPlace={setPlacing} removable={props.removable} onRemove={props.onRemove} />}
@@ -595,6 +597,7 @@ const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stoc
 /**
  * 表示範囲を合わせ直す。別のモデルを開いたとき、配置を切り替えたとき、要素が増減したとき、図の欄の大きさが変わったとき。
  * 式や値が変わっただけのとき（AI が値を調整したなど）は動かさない。画面で要素を足した・消した・名前を変えたとき（keepView）も、増減では動かさない。
+ * 境界線のドラッグで図の欄の大きさが変わったとき（holdView）も動かさない（ズームや位置を保つ）。
  * 全体が名前の読める大きさで入らないときは、ストックが入るように合わせる（ほかはドラッグやミニマップで見る）。
  */
 function FitOnChange({
@@ -604,6 +607,7 @@ function FitOnChange({
   embed,
   badge,
   keepView,
+  holdView,
 }: {
   modelName: string;
   layoutKey: string;
@@ -611,18 +615,27 @@ function FitOnChange({
   embed?: boolean;
   badge?: boolean;
   keepView?: boolean;
+  holdView?: boolean;
 }) {
   const flow = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
   // 要素の並び（layoutKey）と、それ以外（モデル、図の欄の大きさ）を分けて覚える
   const view = `${modelName}:${Math.round(width / 40)}:${Math.round(height / 40)}`;
-  const last = useRef({ view, layoutKey });
+  const domNode = useStore((s) => s.domNode);
+  const last = useRef({ view, layoutKey, modelName });
+  // 境界線のドラッグで変わった大きさが、まだ届いていないか（届くのはドラッグを終えたあとのこともある）
+  const held = useRef(false);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   useEffect(() => {
     const prev = last.current;
-    last.current = { view, layoutKey };
+    last.current = { view, layoutKey, modelName };
+    if (holdView) held.current = true;
+    const hold = held.current;
+    // ドラッグを終え、図の欄のいまの大きさが届いたら、ふだんどおりに戻す
+    if (!holdView && domNode && domNode.offsetWidth === width && domNode.offsetHeight === height) held.current = false;
+    if (hold && prev.modelName === modelName && prev.layoutKey === layoutKey) return;
     if (prev.view === view && (prev.layoutKey === layoutKey || keepView)) return;
     if (embed) {
       const padding = badge ? { top: BADGE_SPACE, bottom: FIT_PADDING, x: FIT_PADDING } : FIT_PADDING;
@@ -633,6 +646,6 @@ function FitOnChange({
     const fit = fitTargets(nodesRef.current, width, height, FIT_PADDING);
     const targets = fit.nodes.map((n) => ({ id: n.id }));
     requestAnimationFrame(() => flow.fitView({ nodes: targets, padding: FIT_PADDING, maxZoom: fit.maxZoom, minZoom: MIN_FIT_ZOOM, duration: 200 }));
-  }, [view, layoutKey, keepView, flow, embed, badge, width, height]);
+  }, [view, layoutKey, modelName, keepView, holdView, domNode, flow, embed, badge, width, height]);
   return null;
 }
