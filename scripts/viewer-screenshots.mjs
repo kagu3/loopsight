@@ -105,10 +105,10 @@ try {
   await b.clickText(".form-buttons button", "やめる");
 
   // 編集モードをオンにしたところ（あとの場面に出ないよう、撮ったらオフに戻す）
-  await b.clickText(".toolbar-button", "✎ 編集モード");
-  await b.waitFor("document.querySelector('.edit-tools')");
+  await b.clickText(".edit-toggle", "✎ 図を編集");
+  await b.waitFor("document.querySelector('.edit-tools.on')");
   await shot("edit-mode");
-  await b.clickText(".toolbar-button", "✎ 編集モード");
+  await b.clickText(".edit-toggle", "✎ 図を編集");
 
   // グラフとツールチップ
   await b.open(url("predator_prey"));

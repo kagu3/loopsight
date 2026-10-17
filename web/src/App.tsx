@@ -17,7 +17,8 @@ import { draggedResultsRatio, parseResultsRatio, RESULTS_RATIO } from "./split.j
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
 // 画面からの編集（式などの変更、位置の変更、施策の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
-// 図の形を変える操作（配置のドラッグ、要素を足す・消す、線を引く・消す）は、上の帯の「編集モード」をオンにしたときだけできる。
+// 図の形を変える操作（配置のドラッグ、要素を足す・消す、線を引く・消す）は、図の左上の「図を編集」をオンにしたときだけできる。
+// 値（詳細欄の「編集」）や施策は、「図を編集」に関係なく、いつでも直せる（入力欄に打ち込む操作で、元に戻すでも戻せるため）。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
@@ -117,7 +118,7 @@ export function App() {
   const [renamed, setRenamed] = useState<[string, string][]>(NO_RENAMES);
   const [updatedAt, setUpdatedAt] = useState<Date>();
   const [busy, setBusy] = useState(false);
-  // 編集モード（図の形を変える操作をできるようにする）。うっかり動かさないよう、開くたびにオフから始める（ブラウザに覚えさせない）
+  // 編集モード（図の左上の「図を編集」。図の形を変える操作をできるようにする）。うっかり動かさないよう、開くたびにオフから始める（ブラウザに覚えさせない）
   const [editMode, setEditMode] = useState(false);
   // 画面で要素を足した・消した・名前を変えた（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
   const [keepView, setKeepView] = useState<string>();
@@ -623,7 +624,7 @@ export function App() {
               <span>
                 <strong>{selectedLinkEl.from}</strong> → <strong>{selectedLinkEl.to}</strong> のリンク
               </span>
-              <span className="muted">{linkLocked ?? (editMode ? "「削除」か Delete キーで消せます。" : "消すときは、編集モードをオンにします。")}</span>
+              <span className="muted">{linkLocked ?? (editMode ? "「削除」か Delete キーで消せます。" : "消すときは、図の左上の「図を編集」をオンにします。")}</span>
             </p>
           ) : selectedLink && data ? (
             <p className="muted">選んでいたリンクが見つかりません。消された可能性があります。</p>
@@ -663,8 +664,7 @@ export function App() {
       </aside>
 
       <main className="main" ref={mainRef}>
-        {/* 色は切り替えボタンが出ているときだけ付ける（ボタンのない画面で、オフに戻せない色を残さない） */}
-        <div className={`toolbar ${editMode && graph && data ? "is-editing" : ""}`}>
+        <div className="toolbar">
           <div className="title">
             <h2>{title || "モデルを選んでください"}</h2>
             {data?.model.description && (
@@ -675,19 +675,7 @@ export function App() {
           </div>
           {graph && data && (
             <div className="toolbar-right">
-              {graph.missingCoordinates && <span className="note">座標のない要素を仮に並べています。編集モードで動かすと、この配置を保存します</span>}
-              <button
-                className={`toolbar-button edit-toggle ${editMode ? "on" : ""}`}
-                onClick={() => setEditMode((on) => !on)}
-                aria-pressed={editMode}
-                title={
-                  editMode
-                    ? "編集モードを終えます（図の要素を動かす・足す・消す、線を引くことができなくなります）"
-                    : "図の要素を動かす・足す・消す、線を引くことができるようにします。要素の中身は、左の「編集」でいつでも直せます"
-                }
-              >
-                ✎ 編集モード
-              </button>
+              {graph.missingCoordinates && <span className="note">座標のない要素を仮に並べています。「図を編集」で動かすと、この配置を保存します</span>}
               <a
                 className="toolbar-button"
                 href={`?view=present#${encodeURIComponent(data.name)}`}
@@ -723,7 +711,8 @@ export function App() {
           </div>
         )}
 
-        <div className="diagram" ref={diagramRef}>
+        {/* 編集モードの間は、図の窓の色と縁を変える（図の形を変えられると一目でわかるように） */}
+        <div className={`diagram ${editMode && graph && data ? "is-editing" : ""}`} ref={diagramRef}>
           {graph && data ? (
             <ReactFlowProvider>
               <Diagram
@@ -736,6 +725,7 @@ export function App() {
                 onMove={move}
                 scenario={scenarioMarks}
                 editable={editMode}
+                onEditableChange={setEditMode}
                 keepView={data.version === keepView}
                 holdView={resizing}
                 onAdd={addElement}

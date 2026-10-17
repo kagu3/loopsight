@@ -28,7 +28,7 @@
   /* 目立たせるループ（R：強める、B：釣り合わせる） */
   --loop-r: #e34948;
   --loop-b: #2a78d6;
-  /* 編集モードの上の帯 */
+  /* 編集モードの図の窓 */
   --editing-bg: #e3eefb;
 
   /* グラフの系列（dataviz の検証済みパレット、明るい表示） */
@@ -327,13 +327,6 @@ button.link {
 .toolbar .title {
   min-width: 0;
 }
-/* 編集モードの間は帯の色を変え、下の線を太く見せる（編集中だと一目でわかるように）。
-   帯の高さを変えると図の欄の大きさが変わり、表示範囲を合わせ直してしまうので、線は内側の影で太くする */
-.toolbar.is-editing {
-  background: var(--editing-bg);
-  border-bottom-color: var(--accent);
-  box-shadow: inset 0 -1px 0 var(--accent);
-}
 .toolbar .title h2 {
   font-size: 16px;
 }
@@ -408,15 +401,6 @@ a.toolbar-button {
 button:disabled {
   opacity: 0.5;
   cursor: default;
-}
-button.toolbar-button.edit-toggle.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-button.toolbar-button.edit-toggle.on:hover:not(:disabled) {
-  background: var(--accent);
-  filter: brightness(1.1);
 }
 .form-buttons button.primary {
   background: var(--accent);
@@ -590,6 +574,20 @@ button.link.danger-link {
   min-height: 240px;
   background: var(--surface-1);
 }
+/* 編集モードの間は図の窓の色を変え、縁を付ける（編集中だと一目でわかるように）。
+   縁で図の欄の大きさが変わると表示範囲を合わせ直してしまうので、図の上に重ねて描く（押す操作は通す） */
+.diagram.is-editing .react-flow {
+  --xy-background-color: var(--editing-bg);
+  background: var(--editing-bg);
+}
+.diagram.is-editing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  z-index: 10;
+}
 .diagram .react-flow {
   --xy-background-pattern-color-default: var(--grid);
   --xy-controls-button-background-color-default: var(--surface-1);
@@ -597,6 +595,8 @@ button.link.danger-link {
   --xy-controls-button-color-default: var(--text-primary);
   --xy-controls-button-border-color-default: var(--border);
   --xy-edge-stroke-default: var(--link);
+  /* 背景の点の下地（暗い表示では React Flow が自分の色で塗り、編集中の色を隠すため） */
+  --xy-background-color: var(--surface-1);
   background: var(--surface-1);
 }
 
@@ -840,20 +840,41 @@ button.link.danger-link {
 .react-flow__edge-path.edge-flow.is-loop {
   stroke-width: 4;
 }
-/* 編集モードの道具の場所（図の左上）。重なった要素が透けて見えるよう、背景は少し透かす */
+/* 編集モードの切り替えと道具の場所（図の左上）。オンの間だけ枠で囲む。重なった要素が透けて見えるよう、背景は少し透かす。
+   オフでも同じ余白と透明な枠を持たせ、切り替えてもボタンの位置がずれないようにする */
 .edit-tools {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 12px;
-  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
-  border: 1px solid var(--accent);
+  padding: 4px 12px 4px 4px;
+  border: 1px solid transparent;
   border-radius: 8px;
   font-size: 12px;
 }
-.edit-tools-label {
+.edit-tools.on {
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
+  border-color: var(--accent);
+}
+/* 「図を編集」の切り替え。オンの間は塗る */
+button.edit-toggle {
+  font: inherit;
+  font-size: 12px;
   font-weight: 700;
-  color: var(--accent);
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+button.edit-toggle:hover {
+  background: var(--surface-2);
+}
+button.edit-toggle.on,
+button.edit-toggle.on:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 .edit-tools-hint {
   color: var(--text-secondary);

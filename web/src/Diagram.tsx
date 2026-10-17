@@ -30,7 +30,7 @@ import { nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
-// 編集モードのときだけ、箱と雲をドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
+// 編集モード（図の左上の「図を編集」で切り替える）のときだけ、箱と雲をドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
 // 編集モードでは、左上の道具で要素を足す（種類を選んでから図の置きたい場所を押す）・選んだ要素やリンクを消すこともできる。
 // リンクは、要素の縁からドラッグして別の要素の上で離すか、[＋線] を押してから元の要素 → 先の要素の順に押して引く。
 
@@ -206,6 +206,8 @@ export interface DiagramProps {
   scenario?: ScenarioMarks;
   /** 編集モード。オンのときだけ要素を動かせて、図の上に編集の道具の場所を出す。選ぶ・薄くするなどの見るための操作はいつでもできる */
   editable?: boolean;
+  /** 図の左上の「図を編集」を押した。渡したときだけ切り替えを出す（図だけの表示では渡さない） */
+  onEditableChange?(on: boolean): void;
   /** 画面で要素を足した・消した・名前を変えた直後の図。要素が増減しても（名前を変えるとノードの ID も変わる）、見る場所を合わせ直さない（置いた位置と見た目がずれないように） */
   keepView?: boolean;
   /** 図と下の欄の境界線をドラッグしている間。図の欄の大きさが変わっても、見る場所を合わせ直さない */
@@ -480,7 +482,17 @@ export function Diagram(props: DiagramProps) {
       <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} keepView={props.keepView} holdView={props.holdView} />
       <Background gap={20} size={1} />
       {props.loop && <LoopBadge loop={props.loop} />}
-      {editable && <EditTools placing={placing} linkFrom={linkFrom} onPlace={setPlacing} removable={props.removable} onRemove={props.onRemove} />}
+      {props.onEditableChange && (
+        <EditTools
+          editable={!!editable}
+          onEditableChange={props.onEditableChange}
+          placing={placing}
+          linkFrom={linkFrom}
+          onPlace={setPlacing}
+          removable={props.removable}
+          onRemove={props.onRemove}
+        />
+      )}
       {!props.embed && <Controls showInteractive={false} fitViewOptions={VIEWER_FIT} />}
       {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
       {!props.embed && <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} ariaLabel="図の全体" style={{ width: 150, height: 90 }} />}
@@ -489,17 +501,22 @@ export function Diagram(props: DiagramProps) {
 }
 
 /**
- * 編集モードの道具の場所（図の左上）。要素を足すボタン、線（リンク）を引くボタンと、選んだ要素やリンクを消すボタン。
+ * 編集モードの切り替えと道具の場所（図の左上）。オフのときは「図を編集」だけを出す。
+ * オンのときは、要素を足すボタン、線（リンク）を引くボタンと、選んだ要素やリンクを消すボタンを並べる。
  * 図は真ん中に合わせるので、要素は角より真ん中の上にかかりやすい。左下の操作部品と右下のミニマップとも離れている。
  * 足す場所や線の両端を選んでいる間だけ、何をすればよいかを添える（いつもは出さず、帯を小さく保つ）
  */
 function EditTools({
+  editable,
+  onEditableChange,
   placing,
   linkFrom,
   onPlace,
   removable,
   onRemove,
 }: {
+  editable: boolean;
+  onEditableChange(on: boolean): void;
   placing?: NewElementType | "LINK";
   linkFrom?: string;
   onPlace(type: NewElementType | "LINK" | undefined): void;
@@ -513,44 +530,57 @@ function EditTools({
         : "線の元の要素を押してください（Esc でやめる）"
       : placing && "置きたい場所を押してください（Esc でやめる）";
   return (
-    <Panel position="top-left" className="edit-tools">
-      <span className="edit-tools-label" title="要素をドラッグで動かせます。要素の縁からドラッグして別の要素の上で離すと、線（リンク）を引けます">
-        編集モード
-      </span>
-      {(Object.keys(NEW_ELEMENT_LABEL) as NewElementType[]).map((type) => (
-        <button
-          key={type}
-          className={`edit-tool ${placing === type ? "on" : ""}`}
-          aria-pressed={placing === type}
-          onClick={() => onPlace(placing === type ? undefined : type)}
-          title={`${NEW_ELEMENT_LABEL[type]}を足します。押してから、図の置きたい場所を押します`}
-        >
-          ＋{NEW_ELEMENT_LABEL[type]}
-        </button>
-      ))}
+    <Panel position="top-left" className={`edit-tools ${editable ? "on" : ""}`}>
       <button
-        className={`edit-tool ${placing === "LINK" ? "on" : ""}`}
-        aria-pressed={placing === "LINK"}
-        onClick={() => onPlace(placing === "LINK" ? undefined : "LINK")}
-        title="線（リンク）を引きます。押してから、元の要素 → 先の要素の順に押します（要素の縁からドラッグしても引けます）"
-      >
-        ＋線
-      </button>
-      <button
-        className="edit-tool danger"
-        disabled={!removable}
-        onClick={() => removable && onRemove?.()}
+        className={`edit-toggle ${editable ? "on" : ""}`}
+        onClick={() => onEditableChange(!editable)}
+        aria-pressed={editable}
         title={
-          removable
-            ? removable.link
-              ? `リンク「${removable.label}」を消します（Delete キー）`
-              : `「${removable.label}」を消します（つながるリンクも消えます。Delete キー）`
-            : "図で要素か線（リンク）を選ぶと、消せます"
+          editable
+            ? "図の編集を終えます。オンの間は、要素をドラッグで動かしたり、要素の縁からドラッグして別の要素の上で離し、線（リンク）を引いたりできます"
+            : "図の形を変えられるようにします（要素を動かす・足す・消す、線を引く）。値や施策は、オフのままでもいつでも直せます"
         }
       >
-        削除
+        ✎ 図を編集
       </button>
-      {hint && <span className="edit-tools-hint">{hint}</span>}
+      {editable && (
+        <>
+          {(Object.keys(NEW_ELEMENT_LABEL) as NewElementType[]).map((type) => (
+            <button
+              key={type}
+              className={`edit-tool ${placing === type ? "on" : ""}`}
+              aria-pressed={placing === type}
+              onClick={() => onPlace(placing === type ? undefined : type)}
+              title={`${NEW_ELEMENT_LABEL[type]}を足します。押してから、図の置きたい場所を押します`}
+            >
+              ＋{NEW_ELEMENT_LABEL[type]}
+            </button>
+          ))}
+          <button
+            className={`edit-tool ${placing === "LINK" ? "on" : ""}`}
+            aria-pressed={placing === "LINK"}
+            onClick={() => onPlace(placing === "LINK" ? undefined : "LINK")}
+            title="線（リンク）を引きます。押してから、元の要素 → 先の要素の順に押します（要素の縁からドラッグしても引けます）"
+          >
+            ＋線
+          </button>
+          <button
+            className="edit-tool danger"
+            disabled={!removable}
+            onClick={() => removable && onRemove?.()}
+            title={
+              removable
+                ? removable.link
+                  ? `リンク「${removable.label}」を消します（Delete キー）`
+                  : `「${removable.label}」を消します（つながるリンクも消えます。Delete キー）`
+                : "図で要素か線（リンク）を選ぶと、消せます"
+            }
+          >
+            削除
+          </button>
+          {hint && <span className="edit-tools-hint">{hint}</span>}
+        </>
+      )}
     </Panel>
   );
 }
