@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ModelStore, emptyModel, toGraph, upsertElements } from "../src/core/index.js";
 import type { ChangeEvent, EditErrorResponse, EditResponse, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
-import { cellPatchOf } from "../web/src/scenarios.js";
+import { cellPatchOf, newScenarioPatchOf } from "../web/src/scenarios.js";
 import { tempDir } from "./helpers.js";
 
 let dir: string;
@@ -476,6 +476,32 @@ describe("ビューアからの施策の編集", () => {
     expect(clear.body.model.model.scenarios).toEqual([{ name: "高い", values: {} }]);
     const u2 = await post<EditResponse>("/api/models/pop/undo", { version: clear.body.model.version });
     expect(u2.body.model.model.scenarios).toEqual([{ name: "高い", values: { Rate: 0.2 } }]);
+  });
+
+  test("表の見出しで、値を変えない施策を足す・複製する。表とグラフの列になり、どちらも 1 回の「元に戻す」で足す前に戻る", async () => {
+    const store = new ModelStore(dir);
+    const m = population();
+    m.scenarios = [{ name: "高い", description: "増える割合を上げる", values: { Rate: 0.2 } }];
+    await store.write("pop", m);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+
+    const add = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: [newScenarioPatchOf(v0.model, "広告を増やす")] });
+    expect(add.status).toBe(200);
+    expect(add.body.model.model.scenarios).toEqual([m.scenarios[0], { name: "広告を増やす", values: {} }]);
+    // 値を変えない施策も実行し、「何もしない場合」と同じ結果を返す（グラフと表の列になる）
+    expect(add.body.model.scenarios!.map((s) => s.name)).toEqual(["高い", "広告を増やす"]);
+    expect(add.body.model.scenarios![1]!.series).toEqual(add.body.model.run!.series);
+    const u1 = await post<EditResponse>("/api/models/pop/undo", { version: add.body.model.version });
+    expect(u1.body.model.version).toBe(v0.version);
+    expect(u1.body.model.model.scenarios).toEqual(m.scenarios);
+
+    const copy = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: [newScenarioPatchOf(v0.model, "高い（2）", "高い")] });
+    expect(copy.status).toBe(200);
+    expect(copy.body.model.model.scenarios![1]).toEqual({ name: "高い（2）", description: "増える割合を上げる", values: { Rate: 0.2 } });
+    expect(copy.body.model.scenarios![1]!.series).toEqual(copy.body.model.scenarios![0]!.series);
+    const u2 = await post<EditResponse>("/api/models/pop/undo", { version: copy.body.model.version });
+    expect(u2.body.model.version).toBe(v0.version);
+    expect(u2.body.model.model.scenarios).toEqual(m.scenarios);
   });
 
   test("施策の名前を変えると筋書きの中も直し、元に戻すと筋書きも戻す", async () => {

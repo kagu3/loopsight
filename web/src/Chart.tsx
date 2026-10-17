@@ -4,7 +4,21 @@ import type { ActualDataResult, ModelJSON, RunResult, ScenarioPatch, ScenarioRun
 import { sameTime, withActualPoints } from "./actualPoints.js";
 import { renamedName } from "./editing.js";
 import { normalize, normalizeLike, normalizeTogether } from "./normalize.js";
-import { BASELINE_NAME, canEditValue, cellPatchOf, compareRuns, describeRun, resultRows, valueRows, type CompareRun, type CompareRuns, type MatrixCell } from "./scenarios.js";
+import {
+  BASELINE_NAME,
+  canEditValue,
+  cellPatchOf,
+  compareRuns,
+  copyNameOf,
+  describeRun,
+  newScenarioPatchOf,
+  resultRows,
+  scenarioName,
+  valueRows,
+  type CompareRun,
+  type CompareRuns,
+  type MatrixCell,
+} from "./scenarios.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
 // 実行結果の時系列グラフと表。
@@ -606,7 +620,8 @@ function ScenarioLegend({
 /**
  * 施策の中身の表。列は凡例と同じ並び（「何もしない場合」と、重ねている施策）。
  * 行は、どれかの施策で変えた値と、結果（グラフで選んでいる要素の、ある時点の値）。
- * onSave があれば、変えた値の行の施策の列（「—」も）をその場で直せる。「何もしない場合」の列と結果の行は直せない
+ * onSave があれば、変えた値の行の施策の列（「—」も）をその場で直せる。「何もしない場合」の列と結果の行は直せない。
+ * また、見出しの右端の「＋」で施策を足し、施策の見出しの「複製」で同じ値の施策を作れる（名前を付けて Enter で保存する）
  */
 function ScenarioMatrix({
   compare,
@@ -636,7 +651,56 @@ function ScenarioMatrix({
   const results = resultRows(runs, times, visible, at);
   const folding = rows.length > MATRIX_ROWS;
   const shown = folding && !showAll ? rows.slice(0, MATRIX_ROWS) : rows;
-  const colSpan = runs.length + 1;
+  // 名前を付けている途中の、足す施策の列。source は複製元の施策の名前（「＋」で足すときは undefined）
+  const [adding, setAdding] = useState<{ source?: string; initial: string }>();
+  const tableRef = useRef<HTMLTableElement>(null);
+  // 仮の列を閉じたら、キーボードで続けられるようフォーカスを移す。保存したら表に、取りやめたら押した「＋」か「複製」に戻す。
+  // 移すのは、フォーカスがまだ名前の欄（か、欄が消えて body）にあるときだけ。ほかを押して欄から外れたときは動かさない
+  const refocus = useRef<{ cancel: boolean; source?: string } | undefined>(undefined);
+  useEffect(() => {
+    const target = refocus.current;
+    if (adding || !target) return;
+    refocus.current = undefined;
+    const table = tableRef.current;
+    const a = document.activeElement;
+    if (!table || !(!a || a === document.body || table.contains(a))) return;
+    const button = !target.cancel
+      ? undefined
+      : target.source === undefined
+        ? table.querySelector<HTMLButtonElement>(".matrix-add button")
+        : [...table.querySelectorAll<HTMLButtonElement>("button.matrix-copy")].find((b) => b.dataset.scenario === target.source);
+    (button ?? table).focus({ preventScroll: true });
+  }, [adding]);
+  // 見出しの右端の「＋」（足す途中は名前の欄）の列。本文の行にも空のマスを置き、行の線を右端まで引く
+  const extraCol = onSave ? 1 : 0;
+  const colSpan = runs.length + 1 + extraCol;
+  const sourceIndex = adding?.source === undefined ? -1 : runs.findIndex((r) => !r.baseline && r.name === adding.source);
+  // 施策はグラフに重ねられる数（色の数）まで。名前のない施策や実行できなかった施策も 1 つに数える
+  const savedNames = (model.scenarios ?? []).map(scenarioName);
+  const full = savedNames.length >= MAX_SERIES;
+  const fullNote = `グラフに重ねられる施策は ${MAX_SERIES} つまでです。凡例の施策を押して、左の欄で使わない施策を消すと足せます`;
+  const startAdding = (source?: string) => setAdding({ source, initial: source === undefined ? "" : copyNameOf(source, savedNames) });
+  // 名前を決めたら、施策を足して保存する。保存できたら仮の列を閉じ（足した施策の列に替わる）、表にフォーカスを移す
+  const saveNew = async (name: string): Promise<string | undefined> => {
+    // 名前を付けているあいだに、ほかのところ（AI など）で施策が足されて上限に達したら送らない
+    if (full) return fullNote;
+    let patch: ScenarioPatch;
+    try {
+      patch = newScenarioPatchOf(model, name, adding?.source);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    const err = onSave ? await onSave(patch) : undefined;
+    if (!err) {
+      refocus.current = { cancel: false };
+      setAdding(undefined);
+    }
+    return err;
+  };
+  const cancelAdding = () => {
+    refocus.current = { cancel: true, source: adding?.source };
+    setAdding(undefined);
+  };
   // マスに入れた文字を、その施策の変更にして送る。書けない値ならエラーの文を返す（送らない）
   const saveValue = (r: CompareRun, element: string) => async (text: string) => {
     let patch: ScenarioPatch | undefined;
@@ -649,7 +713,7 @@ function ScenarioMatrix({
   };
   return (
     <div className="scenario-matrix-scroll">
-      <table className="scenario-matrix" aria-label="施策の中身" tabIndex={-1}>
+      <table className="scenario-matrix" aria-label="施策の中身" tabIndex={-1} ref={tableRef}>
         <thead>
           <tr>
             <th scope="col" className="matrix-corner">
@@ -657,9 +721,34 @@ function ScenarioMatrix({
             </th>
             {runs.map((r, k) => (
               <th key={k} scope="col" title={`${r.name}\n${describeRun(r)}`}>
-                <div className="scenario-chip">{chip(r, k)}</div>
+                <div className="scenario-chip">
+                  {chip(r, k)}
+                  {onSave && !r.baseline && !adding && (
+                    <button
+                      className="matrix-copy"
+                      data-scenario={r.name}
+                      onClick={() => !full && startAdding(r.name)}
+                      aria-disabled={full}
+                      aria-label={`施策「${r.name}」を複製`}
+                      title={full ? fullNote : "同じ値の施策を作ります"}
+                    >
+                      複製
+                    </button>
+                  )}
+                </div>
               </th>
             ))}
+            {adding ? (
+              <NewScenarioHeader key={adding.source ?? ""} initial={adding.initial} copy={adding.source !== undefined} onSave={saveNew} onCancel={cancelAdding} />
+            ) : (
+              onSave && (
+                <th scope="col" className="matrix-add">
+                  <button onClick={() => !full && startAdding()} aria-disabled={full} aria-label="施策を足す" title={full ? fullNote : "施策を足します（名前を付けて Enter）"}>
+                    ＋
+                  </button>
+                </th>
+              )
+            )}
           </tr>
         </thead>
         <tbody>
@@ -695,6 +784,7 @@ function ScenarioMatrix({
                   </td>
                 ),
               )}
+              {adding ? <NewScenarioCell value={sourceIndex > 0 ? row.cells[sourceIndex]?.value : undefined} /> : extraCol > 0 && <td />}
             </tr>
           ))}
           {folding && (
@@ -720,11 +810,96 @@ function ScenarioMatrix({
                   {c.change && <small className="matrix-change">{c.change}</small>}
                 </td>
               ))}
+              {/* 足す施策の結果は、保存して実行するまでわからない */}
+              {adding ? <td className="matrix-same" /> : extraCol > 0 && <td />}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * 施策の中身の表で、足す施策の列の見出し。名前を入れて Enter（か欄から外れる）で保存し、Esc で取りやめる。
+ * 名前が空のまま欄から外れたときも取りやめる。名前が使えない・保存に失敗したときは、その場で知らせて列を残す（保存しない）
+ */
+function NewScenarioHeader({ initial, copy, onSave, onCancel }: { initial: string; copy: boolean; onSave(name: string): Promise<string | undefined>; onCancel(): void }) {
+  const [name, setName] = useState(initial);
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  // 保存しているあいだと閉じたあとは、欄から外れたこと（blur）で、もう一度送らない
+  const busy = useRef(false);
+  const closed = useRef(false);
+  const commit = async () => {
+    if (busy.current || closed.current) return;
+    busy.current = true;
+    setSaving(true);
+    const err = await onSave(name);
+    busy.current = false;
+    // 保存できたら、この列は消える（足した施策の列に替わる）
+    if (err) {
+      setSaving(false);
+      setError(err);
+    } else closed.current = true;
+  };
+  const cancel = () => {
+    if (busy.current) return;
+    closed.current = true;
+    onCancel();
+  };
+  return (
+    <th scope="col" className="matrix-new">
+      <input
+        className="matrix-input matrix-name"
+        value={name}
+        size={Math.min(Math.max(name.length + 2, 12), 28)}
+        placeholder={copy ? "複製した施策の名前" : "新しい施策の名前"}
+        onChange={(e) => {
+          setName(e.target.value);
+          setError(undefined);
+        }}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+          }
+        }}
+        onBlur={() => {
+          // 名前が空なら取りやめる。知らせを出しているあいだは、外れても送り直さない（直して Enter か、Esc でやめる）
+          if (!name.trim()) cancel();
+          else if (!error) void commit();
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        readOnly={saving}
+        autoFocus
+        aria-label={copy ? "複製した施策の名前" : "足す施策の名前"}
+        aria-invalid={!!error}
+        title="Enter で決める、Esc でやめる"
+      />
+      {error && (
+        <span className="matrix-error" role="alert">
+          {error}
+        </span>
+      )}
+    </th>
+  );
+}
+
+/** 足す施策の列の、変えた値のマス。複製なら複製元の値、「＋」で足すなら「—」。名前を決めて保存してから直せる */
+function NewScenarioCell({ value }: { value?: string }) {
+  return value === undefined ? (
+    <td className="matrix-same" title="この施策では変えていません">
+      —
+    </td>
+  ) : (
+    <td className="matrix-new-value" title={value}>
+      {value}
+    </td>
   );
 }
 

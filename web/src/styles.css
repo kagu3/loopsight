@@ -1497,6 +1497,56 @@ input.matrix-input:focus {
   font-weight: 400;
   text-align: left;
 }
+/* 見出しの「複製」と右端の「＋」。普段は控えめにし、「複製」はカーソルを乗せた見出しにだけ出す */
+button.matrix-copy,
+.scenario-matrix .matrix-add button {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+}
+/* 幅は取っておき、透明にするだけ（カーソルを乗せるたびに列の幅が変わらないように。フォーカスは受けられる） */
+button.matrix-copy {
+  opacity: 0;
+}
+.scenario-matrix thead th:hover button.matrix-copy,
+.scenario-matrix thead th:focus-within button.matrix-copy {
+  opacity: 1;
+}
+.scenario-matrix .matrix-add button {
+  font-size: 14px;
+}
+button.matrix-copy:hover:not([aria-disabled="true"]),
+.scenario-matrix .matrix-add button:hover:not([aria-disabled="true"]) {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.scenario-matrix thead th:hover button.matrix-copy[aria-disabled="true"],
+.scenario-matrix thead th:focus-within button.matrix-copy[aria-disabled="true"],
+.scenario-matrix .matrix-add button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* 名前を付けている途中の、足す施策の列 */
+.scenario-matrix thead th.matrix-new {
+  max-width: none;
+  overflow: visible;
+  white-space: normal;
+}
+input.matrix-input.matrix-name {
+  font-family: inherit;
+  text-align: left;
+}
+.scenario-matrix .matrix-new-value {
+  color: var(--text-secondary);
+}
 .scenario-matrix .matrix-empty,
 .scenario-matrix .matrix-fold {
   text-align: left;

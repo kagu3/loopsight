@@ -235,15 +235,26 @@ function checkRows(rows: ValueRow[]): ValueRow[] {
 }
 
 /**
+ * 施策の名前に使えない理由。空、「何もしない場合」、ほかの施策（others）と同じ名前。使えれば undefined。
+ * 比べ方はサーバーの setScenarios と同じ（大文字と小文字、前後の空白を区別しない）
+ */
+export function scenarioNameProblem(name: string, others: string[]): string | undefined {
+  const n = name.trim();
+  if (!n) return "施策の名前が空です。";
+  if (nameKey(n) === nameKey(BASELINE_NAME)) return `「${BASELINE_NAME}」は何も変えない実行の名前なので、施策には使えません。`;
+  if (others.some((o) => nameKey(o) === nameKey(n))) return `「${n}」という名前の施策がすでにあります。`;
+  return undefined;
+}
+
+/**
  * 編集欄の中身から、送る変更を組み立てる。変えた項目だけにする（値は変えた行だけ、消した行は null）。
  * original は直す施策の名前（足すときは undefined）。others はほかの施策の名前（名前の重なりを確かめる）。
  * 何も変えていなければ undefined。誤りがあれば例外を投げる
  */
 export function scenarioPatchOf(original: string | undefined, before: ScenarioForm, after: ScenarioForm, others: string[]): ScenarioPatch | undefined {
   const name = after.name.trim();
-  if (!name) throw new Error("施策の名前が空です。");
-  if (nameKey(name) === nameKey(BASELINE_NAME)) throw new Error(`「${BASELINE_NAME}」は何も変えない実行の名前なので、施策には使えません。`);
-  if (others.some((n) => nameKey(n) === nameKey(name))) throw new Error(`「${name}」という名前の施策がすでにあります。`);
+  const problem = scenarioNameProblem(name, others);
+  if (problem) throw new Error(problem);
   const rows = checkRows(after.rows);
   const description = after.description.trim();
 
@@ -357,4 +368,32 @@ export function cellPatchOf(model: ModelJSON, scenario: string, element: string,
   const problem = valueProblem(model, value);
   if (problem) throw new Error(problem);
   return { name: scenario, values: { [element]: parseEquation(value) } };
+}
+
+// ここから、施策の中身の表の見出しで、施策を足す・複製するときの計算。送る変更は施策の編集欄で足すときと同じ形
+
+/** 複製するときに最初に入れておく名前。「人を増やさない（2）」のように、まだ使っていない番号を付ける */
+export function copyNameOf(name: string, others: string[]): string {
+  // 「A（2）」や「A (2)」を複製したときは「A（2）（2）」ではなく「A（3）」にする
+  const base = name.trim().replace(/\s*(（\d+）|\(\d+\))$/, "");
+  for (let n = 2; ; n++) {
+    const candidate = `${base}（${n}）`;
+    if (!others.some((o) => nameKey(o) === nameKey(candidate))) return candidate;
+  }
+}
+
+/**
+ * 表の見出しで足す施策の変更。source（複製元の施策の名前）があれば、その値と説明を写す。
+ * 値のない施策も送る（サーバーは受け付け、「何もしない場合」と同じ結果の列になる）。名前が使えなければ例外を投げる
+ */
+export function newScenarioPatchOf(model: ModelJSON, name: string, source?: string): ScenarioPatch {
+  const problem = scenarioNameProblem(name, (model.scenarios ?? []).map(scenarioName));
+  if (problem) throw new Error(problem);
+  const from = source === undefined ? undefined : findScenario(model, source);
+  if (source !== undefined && !from) throw new Error(`複製する施策「${source}」が見つかりません。ほかのところ（AI など）で名前が変わったか、消された可能性があります。`);
+  const patch: ScenarioPatch = { name: name.trim(), values: { ...(from?.values ?? {}) } };
+  // 説明は、施策の編集欄と同じく、空でなければ送る
+  const description = from?.description?.trim();
+  if (description) patch.description = description;
+  return patch;
 }

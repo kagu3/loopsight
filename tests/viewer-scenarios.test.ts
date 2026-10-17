@@ -6,13 +6,16 @@ import {
   cellPatchOf,
   changeLabel,
   compareRuns,
+  copyNameOf,
   currentValueOf,
   describeRun,
   findScenario,
+  newScenarioPatchOf,
   numberOf,
   resultRows,
   scenarioBadges,
   scenarioFormOf,
+  scenarioNameProblem,
   scenarioPatchOf,
   scenarioValueOf,
   valueRows,
@@ -344,5 +347,62 @@ describe("施策の中身の表で値を直す（全角と、直せる行）", (
     expect(canEditValue(model, "人口（千人）")).toBe(true);
     expect(canEditValue(model, "Table")).toBe(false);
     expect(canEditValue(model, "Nope")).toBe(false);
+  });
+});
+
+describe("施策の中身の表の見出しで施策を足す・複製する", () => {
+  const model: ModelJSON = {
+    elements: [
+      { type: "STOCK", name: "Pop", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } },
+    ],
+    scenarios: [
+      { name: "人を増やさない", description: " 採用を止める ", values: { Rate: 0.05, Pop: 80 } },
+      { name: "人を増やさない（2）", values: {} },
+      { values: { Rate: 0.3 } },
+    ],
+  };
+  const others = (model.scenarios ?? []).map((s, i) => s.name ?? `scenario ${i + 1}`);
+
+  test("名前は、空・「何もしない場合」・ほかの施策と同じなら使えない。比べ方はサーバーと同じ（大文字と小文字、前後の空白を区別しない）", () => {
+    expect(scenarioNameProblem("  ", others)).toMatch(/空です/);
+    expect(scenarioNameProblem(` ${BASELINE_NAME} `, others)).toMatch(/何も変えない実行の名前/);
+    expect(scenarioNameProblem(" 人を増やさない ", others)).toMatch(/「人を増やさない」という名前の施策がすでにあります/);
+    expect(scenarioNameProblem("Scenario 3", others)).toMatch(/すでにあります/);
+    expect(scenarioNameProblem("広告を増やす", others)).toBeUndefined();
+  });
+
+  test("複製するときの名前は、まだ使っていない番号を付ける。番号つきの施策を複製しても番号を重ねない（全角・半角のかっこ）", () => {
+    expect(copyNameOf("人を増やさない", others)).toBe("人を増やさない（3）");
+    expect(copyNameOf("人を増やさない（2）", others)).toBe("人を増やさない（3）");
+    expect(copyNameOf("scenario 3", others)).toBe("scenario 3（2）");
+    // 半角の「 (2)」も番号として付け直す
+    expect(copyNameOf("人を増やさない (2)", others)).toBe("人を増やさない（3）");
+  });
+
+  test("「＋」で足す施策は、値を変えない施策として送る。名前の前後の空白は除く", () => {
+    expect(newScenarioPatchOf(model, " 広告を増やす ")).toEqual({ name: "広告を増やす", values: {} });
+  });
+
+  test("複製する施策は、元の値と説明を写す（説明は編集欄と同じく前後の空白を除き、空なら送らない）", () => {
+    expect(newScenarioPatchOf(model, "人を増やさない（3）", "人を増やさない")).toEqual({
+      name: "人を増やさない（3）",
+      description: "採用を止める",
+      values: { Rate: 0.05, Pop: 80 },
+    });
+    expect(newScenarioPatchOf(model, "コピー", "scenario 3")).toEqual({ name: "コピー", values: { Rate: 0.3 } });
+  });
+
+  test("名前が使えないとき、複製元が見つからないときは送らない", () => {
+    expect(() => newScenarioPatchOf(model, "")).toThrow(/空です/);
+    expect(() => newScenarioPatchOf(model, "人を増やさない（2）", "人を増やさない")).toThrow(/すでにあります/);
+    expect(() => newScenarioPatchOf(model, "新しい", "消えた施策")).toThrow(/「消えた施策」が見つかりません/);
+  });
+
+  test("値を変えない施策も、表の列になる（どの行も「—」）", () => {
+    const c = compareRuns(run, [scenario("a"), scenario("空", { values: {}, series: run.series })], 8);
+    expect(c.runs.map((r) => r.name)).toEqual([BASELINE_NAME, "a", "空"]);
+    const m: ModelJSON = { elements: [{ type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } }] };
+    expect(valueRows(m, c.runs).map((r) => r.cells.map((x) => x.value ?? "—"))).toEqual([["0.1", "0.2", "—"]]);
   });
 });
