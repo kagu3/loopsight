@@ -210,14 +210,23 @@ try {
   // シナリオの凡例を開いて、シナリオの中身（変えた値と結果）の表にしたところ。グラフにカーソルを乗せ、その時点の結果を出す（撮ったら閉じておく）
   await b.clickText(".scenario-toggle", "▸ 中身を見る");
   await b.waitFor("document.querySelector('.scenario-matrix')");
+  // 表のぶんグラフが下に押し出されるので、境界線を上にドラッグして下の欄を高くし、ツールチップが全部見えるようにする
+  // （100px は今の表の行の数に合わせたもの。表の行が増えたら見直す）
+  const splitter = await b.rectOf(".splitter");
+  const sy = splitter.y + splitter.height / 2;
+  await b.send("Input.dispatchMouseEvent", { type: "mousePressed", x: splitter.x + 40, y: sy, button: "left", clickCount: 1 });
+  await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: splitter.x + 40, y: sy - 100, button: "left" });
+  await b.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: splitter.x + 40, y: sy - 100, button: "left", clickCount: 1 });
   await sleep(300);
   const matrixCell = await b.rectOf(".compare-chart");
-  // 表が高くなるとグラフの下半分が画面の外に出るので、画面に見えている部分の真ん中に乗せる
+  // それでもグラフの下半分は画面の外に出るので、画面に見えている部分の真ん中に乗せる
   await b.hover(matrixCell.x + matrixCell.width * 0.7, matrixCell.y + Math.min(matrixCell.height, H - matrixCell.y) * 0.5);
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("scenario-matrix", ".results");
   await b.hover(W - 4, H - 4);
   await b.clickText(".scenario-toggle", "▾ 中身を閉じる");
+  // 変えた高さは覚えられるので、あとの場面のために消しておく
+  await b.evaluate("localStorage.removeItem('viewer.resultsRatio')");
 
   // 発表モード（MCP の set_slides で保存した筋書きを ?view=present で見せる）。比較のスライドを 16:9 で撮る
   await store.writeSlides(

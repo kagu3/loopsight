@@ -1511,13 +1511,22 @@ button.matrix-copy,
   line-height: 18px;
   cursor: pointer;
 }
-/* 幅は取っておき、透明にするだけ（カーソルを乗せるたびに列の幅が変わらないように。フォーカスは受けられる） */
+/* 幅は取らず、見出しの右端に重ねる（カーソルを乗せても列の幅が変わらないように）。名前に重なっても読めるよう背景を付ける。
+   見えないときは押せない（タッチ端末で、見えない「複製」を押さないように）。キーボードのフォーカスは受けられる */
 button.matrix-copy {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  border-color: var(--border);
+  background: var(--surface-1);
   opacity: 0;
+  pointer-events: none;
 }
 .scenario-matrix thead th:hover button.matrix-copy,
 .scenario-matrix thead th:focus-within button.matrix-copy {
   opacity: 1;
+  pointer-events: auto;
 }
 .scenario-matrix .matrix-add button {
   font-size: 14px;
@@ -1528,11 +1537,20 @@ button.matrix-copy:hover:not([aria-disabled="true"]),
   background: var(--surface-2);
   color: var(--text-primary);
 }
-.scenario-matrix thead th:hover button.matrix-copy[aria-disabled="true"],
-.scenario-matrix thead th:focus-within button.matrix-copy[aria-disabled="true"],
 .scenario-matrix .matrix-add button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* 押せない「複製」は名前の上に重なるので、透けさせず（下の名前と文字が混ざらないように）、文字の色だけ薄くする */
+.scenario-matrix thead th:hover button.matrix-copy[aria-disabled="true"],
+.scenario-matrix thead th:focus-within button.matrix-copy[aria-disabled="true"] {
+  color: color-mix(in srgb, var(--text-muted) 50%, var(--surface-1));
+  cursor: not-allowed;
+}
+/* 見出しのはみ出しは切るので、フォーカスの枠はボタンの内側に描く */
+button.matrix-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 /* 名前を付けている途中の、足すシナリオの列 */
 .scenario-matrix thead th.matrix-new {
