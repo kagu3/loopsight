@@ -196,16 +196,7 @@ try {
   await sleep(200);
   await shot("scenario-badges");
 
-  // シナリオの凡例を押して、左の欄でシナリオを直しているところ（保存せずに閉じる）
   await b.hover(W - 4, H - 4);
-  // シナリオ名の横に変えた値の数も出るので、名前の部分で探す
-  await b.evaluate("[...document.querySelectorAll('.scenario-chip-button')].find((e) => e.querySelector('.legend-name')?.textContent === '移民を増やす').click()");
-  await b.waitFor("document.querySelector('.scenario-table input')");
-  await b.evaluate("(() => { const t = document.querySelector('.scenario-table input'); t.focus(); t.select(); })()");
-  await b.send("Input.insertText", { text: "80" });
-  await sleep(200);
-  await shot("scenario-edit");
-  await b.clickText(".form-buttons button", "やめる");
 
   // シナリオの凡例を開いて、シナリオの中身（変えた値と結果）の表にしたところ。グラフにカーソルを乗せ、その時点の結果を出す（撮ったら閉じておく）
   await b.clickText(".scenario-toggle", "▸ 中身を見る");
@@ -224,6 +215,27 @@ try {
   await b.waitFor("document.querySelector('.tooltip')");
   await shot("scenario-matrix", ".results");
   await b.hover(W - 4, H - 4);
+
+  // 表の見出しのシナリオの名前を押して、吹き出しで名前を変えているところ（保存せずに閉じる）。
+  // シナリオ名の横に変えた値の数も出るので、名前の部分で探す
+  const pressScenario = (name) =>
+    b.evaluate(`[...document.querySelectorAll('.scenario-matrix .scenario-chip-button')].find((e) => e.querySelector('.legend-name')?.textContent === ${JSON.stringify(name)}).click()`);
+  await pressScenario("移民を増やす");
+  await b.waitFor("document.activeElement?.closest('.scenario-menu')");
+  await b.send("Input.insertText", { text: "移民を大きく増やす" });
+  await sleep(200);
+  await shot("scenario-edit", ".results");
+
+  // 吹き出しの「説明を直す」で、左の欄でシナリオの説明を直しているところ（保存せずに閉じる）
+  await b.clickText(".scenario-menu button", "説明を直す");
+  await b.waitFor("document.querySelector('.sidebar textarea')");
+  await b.evaluate("(() => { const t = document.querySelector('.sidebar textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()");
+  await b.send("Input.insertText", { text: "。毎年の受け入れを 2.5 倍にする" });
+  // 表のマスにカーソルが乗ったままにならないよう、左の欄の空いているところに移す
+  await b.hover(150, 400);
+  await sleep(200);
+  await shot("scenario-description");
+  await b.clickText(".form-buttons button", "やめる");
   await b.clickText(".scenario-toggle", "▾ 中身を閉じる");
   // 変えた高さは覚えられるので、あとの場面のために消しておく
   await b.evaluate("localStorage.removeItem('viewer.resultsRatio')");

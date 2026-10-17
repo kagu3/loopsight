@@ -167,7 +167,7 @@ export function resultRows(runs: CompareRun[], times: number[], elements: string
   });
 }
 
-// ここから、シナリオの編集欄（ScenarioEditor）の計算。送る変更は MCP の set_scenarios と同じ形にする
+// ここから、シナリオを直すとき（表の見出しの吹き出しと、左の欄の説明）の計算。送る変更は MCP の set_scenarios と同じ形にする
 
 /** 名前は大文字と小文字、前後の空白を区別しない（サーバーの sameName と同じ） */
 export const nameKey = (name: string) => name.trim().toLowerCase();
@@ -195,48 +195,6 @@ export function currentValueOf(model: ModelJSON, name: string): string | undefin
   return v === undefined ? undefined : String(v);
 }
 
-/** 変える値の表の 1 行。value は入れた文字のまま */
-export interface ValueRow {
-  element: string;
-  value: string;
-}
-
-export interface ScenarioForm {
-  name: string;
-  description: string;
-  rows: ValueRow[];
-}
-
-/**
- * シナリオの編集欄のはじめの中身。シナリオがなければ（足すとき）空。
- * model を渡すと、行の要素名をモデルの表記にそろえる（手で書いたファイルの "rate" を "Rate" に。要素を選ぶ欄で選べるように）
- */
-export function scenarioFormOf(s: Scenario | undefined, name = "", model?: ModelJSON): ScenarioForm {
-  const notation = (key: string) => model?.elements.find((e) => e.type !== "LINK" && e.name && nameKey(e.name) === nameKey(key))?.name ?? key;
-  return {
-    name: s?.name ?? name,
-    description: s?.description ?? "",
-    rows: Object.entries(s?.values ?? {}).map(([element, v]) => ({ element: notation(element), value: String(v) })),
-  };
-}
-
-/** 表から空の行を除き、誤りがあれば知らせる。同じ要素は 1 行だけ */
-function checkRows(rows: ValueRow[]): ValueRow[] {
-  const out: ValueRow[] = [];
-  const seen = new Set<string>();
-  for (const [i, r] of rows.entries()) {
-    const element = r.element.trim();
-    const value = r.value.trim();
-    if (!element && !value) continue;
-    if (!element) throw new Error(`${i + 1} 行目の要素を選んでください。`);
-    if (!value) throw new Error(`「${element}」の値が空です。変えないなら、その行を消してください。`);
-    if (seen.has(nameKey(element))) throw new Error(`「${element}」が 2 行あります。1 つのシナリオの中で、同じ要素は 1 行にしてください。`);
-    seen.add(nameKey(element));
-    out.push({ element, value });
-  }
-  return out;
-}
-
 /**
  * シナリオの名前に使えない理由。空、「元のモデル」、ほかのシナリオ（others）と同じ名前。使えれば undefined。
  * 比べ方はサーバーの setScenarios と同じ（大文字と小文字、前後の空白を区別しない）
@@ -250,37 +208,27 @@ export function scenarioNameProblem(name: string, others: string[]): string | un
 }
 
 /**
- * 編集欄の中身から、送る変更を組み立てる。変えた項目だけにする（値は変えた行だけ、消した行は null）。
- * original は直すシナリオの名前（足すときは undefined）。others はほかのシナリオの名前（名前の重なりを確かめる）。
- * 何も変えていなければ undefined。誤りがあれば例外を投げる
+ * 表の見出しの吹き出しで、シナリオの名前を変えるときの変更。名前が同じなら（何も変えていなければ）undefined。
+ * 大文字と小文字だけを変えるときも送る。名前が使えない・シナリオが見つからなければ例外を投げる
  */
-export function scenarioPatchOf(original: string | undefined, before: ScenarioForm, after: ScenarioForm, others: string[]): ScenarioPatch | undefined {
-  const name = after.name.trim();
-  const problem = scenarioNameProblem(name, others);
+export function renamePatchOf(model: ModelJSON, name: string, text: string): ScenarioPatch | undefined {
+  const scenarios = model.scenarios ?? [];
+  const s = findScenario(model, name);
+  if (!s) throw new Error(`シナリオ「${name}」が見つかりません。ほかのところ（AI など）で名前が変わったか、消された可能性があります。`);
+  const original = scenarioName(s, scenarios.indexOf(s));
+  const next = text.trim();
+  if (next === original) return undefined;
+  const others = scenarios.map(scenarioName).filter((_, i) => scenarios[i] !== s);
+  const problem = scenarioNameProblem(next, others);
   if (problem) throw new Error(problem);
-  const rows = checkRows(after.rows);
-  const description = after.description.trim();
+  return { name: original, rename_to: next };
+}
 
-  if (original === undefined) {
-    const patch: ScenarioPatch = { name, values: Object.fromEntries(rows.map((r) => [r.element, parseEquation(r.value)])) };
-    if (description) patch.description = description;
-    return patch;
-  }
-
-  const patch: ScenarioPatch = { name: original };
-  if (name !== original) patch.rename_to = name;
-  if (description !== before.description.trim()) patch.description = description || null;
-  const old = new Map(before.rows.map((r) => [nameKey(r.element), r]));
-  const values: Record<string, Equation | null> = {};
-  for (const r of rows) {
-    const prev = old.get(nameKey(r.element));
-    // 要素の表記だけを変えたとき（rate → Rate）も送る（サーバーが要素の表記にそろえる）
-    if (!prev || prev.value.trim() !== r.value || prev.element !== r.element) values[r.element] = parseEquation(r.value);
-  }
-  const kept = new Set(rows.map((r) => nameKey(r.element)));
-  for (const r of before.rows) if (!kept.has(nameKey(r.element))) values[r.element] = null;
-  if (Object.keys(values).length) patch.values = values;
-  return Object.keys(patch).length > 1 ? patch : undefined;
+/** シナリオの説明（左の欄）。直していなければ undefined。空にしたら説明を消す（null） */
+export function descriptionPatchOf(name: string, before: string, after: string): ScenarioPatch | undefined {
+  const description = after.trim();
+  if (description === before.trim()) return undefined;
+  return { name, description: description || null };
 }
 
 // ここから、シナリオに注目している間（凡例にカーソルを乗せている・左の欄で直している）に、図の変えた要素に付ける札の計算
@@ -311,7 +259,7 @@ function badgeValue(text: string): string {
 
 /**
  * シナリオで変えた要素の札。要素名（nameKey）→ 札。
- * 値はシナリオに保存してある値（編集欄で入れている途中の値ではない）。モデルにない要素は図に出ないので除く
+ * 値はシナリオに保存してある値（表のマスで入れている途中の値ではない）。モデルにない要素は図に出ないので除く
  */
 export function scenarioBadges(model: ModelJSON, values: Record<string, Equation>): Map<string, ScenarioBadge> {
   const out = new Map<string, ScenarioBadge>();
@@ -328,7 +276,7 @@ export function scenarioBadges(model: ModelJSON, values: Record<string, Equation
   return out;
 }
 
-// ここから、シナリオの中身の表のマスで、シナリオの値をその場で直すときの計算。送る変更はシナリオの編集欄と同じ形（値 1 つだけ）
+// ここから、シナリオの中身の表のマスで、シナリオの値をその場で直すときの計算。送る変更は MCP の set_scenarios と同じ形（値 1 つだけ）
 
 /** シナリオに保存してある要素の値（書き方のまま）。シナリオがないか、その値を変えていなければ undefined */
 export function scenarioValueOf(model: ModelJSON, scenario: string, element: string): string | undefined {
@@ -373,7 +321,7 @@ export function cellPatchOf(model: ModelJSON, scenario: string, element: string,
   return { name: scenario, values: { [element]: parseEquation(value) } };
 }
 
-// ここから、シナリオの中身の表の見出しで、シナリオを足す・複製するときの計算。送る変更はシナリオの編集欄で足すときと同じ形
+// ここから、シナリオの中身の表の見出しで、シナリオを足す・複製するときの計算。送る変更は MCP の set_scenarios と同じ形
 
 /** 複製するときに最初に入れておく名前。「人を増やさない（2）」のように、まだ使っていない番号を付ける */
 export function copyNameOf(name: string, others: string[]): string {
@@ -395,7 +343,7 @@ export function newScenarioPatchOf(model: ModelJSON, name: string, source?: stri
   const from = source === undefined ? undefined : findScenario(model, source);
   if (source !== undefined && !from) throw new Error(`複製するシナリオ「${source}」が見つかりません。ほかのところ（AI など）で名前が変わったか、消された可能性があります。`);
   const patch: ScenarioPatch = { name: name.trim(), values: { ...(from?.values ?? {}) } };
-  // 説明は、シナリオの編集欄と同じく、空でなければ送る
+  // 説明は、空でなければ送る
   const description = from?.description?.trim();
   if (description) patch.description = description;
   return patch;

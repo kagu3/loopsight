@@ -106,11 +106,15 @@ export function App() {
   const [selected, setSelected] = useState<string>();
   // 図で線を押して選んだリンク。要素を選ぶと外す
   const [selectedLink, setSelectedLink] = useState<LinkEnds>();
-  // 左の欄で直しているシナリオ。name がなければ、シナリオを足している
-  const [scenario, setScenario] = useState<{ name?: string }>();
-  // 保存を待つあいだに、ほかのモデルや要素、シナリオを開いたかを確かめるため
-  const scenarioRef = useRef(scenario);
-  scenarioRef.current = scenario;
+  // 左の欄で説明を直しているシナリオ（名前・値・足す・消すは、シナリオの中身の表で直す）。
+  // id は欄を開いた回ごとの番号。表で名前を変えても同じ欄のまま（書きかけの説明を残す）にするため、欄の key に使う
+  const [scenario, setScenario] = useState<{ name: string; id: number }>();
+  const scenarioSeq = useRef(0);
+  /** 左の欄でシナリオの説明を直す。同じシナリオの欄を開いていれば、そのままにする */
+  const editScenarioDescription = useCallback(
+    (name: string) => setScenario((s) => (s && sameName(s.name, name) ? s : { name, id: ++scenarioSeq.current })),
+    [],
+  );
   // グラフの上のシナリオの凡例にカーソルを乗せているシナリオ
   const [hoveredScenario, setHoveredScenario] = useState<string>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
@@ -122,7 +126,7 @@ export function App() {
   const [editMode, setEditMode] = useState(false);
   // 画面で要素を足した・消した・名前を変えた（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
   const [keepView, setKeepView] = useState<string>();
-  // 要素や、シナリオの中身の表の行を消したときの知らせ。元に戻したら閉じる
+  // 要素や、シナリオの中身の表の行・シナリオを消したときの知らせ。元に戻したら閉じる
   const removedNotice = useRef<string>(undefined);
   const [modelsOpen, setModelsOpen] = useState(loadModelsOpen);
   const toggleModels = () =>
@@ -353,18 +357,26 @@ export function App() {
       }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
   );
-  const saveScenario = useCallback(
-    async (patch: ScenarioPatch) => {
-      const [model, target] = [currentRef.current, scenarioRef.current];
-      const err = await editScenarios([patch]);
-      // 足したり名前を変えたりしたら、その名前で編集欄を開いたままにする。待つあいだにほかを開いていたら、そのままにする
-      if (!err && currentRef.current === model && scenarioRef.current === target) setScenario({ name: patch.rename_to ?? patch.name });
-      return err;
-    },
-    [editScenarios],
+  /** 左の欄で、シナリオの説明を直す */
+  const saveScenarioDescription = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
+  /**
+   * シナリオの中身の表で、シナリオを直す（値、足す・複製する、見出しの吹き出しで名前を変える）。編集欄は開かない。
+   * 左の欄で説明を直しているシナリオの名前を変えたら、新しい名前で開いたままにする
+   */
+  const saveScenarioValue = useCallback(
+    (patch: ScenarioPatch): Promise<string | undefined> =>
+      enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        const result = await postScenarios(d.name, d.version, [patch]);
+        const err = applyWrite(result);
+        // 名前は、新しい版と同じ描画で差し替える（左の欄が一瞬「見つかりません」になって作り直されないように）
+        const to = patch.rename_to;
+        if (!err && result.ok && to !== undefined) setScenario((s) => (s && sameName(s.name, patch.name) ? { ...s, name: to } : s));
+        return err;
+      }, SKIPPED_MESSAGE),
+    [applyWrite, enqueueWrite],
   );
-  /** シナリオの中身の表で、シナリオの値をその場で直す。編集欄は開かない */
-  const saveScenarioValue = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
   /**
    * シナリオの中身の表で、行（変える値）を消す。すべてのシナリオでその値を変えないことにする。
    * 確かめずに消す代わりに、すべてのシナリオの変更を 1 回の保存にし（Ctrl+Z 1 回で戻せる）、戻せることを知らせの帯に出す
@@ -390,14 +402,30 @@ export function App() {
     },
     [applyWrite, enqueueWrite],
   );
+  /**
+   * シナリオの中身の表の見出しの吹き出しで、シナリオを消す。表の行を消すときと同じく、確かめずに消す代わりに、
+   * Ctrl+Z で戻せることを知らせの帯に出す。左の欄でそのシナリオの説明を直していたら閉じる
+   */
   const removeScenario = useCallback(
     async (name: string) => {
-      const [model, target] = [currentRef.current, scenarioRef.current];
-      const err = await editScenarios([], [name]);
-      if (!err && currentRef.current === model && scenarioRef.current === target) setScenario(undefined);
+      const model = currentRef.current;
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 続けて押したときなどで、先に消えていれば何もしない
+        if (!findScenario(d.model, name)) return undefined;
+        const result = await postScenarios(d.name, d.version, [], [name]);
+        const err = applyWrite(result);
+        if (!err && result.ok) {
+          removedNotice.current = `シナリオ「${name}」を消しました（Ctrl+Z で戻せます）`;
+          setNotice(removedNotice.current);
+        }
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (!err && currentRef.current === model) setScenario((s) => (s && sameName(s.name, name) ? undefined : s));
       return err;
     },
-    [editScenarios],
+    [applyWrite, enqueueWrite],
   );
   /** 図で要素を選ぶと、シナリオの編集欄を閉じて、その要素を出す */
   const selectElement = useCallback((name: string | undefined) => {
@@ -636,11 +664,10 @@ export function App() {
           <h2>{scenario ? "シナリオ" : selectedLink ? "選んだ線" : "選んだ要素"}</h2>
           {scenario && data ? (
             <ScenarioEditor
-              key={scenario.name?.toLowerCase() ?? "（新しいシナリオ）"}
+              key={scenario.id}
               model={data.model}
               name={scenario.name}
-              onSave={saveScenario}
-              onRemove={removeScenario}
+              onSave={saveScenarioDescription}
               onClose={() => setScenario(undefined)}
             />
           ) : selectedEl ? (
@@ -806,8 +833,9 @@ export function App() {
               actual={data.actual}
               renamed={renamed}
               editingScenario={scenario?.name}
-              onEditScenario={(name) => setScenario({ name })}
+              onEditScenario={editScenarioDescription}
               onSaveScenario={saveScenarioValue}
+              onRemoveScenario={removeScenario}
               onRemoveScenarioValue={removeScenarioValue}
               onFocusScenario={setHoveredScenario}
             />

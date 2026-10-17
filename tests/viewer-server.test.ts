@@ -458,6 +458,16 @@ describe("ビューアからのシナリオの編集", () => {
     expect(u.body.model.model.scenarios).toBeUndefined();
   });
 
+  test("消したシナリオも元に戻せる（表の見出しの吹き出しで、確かめずに消すため）", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const add = await post<EditResponse>("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "高い", description: "速く増やす", values: { Rate: 0.2 } }] });
+    const remove = await post<EditResponse>("/api/models/pop/scenarios", { version: add.body.model.version, scenarios: [], remove: ["高い"] });
+    expect(remove.body.model.model.scenarios).toBeUndefined();
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: remove.body.model.version });
+    expect(u.status).toBe(200);
+    expect(u.body.model.model.scenarios).toEqual([{ name: "高い", description: "速く増やす", values: { Rate: 0.2 } }]);
+  });
+
   test("表のマスで値を 1 つ直す・空にして変えないことにする。どちらも 1 回の「元に戻す」で直す前に戻る", async () => {
     const store = new ModelStore(dir);
     const m = population();

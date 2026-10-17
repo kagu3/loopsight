@@ -398,6 +398,11 @@ a.toolbar-button {
   text-decoration: none;
   white-space: nowrap;
 }
+/* シナリオが上限まであるときの「＋ シナリオを足す」。理由をツールチップで出すため、disabled にはしない */
+button.toolbar-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -465,103 +470,10 @@ button:disabled {
   align-items: center;
   gap: 8px;
 }
-.form-buttons.confirm {
-  flex-wrap: wrap;
-  font-size: 13px;
-}
-.form-buttons button.danger {
-  background: var(--error);
-  border-color: var(--error);
-  color: #fff;
-}
-.form-buttons button.danger:hover:not(:disabled) {
-  background: var(--error);
-  filter: brightness(1.1);
-}
 button.link.danger-link {
   align-self: flex-start;
   color: var(--error);
   font-size: 12px;
-}
-.form-note {
-  margin: 0;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--warning-bg);
-  color: var(--warning);
-  font-size: 13px;
-}
-
-/* シナリオの編集欄：変える値の表（要素・このシナリオの値・元のモデル） */
-.scenario-values {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.scenario-values > small {
-  font-size: 11px;
-}
-.scenario-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-.scenario-table th {
-  font-weight: normal;
-  text-align: left;
-  padding: 0 4px 2px 0;
-}
-.scenario-table th:first-child {
-  width: 42%;
-}
-.scenario-table th:nth-child(2) {
-  width: 30%;
-}
-.scenario-table th:last-child {
-  width: 22px;
-}
-.scenario-table td {
-  padding: 2px 4px 2px 0;
-  vertical-align: top;
-  color: var(--text-primary);
-}
-.scenario-table td small {
-  display: block;
-  font-size: 11px;
-}
-.scenario-table td.code {
-  padding-top: 7px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  color: var(--text-muted);
-}
-.scenario-table select,
-.scenario-table input {
-  box-sizing: border-box;
-  width: 100%;
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-primary);
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 6px;
-}
-.scenario-table input.code {
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-}
-.scenario-table select:focus,
-.scenario-table input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-.scenario-table button.legend-remove {
-  margin-top: 4px;
 }
 
 .embed-diagram {
@@ -1275,6 +1187,11 @@ button.legend-remove:hover {
   gap: 12px;
   margin-left: auto;
 }
+/* シナリオが上限まであるときの帯の「＋ シナリオを足す」。理由をツールチップで出すため、disabled にはしない */
+.scenario-bar button.link[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .scenario-tools button.link {
   margin-right: 0;
   font-size: 12px;
@@ -1485,7 +1402,8 @@ input.matrix-input:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
-.scenario-matrix .matrix-error {
+.scenario-matrix .matrix-error,
+.scenario-menu .matrix-error {
   display: block;
   min-width: 16em;
   max-width: 260px;
@@ -1496,6 +1414,53 @@ input.matrix-input:focus {
   color: var(--error);
   font-weight: 400;
   text-align: left;
+}
+/* シナリオの名前を押すと出る吹き出し（名前を変える・説明を直す・消す）。位置は Chart.tsx の ScenarioMenu が、押したボタンの下に決める */
+.scenario-menu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  max-width: 300px;
+  padding: 8px 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.16);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.scenario-menu-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+.scenario-menu input.matrix-input {
+  width: 16em;
+  margin: 0;
+  padding: 3px 6px;
+  font-family: inherit;
+  text-align: left;
+}
+.scenario-menu small {
+  font-size: 11px;
+}
+.scenario-menu .matrix-error {
+  min-width: 0;
+  margin-top: 0;
+}
+.scenario-menu-actions {
+  display: flex;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid var(--grid);
+}
+.scenario-menu-actions button.link {
+  margin-right: 0;
+  font-size: 12px;
 }
 /* 見出しの「複製」と右端の「＋」。普段は控えめにし、「複製」はカーソルを乗せた見出しにだけ出す */
 button.matrix-copy,

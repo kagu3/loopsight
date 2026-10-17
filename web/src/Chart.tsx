@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import type { ActualDataResult, ModelJSON, RunResult, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
 import { sameTime, withActualPoints } from "./actualPoints.js";
@@ -14,6 +14,7 @@ import {
   describeRun,
   nameKey,
   newScenarioPatchOf,
+  renamePatchOf,
   resultRows,
   scenarioName,
   valueRows,
@@ -144,12 +145,17 @@ export interface ChartProps {
   actual?: ActualDataResult;
   /** いまの版で名前の変わった要素の [前の名前, 新しい名前]。グラフに出している要素を新しい名前で出し続ける */
   renamed?: [string, string][];
-  /** 左の欄で直しているシナリオの名前（凡例で目立たせる） */
+  /** 左の欄で説明を直しているシナリオの名前（凡例で目立たせる） */
   editingScenario?: string;
-  /** シナリオの編集欄を開く。name がなければシナリオを足す */
-  onEditScenario?(name?: string): void;
-  /** シナリオを直す（MCP の set_scenarios と同じ形）。失敗したらエラーの文を返す。あれば、シナリオの中身の表で値をその場で直せる */
+  /** シナリオの説明を左の欄で直す（表の見出しの吹き出しの「説明を直す」） */
+  onEditScenario?(name: string): void;
+  /**
+   * シナリオを直す（MCP の set_scenarios と同じ形）。失敗したらエラーの文を返す。
+   * あれば、シナリオの中身の表で値をその場で直し、シナリオを足し、見出しの吹き出しで名前を変えられる
+   */
   onSaveScenario?(patch: ScenarioPatch): Promise<string | undefined>;
+  /** シナリオを消す（表の見出しの吹き出しの「このシナリオを消す」）。失敗したらエラーの文を返す */
+  onRemoveScenario?(name: string): Promise<string | undefined>;
   /** すべてのシナリオで、その要素の値を変えないことにする（シナリオの中身の表の行を消す）。失敗したらエラーの文を返す */
   onRemoveScenarioValue?(element: string): Promise<string | undefined>;
   /** シナリオの凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「元のモデル」では呼ばない */
@@ -171,7 +177,20 @@ export function scenarioColor(run: RunResult, scenarios: ScenarioRunResult[], na
 /** シナリオを重ねているときの、実際のデータの点の色 */
 const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
-export function Chart({ modelName, model, run, scenarios, actual, renamed, editingScenario, onEditScenario, onSaveScenario, onRemoveScenarioValue, onFocusScenario }: ChartProps) {
+export function Chart({
+  modelName,
+  model,
+  run,
+  scenarios,
+  actual,
+  renamed,
+  editingScenario,
+  onEditScenario,
+  onSaveScenario,
+  onRemoveScenario,
+  onRemoveScenarioValue,
+  onFocusScenario,
+}: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
   // グラフに出す要素と線の色。名前を変えた版を受け取った描画では、下の effect が直すまで、前の名前のままになっている
@@ -187,6 +206,41 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
   const compare = useMemo(() => compareRuns(run, scenarios ?? [], MAX_SERIES), [run, scenarios]);
   const hasScenarios = (scenarios?.length ?? 0) > 0;
   const comparing = overlay && hasScenarios;
+  // シナリオの中身の表で、名前を付けている途中の足すシナリオ。シナリオがない・重ねないときも、足し始めたら「元のモデル」だけの表を出す
+  const [adding, setAdding] = useState<NewScenario>();
+  const full = isFull(model);
+  // グラフの上の「＋ シナリオを足す」で足し始めたときの、押す前の「重ねる」「重ねない」。取りやめたら元に戻し、そのボタンにフォーカスを戻す
+  const fromToolbar = useRef<{ overlay: boolean }>(undefined);
+  const toolbarAddRef = useRef<HTMLButtonElement>(null);
+  const refocusToolbarAdd = useRef(false);
+  /** 足すシナリオの列を出す・閉じる。cancelled は、名前を付けずに取りやめたとき（保存して閉じたときは false） */
+  const changeAdding = (next: NewScenario | undefined, cancelled = false) => {
+    const from = fromToolbar.current;
+    if (next === undefined) {
+      fromToolbar.current = undefined;
+      if (cancelled && from) {
+        setOverlay(from.overlay);
+        refocusToolbarAdd.current = true;
+      }
+    }
+    setAdding(next);
+  };
+  // 取りやめたり最後のシナリオを消したりして表が消えたら（シナリオがない・重ねないに戻した）、フォーカスがどこにもなければ「＋ シナリオを足す」に移す
+  useEffect(() => {
+    if (adding || comparing || !refocusToolbarAdd.current) return;
+    refocusToolbarAdd.current = false;
+    const a = document.activeElement;
+    if (!a || a === document.body) toolbarAddRef.current?.focus();
+  }, [adding, comparing]);
+  /** 見出しの吹き出しでシナリオを消す。最後のシナリオなら、表がなくなるので「＋ シナリオを足す」にフォーカスを移す */
+  const removeScenario =
+    onRemoveScenario &&
+    (async (name: string) => {
+      if ((model.scenarios ?? []).length <= 1) refocusToolbarAdd.current = true;
+      const err = await onRemoveScenario(name);
+      if (err) refocusToolbarAdd.current = false;
+      return err;
+    });
   // シナリオを重ねたグラフにカーソルを乗せている時点（シナリオの中身の表の、結果の行に出す）
   const [hoverTime, setHoverTime] = useState<number | undefined>();
   // マウスが出ないままグラフが消えたり（要素を外す・表にする）、別のモデルを開いたりしたら、時点を忘れる
@@ -201,6 +255,8 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
   useEffect(() => {
     if (shownModel !== modelName) {
       setShownModel(modelName);
+      fromToolbar.current = undefined;
+      setAdding(undefined);
       const v = defaultVisible(model, names);
       setVisible(v);
       setSlots(assignSlots(v, new Map()));
@@ -289,7 +345,11 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
               role="radio"
               aria-checked={!comparing}
               className={!comparing ? "on" : ""}
-              onClick={() => setOverlay(false)}
+              onClick={() => {
+                // 名前を付けている途中の足すシナリオも閉じる
+                changeAdding(undefined);
+                setOverlay(false);
+              }}
               title={`「${BASELINE_NAME}」だけを、要素を重ねて出します`}
             >
               重ねない
@@ -297,8 +357,19 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
           </div>
         )}
         {/* シナリオの凡例を出していないとき（シナリオがない・重ねない）の、シナリオを足す入口 */}
-        {!comparing && onEditScenario && (
-          <button className="toolbar-button" onClick={() => onEditScenario()} title={`値を変えたシナリオを足し、「${BASELINE_NAME}」と重ねて比べます`}>
+        {!comparing && !adding && onSaveScenario && (
+          <button
+            className="toolbar-button"
+            ref={toolbarAddRef}
+            onClick={() => {
+              if (full) return;
+              fromToolbar.current = { overlay };
+              setOverlay(true);
+              changeAdding({ initial: "" });
+            }}
+            aria-disabled={full}
+            title={full ? FULL_NOTE : `シナリオの中身の表を開いて、シナリオを足します（名前を付けて Enter）。「${BASELINE_NAME}」と重ねて比べます`}
+          >
             ＋ シナリオを足す
           </button>
         )}
@@ -344,7 +415,7 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
         </ul>
       </div>
 
-      {comparing && (
+      {(comparing || adding) && (
         <ScenarioLegend
           // 表で足した行は、モデルごとに持つ（別のモデルを開いたら持ち越さない）
           key={modelName}
@@ -355,8 +426,11 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
           at={view === "chart" ? hoverTime : undefined}
           unit={unit}
           editing={editingScenario}
+          adding={adding}
+          onAdding={changeAdding}
           onEdit={onEditScenario}
           onSave={onSaveScenario}
+          onRemove={removeScenario}
           onRemoveValue={onRemoveScenarioValue}
           onFocus={onFocusScenario}
         />
@@ -495,11 +569,22 @@ function yAxis(scale: Scale) {
 /** シナリオの中身の表で、はじめから出す「変えた値」の行の数。超えたぶんは畳んで「ほか N 件」で開く */
 const MATRIX_ROWS = 6;
 
+/** 名前を付けている途中の、足すシナリオ。source は複製元のシナリオの名前（「＋」で足すときは undefined） */
+interface NewScenario {
+  source?: string;
+  initial: string;
+}
+
+/** シナリオはグラフに重ねられる数（色の数）まで。名前のないシナリオや実行できなかったシナリオも 1 つに数える */
+const isFull = (model: ModelJSON) => (model.scenarios ?? []).length >= MAX_SERIES;
+const FULL_NOTE = `グラフに重ねられるシナリオは ${MAX_SERIES} つまでです。表の見出しのシナリオの名前を押して、使わないシナリオを消すと足せます`;
+
 /**
  * シナリオの凡例。「元のモデル」は灰色の点線。実行できなかったシナリオと、色が足りずに出さないシナリオも知らせる。
- * onEdit があれば、シナリオの名前を押すと左の欄で直せる。最後に「＋ シナリオを足す」を置く。
+ * onSave があれば、シナリオの名前を押すと吹き出し（名前を変える・説明を直す・消す）を出す。最後に「＋ シナリオを足す」を置く。
  * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、シナリオごとに変えた値と結果（グラフで選んでいる要素の値）を並べる。
- * onSave があれば、表のシナリオの値をその場で直せる。onRemoveValue があれば、表の行（変える値）を消せる
+ * onSave があれば、表のシナリオの値をその場で直せる。onRemoveValue があれば、表の行（変える値）を消せる。
+ * 「＋ シナリオを足す」は表を開いて、表の右端の「＋」と同じく名前を入れる状態にする（adding）
  */
 function ScenarioLegend({
   compare,
@@ -509,8 +594,11 @@ function ScenarioLegend({
   at,
   unit,
   editing,
+  adding,
+  onAdding,
   onEdit,
   onSave,
+  onRemove,
   onRemoveValue,
   onFocus,
 }: {
@@ -523,8 +611,12 @@ function ScenarioLegend({
   at?: number;
   unit: string;
   editing?: string;
-  onEdit?(name?: string): void;
+  adding?: NewScenario;
+  /** cancelled は、名前を付けずに取りやめたとき */
+  onAdding(adding: NewScenario | undefined, cancelled?: boolean): void;
+  onEdit?(name: string): void;
   onSave?(patch: ScenarioPatch): Promise<string | undefined>;
+  onRemove?(name: string): Promise<string | undefined>;
   onRemoveValue?(element: string): Promise<string | undefined>;
   onFocus?(name: string | undefined): void;
 }) {
@@ -536,14 +628,28 @@ function ScenarioLegend({
     setOpenState(o);
     saveMatrixOpen(o);
   };
-  // 重ねているシナリオがない（どれも実行できなかった・出していない）ときは、表にしても空なので開かない
+  // シナリオを足し始めたら（帯の「＋ シナリオを足す」など）、表を開く。足したあとも表のまま続けられるように
+  useEffect(() => {
+    if (adding && !open) setOpen(true);
+  }, [adding]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 重ねているシナリオがない（どれも実行できなかった・出していない）ときは、表にしても空なので開かない。足している途中は「元のモデル」だけの表を出す
   const canOpen = compare.runs.length > 1;
-  const isOpen = open && canOpen;
-  const isEditing = (n: string) => editing !== undefined && editing.toLowerCase() === n.toLowerCase();
-  // 実行できなかったシナリオと、出していないシナリオの名前も、押すと直せる
+  const isOpen = (open && canOpen) || adding !== undefined;
+  // 吹き出しを出しているシナリオと、押した名前のボタン（吹き出しの位置と、閉じたあとのフォーカスの戻り先）
+  const [menu, setMenu] = useState<{ name: string; anchor: HTMLElement }>();
+  const closeMenu = useCallback(() => setMenu(undefined), []);
+  const isOn = (n: string) => (editing !== undefined && nameKey(editing) === nameKey(n)) || menu?.name === n;
+  const toggleMenu = (n: string, anchor: HTMLElement) => setMenu((m) => (m?.name === n ? undefined : { name: n, anchor }));
+  // 実行できなかったシナリオと、出していないシナリオの名前も、押すと吹き出しを出す
   const nameButton = (n: string) =>
-    onEdit ? (
-      <button className="link inline-link" onClick={() => onEdit(n)} title={`シナリオ「${n}」を左の欄で直します`}>
+    onSave ? (
+      <button
+        className="link inline-link"
+        onClick={(e) => toggleMenu(n, e.currentTarget)}
+        aria-expanded={menu?.name === n}
+        aria-haspopup="dialog"
+        title={`シナリオ「${n}」の名前を変える・説明を直す・消す`}
+      >
         {n}
       </button>
     ) : (
@@ -568,23 +674,44 @@ function ScenarioLegend({
         )}
       </>
     );
-    return r.baseline || !onEdit ? (
+    return r.baseline || !onSave ? (
       <span className="scenario-chip-label" {...focus}>
         {label}
       </span>
     ) : (
-      <button className={`scenario-chip-button ${isEditing(r.name) ? "on" : ""}`} onClick={() => onEdit(r.name)} aria-pressed={isEditing(r.name)} {...focus}>
+      <button
+        className={`scenario-chip-button ${isOn(r.name) ? "on" : ""}`}
+        onClick={(e) => toggleMenu(r.name, e.currentTarget)}
+        aria-expanded={menu?.name === r.name}
+        aria-haspopup="dialog"
+        {...focus}
+      >
         {label}
       </button>
     );
   };
-  const addButton = onEdit && (
-    <button className="link" onClick={() => onEdit()} title={`値を変えたシナリオを足し、「${BASELINE_NAME}」と重ねて比べます`}>
+  const full = isFull(model);
+  const addButton = onSave && (
+    <button
+      className="link"
+      onClick={() => !full && !adding && onAdding({ initial: "" })}
+      aria-disabled={full}
+      title={full ? FULL_NOTE : `シナリオの中身の表を開いて、シナリオを足します（名前を付けて Enter）。「${BASELINE_NAME}」と重ねて比べます`}
+    >
       ＋ シナリオを足す
     </button>
   );
   const toggle = (
-    <button className="link scenario-toggle" aria-expanded={open} onClick={() => setOpen(!open)} title="シナリオごとに、変えた値と結果を表で比べます">
+    <button
+      className="link scenario-toggle"
+      aria-expanded={open}
+      onClick={() => {
+        // 閉じたら、名前を付けている途中の足すシナリオも取りやめる
+        if (open && adding) onAdding(undefined, true);
+        setOpen(!open);
+      }}
+      title="シナリオごとに、変えた値と結果を表で比べます"
+    >
       {open ? "▾ 中身を閉じる" : "▸ 中身を見る"}
     </button>
   );
@@ -602,6 +729,8 @@ function ScenarioLegend({
             chip={chip}
             showAll={showAll}
             onShowAll={setShowAll}
+            adding={adding}
+            onAdding={onAdding}
             onSave={onSave}
             onRemoveValue={onRemoveValue}
           />
@@ -634,6 +763,193 @@ function ScenarioLegend({
           は出していません
         </p>
       )}
+      {menu && onSave && (
+        <ScenarioMenu
+          // 別のシナリオの吹き出しに替えたら、名前の欄を作り直す
+          key={menu.name}
+          model={model}
+          name={menu.name}
+          anchor={menu.anchor}
+          onRename={onSave}
+          onEdit={onEdit}
+          onRemove={onRemove}
+          onClose={closeMenu}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * シナリオの名前を押すと出る吹き出し。名前を変える（Enter で保存、Esc でやめる）、説明を直す（左の欄）、シナリオを消す。
+ * 消すときは表の行と同じく確かめず、Ctrl+Z で戻せる（知らせは App が出す）。
+ * 表の見出しは切れたり横に流れたりするので、押したボタンの下に重ねて出す（position: fixed）。ほかを押すと閉じる（名前は保存しない）
+ */
+function ScenarioMenu({
+  model,
+  name,
+  anchor,
+  onRename,
+  onEdit,
+  onRemove,
+  onClose,
+}: {
+  model: ModelJSON;
+  name: string;
+  anchor: HTMLElement;
+  onRename(patch: ScenarioPatch): Promise<string | undefined>;
+  onEdit?(name: string): void;
+  onRemove?(name: string): Promise<string | undefined>;
+  onClose(): void;
+}) {
+  const [text, setText] = useState(name);
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  // はじめから押したボタンの下に置く（見えない吹き出しの中の名前の欄には、フォーカスを移せないため）
+  const [pos, setPos] = useState(() => {
+    const a = anchor.getBoundingClientRect();
+    return { left: a.left, top: a.bottom + 4 };
+  });
+  const ref = useRef<HTMLDivElement>(null);
+  // 画面の右からはみ出すなら左へずらす。スクロールしたり画面の大きさが変わったりしたら合わせ直す
+  useLayoutEffect(() => {
+    const place = () => {
+      // 表を開け閉めしたなどで、押したボタンがなくなったら閉じる
+      if (!anchor.isConnected) return onClose();
+      const a = anchor.getBoundingClientRect();
+      const width = ref.current?.offsetWidth ?? 0;
+      setPos({ left: Math.max(8, Math.min(a.left, window.innerWidth - width - 8)), top: a.bottom + 4 });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [anchor, onClose]);
+  // 描き直すたびに、押したボタンがまだあるか確かめる（モデルが変わって見出しが作り直されたときなど）
+  useEffect(() => {
+    if (!anchor.isConnected) onClose();
+  });
+  // 吹き出しと押したボタンの外を押したら閉じる
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !anchor.contains(t)) onClose();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [anchor, onClose]);
+  // Esc で閉じたら、キーボードで続けられるよう押したボタンにフォーカスを戻す
+  const cancel = () => {
+    if (anchor.isConnected) anchor.focus();
+    onClose();
+  };
+  const rename = async () => {
+    if (saving) return;
+    let patch: ScenarioPatch | undefined;
+    try {
+      patch = renamePatchOf(model, name, text);
+    } catch (e) {
+      setError((e as Error).message);
+      return;
+    }
+    if (!patch) {
+      cancel();
+      return;
+    }
+    setSaving(true);
+    const err = await onRename(patch);
+    setSaving(false);
+    // 名前を変えても押したボタンは残る（見出しは並びで作る）ので、Esc のときと同じくそこへ戻す
+    if (err) setError(err);
+    else cancel();
+  };
+  const remove = async () => {
+    if (saving || !onRemove) return;
+    // 表を開いていれば、消したあとは表にフォーカスを移す（表の行を消すときと同じ）。押したボタンは列ごとなくなることがある
+    const table = anchor.closest("table");
+    setSaving(true);
+    const err = await onRemove(name);
+    setSaving(false);
+    if (err) {
+      setError(err);
+      return;
+    }
+    if (table?.isConnected) table.focus({ preventScroll: true });
+    onClose();
+  };
+  return (
+    <div
+      className="scenario-menu"
+      role="dialog"
+      aria-label={`シナリオ「${name}」`}
+      ref={ref}
+      style={{ left: pos.left, top: pos.top }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          // 図で要素を置こうとしているのを取りやめる Esc（window で受ける）には届けない
+          e.stopPropagation();
+          cancel();
+        }
+      }}
+      // Tab でほかへ移ったときも閉じる（押したボタンに戻ったときは、そのボタンで閉じる）
+      onBlur={(e) => {
+        const to = e.relatedTarget;
+        if (to && !e.currentTarget.contains(to) && to !== anchor) onClose();
+      }}
+    >
+      <label className="scenario-menu-name">
+        <span>名前</span>
+        <input
+          className="matrix-input"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setError(undefined);
+          }}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void rename();
+            }
+          }}
+          onFocus={(e) => e.currentTarget.select()}
+          readOnly={saving}
+          autoFocus
+          aria-invalid={!!error}
+          title="Enter で名前を変える、Esc でやめる"
+        />
+      </label>
+      {error && (
+        <span className="matrix-error" role="alert">
+          {error}
+        </span>
+      )}
+      <small className="muted">Enter で名前を変える、Esc でやめる</small>
+      <div className="scenario-menu-actions">
+        {onEdit && (
+          <button
+            className="link"
+            onClick={() => {
+              onEdit(name);
+              onClose();
+            }}
+            disabled={saving}
+            title="発表モードの解決案のスライドに出る説明を、左の欄で直します"
+          >
+            説明を直す
+          </button>
+        )}
+        {onRemove && (
+          <button className="link danger-link" onClick={() => void remove()} disabled={saving} title="このシナリオを消します（Ctrl+Z で戻せます）">
+            このシナリオを消す
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -656,6 +972,8 @@ function ScenarioMatrix({
   chip,
   showAll,
   onShowAll,
+  adding,
+  onAdding: setAdding,
   onSave,
   onRemoveValue,
 }: {
@@ -668,6 +986,10 @@ function ScenarioMatrix({
   chip(r: CompareRun, k: number): React.ReactNode;
   showAll: boolean;
   onShowAll(all: boolean): void;
+  /** 名前を付けている途中の、足すシナリオの列（帯の「＋ シナリオを足す」からも始まるので、凡例の外で持つ） */
+  adding?: NewScenario;
+  /** cancelled は、名前を付けずに取りやめたとき */
+  onAdding(adding: NewScenario | undefined, cancelled?: boolean): void;
   onSave?(patch: ScenarioPatch): Promise<string | undefined>;
   onRemoveValue?(element: string): Promise<string | undefined>;
 }) {
@@ -680,8 +1002,6 @@ function ScenarioMatrix({
   const results = resultRows(runs, times, visible, at);
   const folding = rows.length > MATRIX_ROWS;
   const shown = folding && !showAll ? rows.slice(0, MATRIX_ROWS) : rows;
-  // 名前を付けている途中の、足すシナリオの列。source は複製元のシナリオの名前（「＋」で足すときは undefined）
-  const [adding, setAdding] = useState<{ source?: string; initial: string }>();
   const tableRef = useRef<HTMLTableElement>(null);
   // 仮の列を閉じたら、キーボードで続けられるようフォーカスを移す。保存したら表に、取りやめたら押した「＋」か「複製」に戻す。
   // 移すのは、フォーカスがまだ名前の欄（か、欄が消えて body）にあるときだけ。ほかを押して欄から外れたときは動かさない
@@ -704,15 +1024,13 @@ function ScenarioMatrix({
   const extraCol = onSave ? 1 : 0;
   const colSpan = runs.length + 1 + extraCol;
   const sourceIndex = adding?.source === undefined ? -1 : runs.findIndex((r) => !r.baseline && r.name === adding.source);
-  // シナリオはグラフに重ねられる数（色の数）まで。名前のないシナリオや実行できなかったシナリオも 1 つに数える
   const savedNames = (model.scenarios ?? []).map(scenarioName);
-  const full = savedNames.length >= MAX_SERIES;
-  const fullNote = `グラフに重ねられるシナリオは ${MAX_SERIES} つまでです。凡例のシナリオを押して、左の欄で使わないシナリオを消すと足せます`;
+  const full = isFull(model);
   const startAdding = (source?: string) => setAdding({ source, initial: source === undefined ? "" : copyNameOf(source, savedNames) });
   // 名前を決めたら、シナリオを足して保存する。保存できたら仮の列を閉じ（足したシナリオの列に替わる）、表にフォーカスを移す
   const saveNew = async (name: string): Promise<string | undefined> => {
     // 名前を付けているあいだに、ほかのところ（AI など）でシナリオが足されて上限に達したら送らない
-    if (full) return fullNote;
+    if (full) return FULL_NOTE;
     let patch: ScenarioPatch;
     try {
       patch = newScenarioPatchOf(model, name, adding?.source);
@@ -728,7 +1046,7 @@ function ScenarioMatrix({
   };
   const cancelAdding = () => {
     refocus.current = { cancel: true, source: adding?.source };
-    setAdding(undefined);
+    setAdding(undefined, true);
   };
   // 「＋ 値を追加」で選んでいる途中か。足したら、その行の最初のシナリオのマスにフォーカスを移す（そのまま Enter で値を入れられる）
   const [picking, setPicking] = useState(false);
@@ -796,7 +1114,7 @@ function ScenarioMatrix({
                       onClick={() => !full && startAdding(r.name)}
                       aria-disabled={full}
                       aria-label={`シナリオ「${r.name}」を複製`}
-                      title={full ? fullNote : "同じ値のシナリオを作ります"}
+                      title={full ? FULL_NOTE : "同じ値のシナリオを作ります"}
                     >
                       複製
                     </button>
@@ -809,7 +1127,7 @@ function ScenarioMatrix({
             ) : (
               onSave && (
                 <th scope="col" className="matrix-add">
-                  <button onClick={() => !full && startAdding()} aria-disabled={full} aria-label="シナリオを足す" title={full ? fullNote : "シナリオを足します（名前を付けて Enter）"}>
+                  <button onClick={() => !full && startAdding()} aria-disabled={full} aria-label="シナリオを足す" title={full ? FULL_NOTE : "シナリオを足します（名前を付けて Enter）"}>
                     ＋
                   </button>
                 </th>
