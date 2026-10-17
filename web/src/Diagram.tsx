@@ -25,7 +25,7 @@ import { nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
-// 箱と雲はドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
+// 編集モードのときだけ、箱と雲をドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
@@ -154,6 +154,8 @@ export interface DiagramProps {
   loop?: LoopView;
   /** 注目している施策（凡例にカーソルを乗せている・左の欄で直している）。変えた要素に札を付け、枠を施策の線の色にする */
   scenario?: ScenarioMarks;
+  /** 編集モード。オンのときだけ要素を動かせて、図の上に編集の道具の場所を出す。選ぶ・薄くするなどの見るための操作はいつでもできる */
+  editable?: boolean;
 }
 
 export interface ScenarioMarks {
@@ -166,7 +168,7 @@ export interface ScenarioMarks {
 type Pos = { x: number; y: number };
 
 export function Diagram(props: DiagramProps) {
-  const { graph, selected, changed, values, onMove, scenario } = props;
+  const { graph, selected, changed, values, onMove, scenario, editable } = props;
   // 要素が増えたり減ったりしたときも表示範囲を合わせ直す
   const nodeIds = useMemo(() => graph.nodes.map((n) => n.id).sort().join("|"), [graph]);
 
@@ -229,10 +231,10 @@ export function Diagram(props: DiagramProps) {
         },
         // 札がほかの要素の下に隠れないように、札の付いた要素を上に重ねる
         zIndex: g.element && scenario?.badges.has(nameKey(g.element)) ? 1 : undefined,
-        draggable: g.kind !== "VALVE",
+        draggable: !!editable && g.kind !== "VALVE",
         connectable: false,
       })),
-    [placed, selected, changed, values, focus, scenario],
+    [placed, selected, changed, values, focus, scenario, editable],
   );
 
   const onNodesChange = useCallback((changes: NodeChange<ModelNodeT>[]) => {
@@ -307,6 +309,7 @@ export function Diagram(props: DiagramProps) {
       style={scenario ? ({ "--scenario": scenario.color } as React.CSSProperties) : undefined}
       onNodesChange={onNodesChange}
       onNodeDragStop={onNodeDragStop}
+      nodesDraggable={!!editable}
       nodeDragThreshold={3}
       nodesConnectable={false}
       elementsSelectable
@@ -321,10 +324,25 @@ export function Diagram(props: DiagramProps) {
       <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} />
       <Background gap={20} size={1} />
       {props.loop && <LoopBadge loop={props.loop} />}
+      {editable && <EditTools />}
       {!props.embed && <Controls showInteractive={false} fitViewOptions={VIEWER_FIT} />}
       {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
       {!props.embed && <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} ariaLabel="図の全体" style={{ width: 150, height: 90 }} />}
     </ReactFlow>
+  );
+}
+
+/**
+ * 編集モードの道具の場所（図の左上）。いまは編集中であることと、できることだけを出す。
+ * 要素を足す・消す、線を引くボタンは、ここに右へ並べる。
+ * 図は真ん中に合わせるので、要素は角より真ん中の上にかかりやすい。左下の操作部品と右下のミニマップとも離れている
+ */
+function EditTools() {
+  return (
+    <Panel position="top-left" className="edit-tools">
+      <span className="edit-tools-label">編集モード</span>
+      <span className="edit-tools-hint">要素をドラッグで動かせます</span>
+    </Panel>
   );
 }
 

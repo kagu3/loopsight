@@ -104,6 +104,12 @@ try {
   await shot("edit");
   await b.clickText(".form-buttons button", "やめる");
 
+  // 編集モードをオンにしたところ（あとの場面に出ないよう、撮ったらオフに戻す）
+  await b.clickText(".toolbar-button", "✎ 編集モード");
+  await b.waitFor("document.querySelector('.edit-tools')");
+  await shot("edit-mode");
+  await b.clickText(".toolbar-button", "✎ 編集モード");
+
   // グラフとツールチップ
   await b.open(url("predator_prey"));
   const chart = await b.rectOf(".chart-area");

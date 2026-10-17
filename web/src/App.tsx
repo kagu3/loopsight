@@ -14,6 +14,7 @@ import { findScenario, scenarioBadges } from "./scenarios.js";
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
 // 画面からの編集（式などの変更、位置の変更、施策の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
+// 図の形を変える操作（配置のドラッグなど）は、上の帯の「編集モード」をオンにしたときだけできる。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
@@ -86,6 +87,8 @@ export function App() {
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [updatedAt, setUpdatedAt] = useState<Date>();
   const [busy, setBusy] = useState(false);
+  // 編集モード（図の形を変える操作をできるようにする）。うっかり動かさないよう、開くたびにオフから始める（ブラウザに覚えさせない）
+  const [editMode, setEditMode] = useState(false);
   const [modelsOpen, setModelsOpen] = useState(loadModelsOpen);
   const toggleModels = () =>
     setModelsOpen((open) => {
@@ -446,7 +449,8 @@ export function App() {
       </aside>
 
       <main className="main">
-        <div className="toolbar">
+        {/* 色は切り替えボタンが出ているときだけ付ける（ボタンのない画面で、オフに戻せない色を残さない） */}
+        <div className={`toolbar ${editMode && graph && data ? "is-editing" : ""}`}>
           <div className="title">
             <h2>{title || "モデルを選んでください"}</h2>
             {data?.model.description && (
@@ -457,7 +461,15 @@ export function App() {
           </div>
           {graph && data && (
             <div className="toolbar-right">
-              {graph.missingCoordinates && <span className="note">座標のない要素を仮に並べています。動かすと、この配置を保存します</span>}
+              {graph.missingCoordinates && <span className="note">座標のない要素を仮に並べています。編集モードで動かすと、この配置を保存します</span>}
+              <button
+                className={`toolbar-button edit-toggle ${editMode ? "on" : ""}`}
+                onClick={() => setEditMode((on) => !on)}
+                aria-pressed={editMode}
+                title={editMode ? "編集モードを終えます（図の要素を動かせなくなります）" : "図の要素をドラッグで動かせるようにします。要素の中身は、左の「編集」でいつでも直せます"}
+              >
+                ✎ 編集モード
+              </button>
               <a
                 className="toolbar-button"
                 href={`?view=present#${encodeURIComponent(data.name)}`}
@@ -505,6 +517,7 @@ export function App() {
                 onSelect={selectElement}
                 onMove={move}
                 scenario={scenarioMarks}
+                editable={editMode}
               />
             </ReactFlowProvider>
           ) : (

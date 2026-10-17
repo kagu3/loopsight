@@ -28,6 +28,8 @@
   /* 目立たせるループ（R：強める、B：釣り合わせる） */
   --loop-r: #e34948;
   --loop-b: #2a78d6;
+  /* 編集モードの上の帯 */
+  --editing-bg: #e3eefb;
 
   /* グラフの系列（dataviz の検証済みパレット、明るい表示） */
   --series-1: #2a78d6;
@@ -72,6 +74,7 @@
     --selected: #5598e7;
     --loop-r: #e66767;
     --loop-b: #5598e7;
+    --editing-bg: #1c2a3d;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -324,6 +327,13 @@ button.link {
 .toolbar .title {
   min-width: 0;
 }
+/* 編集モードの間は帯の色を変え、下の線を太く見せる（編集中だと一目でわかるように）。
+   帯の高さを変えると図の欄の大きさが変わり、表示範囲を合わせ直してしまうので、線は内側の影で太くする */
+.toolbar.is-editing {
+  background: var(--editing-bg);
+  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
 .toolbar .title h2 {
   font-size: 16px;
 }
@@ -398,6 +408,15 @@ a.toolbar-button {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+button.toolbar-button.edit-toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.toolbar-button.edit-toggle.on:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
 }
 .form-buttons button.primary {
   background: var(--accent);
@@ -820,6 +839,24 @@ button.link.danger-link {
 }
 .react-flow__edge-path.edge-flow.is-loop {
   stroke-width: 4;
+}
+/* 編集モードの道具の場所（図の左上）。重なった要素が透けて見えるよう、背景は少し透かす */
+.edit-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.edit-tools-label {
+  font-weight: 700;
+  color: var(--accent);
+}
+.edit-tools-hint {
+  color: var(--text-secondary);
 }
 .loop-badge {
   display: flex;
