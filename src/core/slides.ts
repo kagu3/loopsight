@@ -275,7 +275,10 @@ export function checkSlides(model: ModelJSON, deck: SlideDeck, data?: ActualData
       case "compare": {
         s.elements = elements(s.elements, "比べる要素");
         // 「元のモデル」はいつも重ねるので、並べなくてよい
-        s.scenarios = s.scenarios.map(scenario).filter((name) => name !== BASELINE_SCENARIO);
+        // 大文字と小文字だけが違う名前が重なっていれば、1 つにまとめる（同じ線が 2 本出ないように）
+        s.scenarios = s.scenarios
+          .map(scenario)
+          .filter((name, j, list) => name !== BASELINE_SCENARIO && list.findIndex((x) => sameName(x, name)) === j);
         if (s.scenarios.length === 0) error("比べるシナリオがありません。", `「${BASELINE_SCENARIO}」はいつも重ねます。ほかにシナリオの名前を 1 つ以上並べてください。`);
         if (s.scenarios.length > MAX_SLIDE_SCENARIOS) error(`比べるシナリオは ${MAX_SLIDE_SCENARIOS} つまでにしてください。`);
         time(s.at, "注目する時点");

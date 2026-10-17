@@ -5,7 +5,8 @@ import { fetchModel } from "./api.js";
 import { withActualPoints, type ChartRow } from "./actualPoints.js";
 import { CauseSlide } from "./CauseSlide.js";
 import { TIME_UNIT_LABEL, formatTime, formatValue } from "./Chart.js";
-import { KIND_LABEL, changeFrom, isPrintFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "./presentation.js";
+import { KIND_LABEL, changeFrom, figureShape, isFigureFrom, isPrintFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "./presentation.js";
+import { formatReadable } from "../../src/core/format.js";
 import { BASELINE_NAME } from "./scenarios.js";
 
 // 発表モード（?view=present#<モデル名>）。SD を知らない身近な人に、説明資料のスライドを順に見せる。
@@ -14,6 +15,7 @@ import { BASELINE_NAME } from "./scenarios.js";
 // AI が筋書きやモデルを直すと、変更の知らせ（Server-Sent Events）で読み直して、その場で変わる。
 // 何枚目かはアドレスの slide= に入れる（読み直しても同じスライドから。MCP の view_slides もこれで切り替える）。
 // print=1 を付けると、すべてのスライドを縦に並べ、1 枚を 1 ページにして印刷できる形にする（MCP の export_slides が PDF にする）。
+// figure=1 を付けると、slide= のスライドのグラフや図だけを、それに合う大きさの枠に描く（MCP の export_slides が images/ の画像にする）。
 
 /** 文字やグラフの大きさの基準にする枠の幅。実際の枠の幅との比で、グラフの文字も大きくする */
 const BASE_WIDTH = 1280;
@@ -30,6 +32,7 @@ export function Present() {
   const [index, setIndex] = useState(() => slideIndexFrom(location.search, Number.MAX_SAFE_INTEGER));
   const shown = Math.min(index, Math.max(count - 1, 0));
   const [print] = useState(() => isPrintFrom(location.search));
+  const [figure] = useState(() => isFigureFrom(location.search));
   const nameRef = useRef(name);
   nameRef.current = name;
   // 読み込みの番号。古い読み込みの結果が、あとから来ても使わない
@@ -93,8 +96,8 @@ export function Present() {
 
   const go = useCallback((i: number) => setIndex(i), []);
   useEffect(() => {
-    // 印刷の形では、キーでスライドを切り替えない
-    if (print) return;
+    // 印刷の形と、グラフや図だけを描くときは、キーでスライドを切り替えない
+    if (print || figure) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key.toLowerCase() === "f") {
@@ -110,7 +113,7 @@ export function Present() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shown, count, go, print]);
+  }, [shown, count, go, print, figure]);
 
   // 枠の幅。グラフの文字の大きさを、枠に合わせて変えるため（印刷の形では、並べた枠の幅はどれも同じ）
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
@@ -145,6 +148,17 @@ export function Present() {
             <SlideView deck={deck} index={i} data={data} scale={scale} />
           </div>
         ))}
+      </div>
+    );
+  } else if (figure) {
+    const slide = deck.slides[shown]!;
+    return (
+      <div className="present-figure">
+        <div className={`stage ${figureShape(slide)}`} ref={setStage} style={{ "--u": scale } as CSSProperties}>
+          <section key={shown} className={`slide slide-figure slide-${slide.kind}`} data-index={shown + 1} data-ready="1">
+            <SlideBody slide={slide} data={data} scale={scale} figure />
+          </section>
+        </div>
       </div>
     );
   } else content = <SlideView key={shown} deck={deck} index={shown} data={data} scale={scale} />;
@@ -190,19 +204,7 @@ function SlideView({ deck, index, data, scale }: { deck: SlideDeck; index: numbe
         <h1 className="slide-title">{slide.title}</h1>
         {slide.kind !== "conclusion" && <p className="slide-message">{slide.message}</p>}
       </header>
-      {slide.kind === "problem" ? (
-        <ProblemBody slide={slide} data={data} scale={scale} />
-      ) : slide.kind === "cause" ? (
-        <CauseSlide slide={slide} data={data} />
-      ) : slide.kind === "solution" ? (
-        <SolutionBody slide={slide} data={data} />
-      ) : slide.kind === "compare" ? (
-        <CompareBody slide={slide} data={data} scale={scale} />
-      ) : (
-        <div className="slide-body conclusion-body">
-          <p className="conclusion-message">{slide.message}</p>
-        </div>
-      )}
+      <SlideBody slide={slide} data={data} scale={scale} />
       <footer className="slide-foot">
         <span>{deck.title ?? data.model.name ?? data.name}</span>
         <span>
@@ -211,6 +213,26 @@ function SlideView({ deck, index, data, scale }: { deck: SlideDeck; index: numbe
       </footer>
     </section>
   );
+}
+
+/** スライドの種類ごとの中身。figure のときは、原因のスライドを図だけにする（グラフや図だけを描くとき） */
+function SlideBody({ slide, data, scale, figure = false }: { slide: Slide; data: ModelResponse; scale: number; figure?: boolean }) {
+  switch (slide.kind) {
+    case "problem":
+      return <ProblemBody slide={slide} data={data} scale={scale} />;
+    case "cause":
+      return <CauseSlide slide={slide} data={data} diagramOnly={figure} />;
+    case "solution":
+      return <SolutionBody slide={slide} data={data} />;
+    case "compare":
+      return <CompareBody slide={slide} data={data} scale={scale} />;
+    case "conclusion":
+      return (
+        <div className="slide-body conclusion-body">
+          <p className="conclusion-message">{slide.message}</p>
+        </div>
+      );
+  }
 }
 
 /** モデルの要素名の表記（大文字と小文字は区別しない）。なければ undefined */
@@ -361,7 +383,7 @@ function CompareBody({ slide, data, scale }: { slide: Extract<Slide, { kind: "co
                       <span className="compare-note">{r.note}</span>
                     ) : (
                       <>
-                        <span className="compare-value">{formatValue(v)}</span>
+                        <span className="compare-value">{formatReadable(v)}</span>
                         {!r.baseline && <span className="compare-change">{changeFrom(base, v)}</span>}
                       </>
                     )}

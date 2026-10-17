@@ -11,6 +11,7 @@ import { Diagram } from "./Diagram.js";
 // R / B はスライドに保存したもの。モデルのリンクの極性と合わないときや、ループになっていないときは、
 // set_slides の結果と、作業画面の「問題」の欄で知らせる（core の checkSlides）。ループになっていなくても、つながるところだけは目立たせる。
 // 発表モードでは動かさないので、図は押したり動かしたりできないようにする。
+// diagramOnly のときは図だけを出す（MCP の export_slides が、図だけの画像にするとき）。
 
 type CauseSlideData = Extract<Slide, { kind: "cause" }>;
 
@@ -26,7 +27,7 @@ const noSelect = () => undefined;
 const noMove = async () => undefined;
 const noChanged = new Set<string>();
 
-export function CauseSlide({ slide, data }: { slide: CauseSlideData; data: ModelResponse }) {
+export function CauseSlide({ slide, data, diagramOnly = false }: { slide: CauseSlideData; data: ModelResponse; diagramOnly?: boolean }) {
   const graph = useMemo(() => toGraph(data.model), [data.model]);
   const names = slide.loop.elements;
   const polarity = slide.loop.polarity;
@@ -34,22 +35,24 @@ export function CauseSlide({ slide, data }: { slide: CauseSlideData; data: Model
   // スライドの見出しがループの説明になっているので、図の札には種類の名前（強めるループなど）を出す
   const loop = useMemo<LoopView>(() => ({ name: LOOP_KIND_LABEL[polarity], kind: polarity, elements: names }), [names, polarity]);
   return (
-    <div className="slide-body cause-body">
+    <div className={diagramOnly ? "slide-body cause-body diagram-only" : "slide-body cause-body"}>
       <div className="cause-diagram">
         <ReactFlowProvider>
           <Diagram graph={graph} modelName={data.name} changed={noChanged} values={{}} onSelect={noSelect} onMove={noMove} embed loop={loop} />
         </ReactFlowProvider>
       </div>
-      <aside className={`loop-card loop-${polarity.toLowerCase()}`}>
-        <ol className={names.length > LONG_LOOP ? "loop-path is-long" : "loop-path"}>
-          {(names.length ? [...names, names[0]!] : []).map((n, i) => (
-            <li key={i} className={known.has(n.toLowerCase()) ? "" : "missing"} title={known.has(n.toLowerCase()) ? undefined : "モデルにない名前です"}>
-              {n}
-            </li>
-          ))}
-        </ol>
-        <p className="loop-note">{POLARITY_NOTE[polarity]}</p>
-      </aside>
+      {!diagramOnly && (
+        <aside className={`loop-card loop-${polarity.toLowerCase()}`}>
+          <ol className={names.length > LONG_LOOP ? "loop-path is-long" : "loop-path"}>
+            {(names.length ? [...names, names[0]!] : []).map((n, i) => (
+              <li key={i} className={known.has(n.toLowerCase()) ? "" : "missing"} title={known.has(n.toLowerCase()) ? undefined : "モデルにない名前です"}>
+                {n}
+              </li>
+            ))}
+          </ol>
+          <p className="loop-note">{POLARITY_NOTE[polarity]}</p>
+        </aside>
+      )}
     </div>
   );
 }

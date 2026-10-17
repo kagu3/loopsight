@@ -75,6 +75,16 @@ describe("筋書きをモデルと照らし合わせる", () => {
     expect(deck.slides[3]).toMatchObject({ scenarios: ["支援"] });
   });
 
+  test("比べるシナリオで、大文字と小文字だけが違う名前が重なっていれば 1 つにまとめる", () => {
+    const m = population();
+    setScenarios(m, [{ name: "Support", values: { "Birth Rate": 0.02 } }]);
+    const deck = toSlideDeck({
+      slides: [{ kind: "compare", title: "比べる", message: "減る", scenarios: ["support", "Support", "SUPPORT", "支援"], elements: ["Population"] }],
+    });
+    expect(checkSlides(m, deck).errors).toEqual([]);
+    expect(deck.slides[0]).toMatchObject({ scenarios: ["Support", "支援"] });
+  });
+
   test("ない要素、シナリオ、データの列は、何枚目かと「もしかして」を添えて返す", () => {
     const deck = toSlideDeck({
       slides: [

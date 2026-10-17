@@ -2246,6 +2246,38 @@ button.scenario-chip-button.on {
   break-before: page;
 }
 
+/* グラフや図だけを描く形（?view=present&figure=1&slide=N）。見出しなどは描かず、グラフの数に合う縦横の比の枠にする（MCP の export_slides が images/ の画像にする） */
+.present-figure {
+  background: var(--surface-1);
+}
+.present-figure .stage {
+  width: 100vw;
+}
+.present-figure .slide {
+  padding: 2cqw;
+}
+.present-figure .stage.n2 {
+  aspect-ratio: 2 / 1;
+}
+.present-figure .stage.n3,
+.present-figure .stage.n4 {
+  aspect-ratio: 4 / 3;
+}
+/* 比較は、グラフの下に値の並び（凡例を兼ねる）があるので少し高くする */
+.present-figure .stage.figure-compare.n1 {
+  aspect-ratio: 16 / 10;
+}
+.present-figure .stage.figure-compare.n2 {
+  aspect-ratio: 16 / 9;
+}
+.present-figure .stage.figure-compare.n3,
+.present-figure .stage.figure-compare.n4 {
+  aspect-ratio: 1 / 1;
+}
+.cause-body.diagram-only {
+  grid-template-columns: 1fr;
+}
+
 /* スライドの移動。マウスを乗せたときだけ出す（スライドの画像には写さない） */
 .present-nav {
   position: fixed;

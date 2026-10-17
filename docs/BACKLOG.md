@@ -34,8 +34,6 @@ Issue にしないのは、Issue をまとめて片付けるときに一緒に�
 
 - **極性が決まっていない原因スライドがあると、編集のたびに同じ警告が `slides_issues` と「問題」欄に出る。** 自動で足すリンクには極性が付かないので、brooks_law のようなモデルではスライドの枚数分の警告が毎回返る。警告は `set_slides` と `view_slides` のときだけにし、編集のあとは食い違い（errors）だけを返す、などを検討する。出どころ：[#24](https://github.com/suda0033/sd-modeler/pull/24)
 - **`set_scenarios` の `replace: true` でシナリオの名前を付け直すと、筋書きは追従しない。** `slides_issues` で知らせるので実害は小さい。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
-- **比較スライドで、シナリオ名の重複（大文字小文字違い）を除いていない。** 同じ線が 2 本出て、React の key も重なる。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
-- **比較スライドの値が `2,691.59` のように小数 2 桁で出る。** 説明資料としては、桁を丸めたほうが読みやすい。出どころ：[#23](https://github.com/suda0033/sd-modeler/pull/23)
 - **例の population の B ループは、R より見分けにくい。** Population → Deaths のリンクがフローの線に沿って、細いレンズ形になる。Death Rate と Deaths の位置を少しずらす。出どころ：[#24](https://github.com/suda0033/sd-modeler/pull/24)
 - **図の R / B の札は px 指定なので、全画面の発表では見出しに比べて小さく見える。** 出どころ：[#24](https://github.com/suda0033/sd-modeler/pull/24)
 

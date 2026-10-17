@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -63,7 +63,8 @@ import {
   type ScenarioPatch,
 } from "../core/index.js";
 import { BrowserNotFoundError, launchBrowser } from "../viewer/browser.js";
-import { startViewer } from "../viewer/server.js";
+import { loadModelResponse, startViewer } from "../viewer/server.js";
+import { hasFigure, slideCSV, slideFileBase, slidesMarkdown, type SlideFiles } from "../viewer/slides-export.js";
 
 // ---- 入力の形 ----
 
@@ -246,7 +247,7 @@ b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 
    - 比較（compare）：比べるシナリオと要素、注目する時点。「元のモデル」はいつも重なる
    - 結論（conclusion）：文章だけ
 c. view_slides でスライドを画像にして 1 枚ずつ確かめ、言いたいことがグラフから読み取れなければ直す。人はビューアの発表モード（http://localhost:5180/?view=present#<モデル名>）で ← → を押して見せる
-d. 資料を送るときは export_slides で PDF に書き出す（1 スライド 1 ページ。中身は止まった絵で、受け取った人は値を変えられない）
+d. 資料を送るときは export_slides でフォルダ（既定は exports/<モデル名>/）に書き出す。slides.pdf（1 スライド 1 ページ。そのまま送れる）、slides.md（骨子）、images/（グラフや図だけの画像）、data/（グラフの値の CSV）ができる。正式な提案資料を作るときは、slides.md と images/・data/ を素材に使う
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -920,17 +921,23 @@ export function registerTools(server: McpServer, store: ModelStore): void {
   server.registerTool(
     "export_slides",
     {
-      title: "説明資料を PDF に書き出す",
+      title: "説明資料をフォルダに書き出す",
       description:
-        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、1 スライド 1 ページの PDF に書き出す。" +
-        "ページは 16:9（13.33 × 7.5 インチ）で、文字のフォントを埋め込むので、ほかの PC でもそのまま開ける。中身は止まった絵で、受け取った人は値を変えられない。" +
-        "名前がモデルに合わないところ（errors）があれば書き出さない。書き出し先は作業フォルダの中（既定は exports/<モデル名>.pdf）。Edge か Chrome が必要。",
+        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、フォルダに書き出す。書き出し先は作業フォルダの中（既定は exports/<モデル名>/）。" +
+        "フォルダの中身：slides.pdf（1 スライド 1 ページの PDF。ページは 16:9 で、フォントを埋め込むので、そのまま送れる）、" +
+        "slides.md（骨子。資料の題、モデル、書き出した日時と、スライドごとの種類・見出し・言いたいこと・注目する要素や時点・ループ・シナリオの変える値・比較の値の表、画像と CSV へのリンク）、" +
+        "images/<番号>-<種類>.png（グラフや図だけの画像。見出しと言いたいことは入れない。問題と比較はグラフ、原因はループを目立たせた図。解決案と結論にはない）、" +
+        "data/<番号>-<種類>.csv（問題と比較のグラフの線の値。丸めない。UTF-8（BOM 付き）で、Excel でそのまま開ける）。" +
+        "正式な提案資料を作るときは、slides.md と images/・data/ を素材に使う（数字は CSV から取り、グラフは CSV から作り直すか画像を貼る）。" +
+        "同じフォルダに書き出し直すと、images/ と data/ の中身は入れ替える（ほかのファイルには触らない）。" +
+        "名前がモデルに合わないところ（errors）があれば書き出さない。Edge か Chrome が必要。",
       inputSchema: {
         model: modelName,
-        path: z.string().optional().describe("作業フォルダからの相対パス（既定は exports/<モデル名>.pdf）"),
+        path: z.string().optional().describe("書き出すフォルダ。作業フォルダからの相対パス（既定は exports/<モデル名>）"),
+        width: z.number().int().min(640).max(3840).optional().describe("images/ の画像の幅（既定 1280。高さはグラフや図に合わせる）"),
       },
     },
-    handle(async (a: { model: string; path?: string }) => {
+    handle(async (a: { model: string; path?: string; width?: number }) => {
       const m = await store.read(a.model);
       const read = await store.readSlidesText(a.model);
       if (!read) throw new StoreError(`モデル "${a.model}" の筋書きがありません。set_slides で保存してください。`);
@@ -938,23 +945,79 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
       if (errors.length) throw new ModelError(`筋書きに直すところが ${errors.length} つあるため、書き出しませんでした。`, errors);
       if (!deck.slides.length) throw new StoreError(`モデル "${a.model}" の筋書きにスライドがありません。`);
-      const rel = a.path ?? path.join("exports", `${a.model}.pdf`);
-      const file = store.resolveInside(rel.toLowerCase().endsWith(".pdf") ? rel : `${rel}.pdf`);
-      let pdf: Buffer;
+      const rel = a.path ?? path.join("exports", a.model);
+      if (rel.toLowerCase().endsWith(".pdf")) throw new StoreError(`path には書き出すフォルダを指定してください（"${rel}" は PDF のファイル名に見えます）。`);
+      const dir = store.resolveInside(rel);
+      if (path.relative(store.dir, dir) === "") throw new StoreError("作業フォルダそのものには書き出せません。exports/<モデル名> のようなフォルダを指定してください。");
+      if ((await stat(dir).catch(() => undefined))?.isFile()) throw new StoreError(`"${rel}" はファイルです。書き出すフォルダを指定してください。`);
+
+      // 値は、ビューアの画面と同じもの（グラフと CSV、比較のスライドと slides.md の値がずれないように）
+      const data = await loadModelResponse(store, a.model);
+      const figures = deck.slides.flatMap((s, i) => (hasFigure(s) ? [i + 1] : []));
+      let rendered: { pdf: Buffer; images: Map<number, Buffer> };
       try {
-        pdf = await renderSlidesPDF(store, a.model, deck.slides.length);
+        rendered = await renderSlidesExport(store, a.model, deck.slides.length, figures, a.width ?? 1280);
       } catch (e) {
         if (e instanceof BrowserNotFoundError) throw e;
-        throw new StoreError(`PDF にできませんでした: ${(e as Error).message}`);
+        throw new StoreError(`説明資料を書き出せませんでした: ${(e as Error).message}`);
       }
-      await store.writeBinaryFile(file, pdf);
+
+      // 中身をすべて作ってから書く
+      const contents = new Map<string, Buffer | string>([["slides.pdf", rendered.pdf]]);
+      const files: SlideFiles[] = [];
+      for (const [i, slide] of deck.slides.entries()) {
+        const base = slideFileBase(i, slide);
+        const f: SlideFiles = {};
+        const png = rendered.images.get(i + 1);
+        if (png) {
+          f.image = `images/${base}.png`;
+          contents.set(f.image, png);
+        }
+        const csv = slideCSV(data, slide);
+        if (csv) {
+          f.data = `data/${base}.csv`;
+          // Excel でそのまま開けるよう、BOM を付ける
+          contents.set(f.data, "﻿" + csv);
+        }
+        files.push(f);
+      }
+      contents.set("slides.md", slidesMarkdown(data, deck, { exportedAt: new Date(), pdf: "slides.pdf", files }));
+
+      // 先に新しいファイルを書き（1 つずつ一時ファイルから置き換える）、そのあとで images/ と data/ の古いファイルを消す。
+      // ほかのアプリで開かれていて書けなくても、古いファイルを消したあとで止まらないように
+      const busy = "ファイルがほかのアプリ（Excel や PDF のビューアなど）で開かれていないか確かめてから、もう一度書き出してください。";
+      for (const [relFile, content] of contents) {
+        const file = path.join(dir, ...relFile.split("/"));
+        try {
+          if (typeof content === "string") await store.writeTextFile(file, content);
+          else await store.writeBinaryFile(file, content);
+        } catch (e) {
+          throw new StoreError(`${relFile} を書けませんでした（${(e as Error).message}）。${busy}`);
+        }
+      }
+      // images/ と data/ は中身を入れ替える（消したスライドの画像や CSV が残らないように）。フォルダのほかのファイルには触らない
+      const leftovers: string[] = [];
+      for (const sub of ["images", "data"]) {
+        const entries = await readdir(path.join(dir, sub)).catch(() => [] as string[]);
+        for (const entry of entries) {
+          if (contents.has(`${sub}/${entry}`)) continue;
+          try {
+            await rm(path.join(dir, sub, entry), { recursive: true, force: true });
+          } catch {
+            leftovers.push(`${sub}/${entry}`);
+          }
+        }
+        // 空になったフォルダは消す（消せなくても困らない）
+        if (entries.length && !entries.some((e) => contents.has(`${sub}/${e}`))) await rmdir(path.join(dir, sub)).catch(() => undefined);
+      }
       return {
         model: a.model,
-        file,
-        pages: deck.slides.length,
+        dir,
+        files: [...contents.keys()].sort(),
         slides: deck.slides.map((s, i) => `${i + 1}. ${SLIDE_KIND_LABEL[s.kind]}：${s.title}`),
         warnings,
-        next_step: "このファイルを、そのまま説明する相手に送れます。",
+        ...(leftovers.length ? { cleanup_warning: `前に書き出した ${leftovers.join("、")} を消せませんでした。${busy}` } : {}),
+        next_step: "slides.pdf は、そのまま説明する相手に送れます。正式な提案資料を作るときは、slides.md と images/・data/ を素材に使えます（数字は data/ の CSV から取れます）。",
       };
     }),
   );
@@ -1015,8 +1078,17 @@ async function renderSlides(store: ModelStore, name: string, numbers: number[], 
 /** PDF のページの大きさ（16:9）。1 インチは 96 px なので、発表モードを幅 1280 px で開いたときの 1 枚がちょうど 1 ページになる */
 const PDF_PAGE = { width: 1280, height: 720 };
 
-/** ビューアを一時的に起動し、ヘッドレスのブラウザで発表モードのスライドをすべて並べて、1 枚 1 ページの PDF にする */
-async function renderSlidesPDF(store: ModelStore, name: string, count: number): Promise<Buffer> {
+/**
+ * ビューアを一時的に起動し、ヘッドレスのブラウザで発表モードを描いて、説明資料の PDF と、グラフや図だけの画像を作る。
+ * PDF はスライドをすべて並べて 1 枚 1 ページに。画像は figures のスライド（番号は 1 から）のグラフや図だけを、幅 width で描く（高さはグラフや図に合わせる）
+ */
+async function renderSlidesExport(
+  store: ModelStore,
+  name: string,
+  count: number,
+  figures: number[],
+  width: number,
+): Promise<{ pdf: Buffer; images: Map<number, Buffer> }> {
   if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
   const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
   try {
@@ -1035,7 +1107,25 @@ async function renderSlidesPDF(store: ModelStore, name: string, count: number): 
         printBackground: true,
         preferCSSPageSize: false,
       });
-      return Buffer.from(data as string, "base64");
+      const pdf = Buffer.from(data as string, "base64");
+
+      const images = new Map<number, Buffer>();
+      if (figures.length) {
+        // 枠の縦横の比は 1:1 まで（styles.css の .present-figure）なので、高さも幅と同じだけあれば収まる
+        await browser.setViewport(width, width);
+        const ready = (n: number) => `document.querySelector('.slide-figure[data-index="${n}"][data-ready="1"]')`;
+        await browser.open(`${viewer.url}?view=present&figure=1&slide=${figures[0]}#${encodeURIComponent(name)}`, ready(figures[0]!));
+        for (const n of figures) {
+          // 開き直さずに、アドレスの slide= を変えて切り替える（view_slides と同じ）
+          await browser.evaluate(
+            `(() => { const u = new URL(location.href); u.searchParams.set("slide", "${n}"); history.replaceState(null, "", u); dispatchEvent(new PopStateEvent("popstate")); })()`,
+          );
+          await browser.waitFor(ready(n));
+          await new Promise((r) => setTimeout(r, 400)); // グラフと図を描き終えるのを待つ
+          images.set(n, await browser.screenshot(".present-figure .stage"));
+        }
+      }
+      return { pdf, images };
     } finally {
       await browser.close();
     }

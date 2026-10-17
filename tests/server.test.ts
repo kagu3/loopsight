@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -347,7 +347,9 @@ describe("MCP server", () => {
     expect(err.issues[0].element).toBe("x");
     expect(await callError("export_model", { model: "e", path: "../../outside.json" })).toMatch(/外を指して/);
     await call("set_slides", { model: "e", slides: [{ kind: "conclusion", title: "結論", message: "まとめ" }] });
-    expect(await callError("export_slides", { model: "e", path: "../../outside.pdf" })).toMatch(/外を指して/);
+    expect(await callError("export_slides", { model: "e", path: "../../outside" })).toMatch(/外を指して/);
+    expect(await callError("export_slides", { model: "e", path: "out/e.pdf" })).toMatch(/フォルダを指定して/);
+    expect(await callError("export_slides", { model: "e", path: "." })).toMatch(/作業フォルダそのもの/);
     // どのエラーも { error } の JSON で返る
     expect(JSON.parse(await callError("get_model", { model: "none" })).error).toMatch(/見つかりません/);
     expect(JSON.parse(await callError("upsert_elements", { model: "e", elements: [{ name: "z" }] })).error).toMatch(/type が必要/);
@@ -480,18 +482,20 @@ describe("MCP server", () => {
     expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([800, 450]);
   }, 60_000);
 
-  test("export_slides は 1 スライド 1 ページの PDF を書き出す（ブラウザと画面のビルドがあるとき）", async () => {
-    await call("create_model", { model: "p" });
+  test("export_slides は PDF・骨子・画像・CSV をフォルダに書き出す（ブラウザと画面のビルドがあるとき）", async () => {
+    await call("create_model", { model: "p", simulation: { time_length: 50 } });
     await call("upsert_elements", { model: "p", elements: SIR });
-    await call("set_slides", {
-      model: "p",
-      slides: [
-        { kind: "problem", title: "感染が広がる", message: "山ができる", elements: ["Infected"] },
-        { kind: "cause", title: "うつす人が増える", message: "感染者が増えるほど広がる", loop: { elements: ["Infected", "Infection"], polarity: "R" } },
-        { kind: "conclusion", title: "結論", message: "対策が要る" },
-      ],
-    });
-    const res = await client.callTool({ name: "export_slides", arguments: { model: "p", path: "out/会議" } });
+    await call("set_scenarios", { model: "p", scenarios: [{ name: "外出を控える", description: "人と会う回数を減らす", values: { "Contact Rate": 0.2 } }] });
+    await call("import_data", { model: "p", content: "Day,Infected\n0,10\n10,40\n12.5,70\n" });
+    const slides = [
+      { kind: "problem", title: "感染が広がる", message: "山ができる", elements: ["Infected"], now: 10 },
+      { kind: "cause", title: "うつす人が増える", message: "感染者が増えるほど広がる", loop: { elements: ["Infected", "Infection"], polarity: "R" } },
+      { kind: "solution", title: "外出を控える", message: "会う回数を減らす", scenario: "外出を控える" },
+      { kind: "compare", title: "比べる", message: "山が低くなる", scenarios: ["外出を控える", "外出を控える"], elements: ["Infected"], at: 40 },
+      { kind: "conclusion", title: "結論", message: "対策が要る" },
+    ];
+    await call("set_slides", { model: "p", title: "感染症の対策", slides });
+    const res = await client.callTool({ name: "export_slides", arguments: { model: "p", path: "out/説明" } });
     const text = (res.content as { text: string }[])[0]!.text;
     if (res.isError) {
       // ブラウザか画面のビルドがない環境では、書き出せないことを知らせる
@@ -499,15 +503,55 @@ describe("MCP server", () => {
       return;
     }
     const out = JSON.parse(text);
-    expect(out.file).toBe(path.join(dir, "out", "会議.pdf"));
-    expect(out.pages).toBe(3);
-    const pdf = (await readFile(out.file)).toString("latin1");
+    const folder = path.join(dir, "out", "説明");
+    expect(out.dir).toBe(folder);
+    expect(out.files).toEqual(
+      ["data/01-problem.csv", "data/04-compare.csv", "images/01-problem.png", "images/02-cause.png", "images/04-compare.png", "slides.md", "slides.pdf"].sort(),
+    );
+    expect(out.next_step).toMatch(/slides\.md と images\/・data\//);
+
+    const pdf = (await readFile(path.join(folder, "slides.pdf"))).toString("latin1");
     expect(pdf.startsWith("%PDF-")).toBe(true);
     // 1 スライド 1 ページで、どのページも 16:9（13.33 × 7.5 インチ = 960 × 540 ポイント）
-    expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(3);
-    expect(pdf.match(/\/MediaBox \[[^\]]*\]/g)).toEqual(Array(3).fill("/MediaBox [0 0 960 540]"));
+    expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(5);
+    expect(pdf.match(/\/MediaBox \[[^\]]*\]/g)).toEqual(Array(5).fill("/MediaBox [0 0 960 540]"));
     // フォントを埋め込み、ビューア（127.0.0.1）へのリンクを残さない
     expect(pdf).toMatch(/\/FontFile2?\b/);
     expect(pdf).not.toMatch(/127\.0\.0\.1|\/URI/);
-  }, 60_000);
+
+    // 画像は幅 1280 の PNG。高さはグラフや図に合わせる（1 つのグラフと図は 16:9、比較は値の並びのぶん高い）
+    const size = async (f: string) => {
+      const png = await readFile(path.join(folder, f));
+      expect(png.subarray(1, 4).toString()).toBe("PNG");
+      return [png.readUInt32BE(16), png.readUInt32BE(20)];
+    };
+    expect(await size("images/01-problem.png")).toEqual([1280, 720]);
+    expect(await size("images/02-cause.png")).toEqual([1280, 720]);
+    expect(await size("images/04-compare.png")).toEqual([1280, 800]);
+
+    // slides.md からのリンクは、どれも書き出したファイルを指す
+    const md = await readFile(path.join(folder, "slides.md"), "utf8");
+    const links = [...md.matchAll(/\]\(([^)]+)\)/g)].map((x) => x[1]!);
+    expect(new Set(links)).toEqual(new Set(out.files.filter((f: string) => f !== "slides.md")));
+    expect(md).toMatch(/^# 感染症の対策\n/);
+    expect(md).toMatch(/## 2\. 原因：うつす人が増える\n\n言いたいこと：感染者が増えるほど広がる/);
+    expect(md).toMatch(/ループ：Infected → Infection → Infected/);
+
+    // CSV は BOM 付きの UTF-8。比較のシナリオの重なりは 1 つにまとめる
+    const csv = await readFile(path.join(folder, "data", "04-compare.csv"), "utf8");
+    expect(csv.startsWith("﻿時間,Infected（元のモデル）,Infected（外出を控える）\r\n")).toBe(true);
+    const problem = await readFile(path.join(folder, "data", "01-problem.csv"), "utf8");
+    expect(problem.split("\r\n")[0]).toBe("﻿時間,Infected（モデル）,Infected（実際のデータ）");
+    // モデルの刻みにない時刻の実際のデータは、行を足す（モデルの値は空）
+    expect(problem).toMatch(/\r\n12\.5,,70\r\n/);
+
+    // スライドを減らして書き出し直すと、消したスライドの画像と CSV は残らない。フォルダのほかのファイルには触らない
+    await writeFile(path.join(folder, "メモ.txt"), "残す");
+    await call("set_slides", { model: "p", slides: [slides[1], slides[4]] });
+    const again = await call("export_slides", { model: "p", path: "out/説明" });
+    expect(again.files).toEqual(["images/01-cause.png", "slides.md", "slides.pdf"]);
+    expect((await readdir(path.join(folder, "images"))).sort()).toEqual(["01-cause.png"]);
+    expect(await readdir(path.join(folder, "data")).catch(() => [])).toEqual([]);
+    expect(await readFile(path.join(folder, "メモ.txt"), "utf8")).toBe("残す");
+  }, 90_000);
 });

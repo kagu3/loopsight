@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { SLIDE_KIND_LABEL, emptyModel, upsertElements } from "../src/core/index.js";
-import { KIND_LABEL, changeFrom, isPrintFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "../web/src/presentation.js";
+import { KIND_LABEL, changeFrom, figureShape, isFigureFrom, isPrintFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "../web/src/presentation.js";
 
 describe("発表モード", () => {
   test("スライドの種類の呼び名はサーバーと同じ", () => {
@@ -18,6 +18,14 @@ describe("発表モード", () => {
     expect(isPrintFrom("?view=present&print=1")).toBe(true);
     expect(isPrintFrom("?view=present")).toBe(false);
     expect(isPrintFrom("?view=present&print=0")).toBe(false);
+  });
+
+  test("アドレスの figure=1 で、グラフや図だけを、グラフの数に合う形の枠に描く", () => {
+    expect(isFigureFrom("?view=present&figure=1&slide=2")).toBe(true);
+    expect(isFigureFrom("?view=present&slide=2")).toBe(false);
+    expect(figureShape({ kind: "problem", title: "a", message: "b", elements: ["A", "B", "C"] })).toBe("figure-problem n3");
+    expect(figureShape({ kind: "compare", title: "a", message: "b", scenarios: ["s"], elements: ["A"] })).toBe("figure-compare n1");
+    expect(figureShape({ kind: "cause", title: "a", message: "b", loop: { elements: ["A", "B"], polarity: "R" } })).toBe("figure-cause");
   });
 
   test("← → などのキーで進んだり戻ったりする。端では止まる", () => {

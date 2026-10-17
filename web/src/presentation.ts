@@ -1,6 +1,9 @@
 // 発表モードの、React に依存しない計算。
 import type { Equation, ModelJSON, ScenarioRunResult, Slide } from "../../src/viewer/api.js";
 
+// 比較スライドの値の計算は、export_slides の slides.md と同じものを使う
+export { changeFrom, valueAt } from "../../src/core/format.js";
+
 /** スライドの種類の呼び名（サーバーの SLIDE_KIND_LABEL と同じ。画面にエンジンを積まないよう、ここに持つ） */
 export const KIND_LABEL: Record<Slide["kind"], string> = { problem: "問題", cause: "原因", solution: "解決案", compare: "比較", conclusion: "結論" };
 
@@ -14,6 +17,20 @@ export function slideIndexFrom(search: string, count: number): number {
 /** アドレスに print=1 があれば、すべてのスライドを並べた印刷の形にする */
 export function isPrintFrom(search: string): boolean {
   return new URLSearchParams(search).get("print") === "1";
+}
+
+/**
+ * アドレスに figure=1 があれば、slide= のスライドのグラフや図だけを描く（見出しや言いたいことは描かない）。
+ * MCP の export_slides が、自分の資料に貼れる画像（images/）にする
+ */
+export function isFigureFrom(search: string): boolean {
+  return new URLSearchParams(search).get("figure") === "1";
+}
+
+/** グラフや図だけを描くときの枠の形（CSS のクラス）。グラフの数に合わせて縦横の比を変える */
+export function figureShape(slide: Slide): string {
+  if (slide.kind === "problem" || slide.kind === "compare") return `figure-${slide.kind} n${Math.min(slide.elements.length, 4)}`;
+  return `figure-${slide.kind}`;
 }
 
 /** 押したキーで、次に出すスライドの番号。関係ないキーなら undefined */
@@ -39,28 +56,6 @@ export function nextSlide(key: string, index: number, count: number): number | u
     default:
       return undefined;
   }
-}
-
-/** 時刻 t の値。刻みの間は前後の値から直線で補う。範囲の外や値のないところは null */
-export function valueAt(times: number[], values: (number | null)[] | undefined, t: number): number | null {
-  if (!values || times.length === 0) return null;
-  const eps = 1e-9 * Math.max(1, Math.abs(t));
-  if (t < times[0]! - eps || t > times.at(-1)! + eps) return null;
-  const j = times.findIndex((x) => x >= t - eps);
-  if (Math.abs(times[j]! - t) <= eps) return values[j] ?? null;
-  const a = values[j - 1];
-  const b = values[j];
-  if (a == null || b == null) return null;
-  return a + ((b - a) * (t - times[j - 1]!)) / (times[j]! - times[j - 1]!);
-}
-
-/** 「元のモデル」と比べた変化（+12% / −39%）。比べられなければ空文字 */
-export function changeFrom(base: number | null, value: number | null): string {
-  if (base === null || value === null || base === 0) return "";
-  const p = ((value - base) / Math.abs(base)) * 100;
-  const r = Math.round(p);
-  if (r === 0) return "±0%";
-  return `${r > 0 ? "+" : "−"}${Math.abs(r)}%`;
 }
 
 /** シナリオで変える値と、いまのモデルの値の組（解決案のスライドに出す） */
