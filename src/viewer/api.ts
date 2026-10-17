@@ -27,7 +27,7 @@ export interface ActualDataResult {
   issues: Issue[];
 }
 
-/** 会議資料の筋書き（<モデル名>.slides.json）。読めなかったときは deck がなく、issues にその理由が入る */
+/** 説明資料の筋書き（<モデル名>.slides.json）。読めなかったときは deck がなく、issues にその理由が入る */
 export interface SlidesResult {
   file: string;
   /** 版（ファイルの中身のハッシュ）。モデルとは別に持つ。筋書きだけが変わったときに、画面が気づけるように */
@@ -68,7 +68,7 @@ export interface ModelResponse {
   run_error?: { message: string; issues: Issue[] };
   /** 実際のデータ（あるときだけ） */
   actual?: ActualDataResult;
-  /** 会議資料の筋書き（あるときだけ） */
+  /** 説明資料の筋書き（あるときだけ） */
   slides?: SlidesResult;
 }
 

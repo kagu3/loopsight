@@ -10,7 +10,7 @@ export function Problems({ data, onSelect }: { data: ModelResponse; onSelect(nam
     })),
     ...data.validation.warnings.map((issue) => ({ level: "warning" as const, issue })),
     ...(data.actual?.issues ?? []).map((issue) => ({ level: "warning" as const, issue })),
-    // 会議資料の筋書きの問題は、作業画面でだけ知らせる（発表モードには出さない）
+    // 説明資料の筋書きの問題は、作業画面でだけ知らせる（発表モードには出さない）
     ...(data.slides?.issues ?? []).map((issue) => ({ level: "warning" as const, issue })),
   ];
   if (!issues.length) return null;

@@ -237,7 +237,7 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
 7. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
-「会議資料を作って」と頼まれたら（SD を知らない人に、問題と解決案を順に見せる資料）:
+「説明資料を作って」と頼まれたら（SD を知らない身近な人に、問題と解決案を順に見せる資料。決定権がある人向けの正式な提案資料の素材にもなる）:
 a. get_model と run_simulation でモデルの振る舞いを確かめる。実際のデータ（実績）があれば import_data で取り込む。比べるシナリオがなければ set_scenarios で保存する（description に、どんなシナリオかを書く）
 b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 比較 → 結論 の順に並べ、どのスライドにも見出しと「言いたいこと」の 1 文を書く。式や SD の用語は使わず、グラフから読み取れることを書く
    - 問題（problem）：注目する要素、実際のデータ、「今」の時点。モデルの線に実際のデータの点が重なり、モデルが問題を再現していることを見せる
@@ -437,7 +437,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、各要素の位置を返す。" +
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
-        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議資料の「原因」のスライド向けの表示）。",
+        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（説明資料の「原因」のスライド向けの表示）。",
       inputSchema: {
         model: modelName,
         image: z.boolean().optional().describe("画像を付ける（既定は true）。一覧だけでよければ false"),
@@ -834,9 +834,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
   server.registerTool(
     "set_slides",
     {
-      title: "会議資料の筋書きを保存する",
+      title: "説明資料の筋書きを保存する",
       description:
-        "会議資料の筋書きを作業フォルダの <モデル名>.slides.json に保存する（今の筋書きはすべて置き換える）。ビューアの発表モードで、スライドを順に見せる。" +
+        "説明資料の筋書きを作業フォルダの <モデル名>.slides.json に保存する（今の筋書きはすべて置き換える）。ビューアの発表モードで、スライドを順に見せる。" +
         "スライドの種類は problem（問題）、cause（原因）、solution（解決案）、compare（比較）、conclusion（結論）で、この順に並べる。どのスライドにも title（見出し）と message（言いたいこと 1 文）を書く。" +
         "要素名、シナリオの名前、実際のデータの列名が実在するかを確かめ、合わなければ保存せずに issues（何枚目の何が合わないか、「もしかして」）を返す。" +
         "原因のスライドは、loop.elements がつながる順のループになっているか、polarity がリンクの極性から決まる R / B と合うかも確かめる（極性が決まっていなければ warnings で知らせて保存する）。" +
@@ -876,7 +876,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "スライドを見る",
       description:
-        "会議資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で 1 枚ずつ PNG の画像にして返す。" +
+        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で 1 枚ずつ PNG の画像にして返す。" +
         "あわせて、筋書きの中身と版、名前がモデルに合わないところ（errors）と確かめたほうがよいところ（warnings）を返す。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、中身だけ返す）。",
       inputSchema: {
@@ -920,9 +920,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
   server.registerTool(
     "export_slides",
     {
-      title: "会議資料を PDF に書き出す",
+      title: "説明資料を PDF に書き出す",
       description:
-        "会議資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、1 スライド 1 ページの PDF に書き出す。" +
+        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、1 スライド 1 ページの PDF に書き出す。" +
         "ページは 16:9（13.33 × 7.5 インチ）で、文字のフォントを埋め込むので、ほかの PC でもそのまま開ける。中身は止まった絵で、受け取った人は値を変えられない。" +
         "名前がモデルに合わないところ（errors）があれば書き出さない。書き出し先は作業フォルダの中（既定は exports/<モデル名>.pdf）。Edge か Chrome が必要。",
       inputSchema: {
@@ -954,7 +954,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         pages: deck.slides.length,
         slides: deck.slides.map((s, i) => `${i + 1}. ${SLIDE_KIND_LABEL[s.kind]}：${s.title}`),
         warnings,
-        next_step: "このファイルを、そのまま会議の参加者に送れます。",
+        next_step: "このファイルを、そのまま説明する相手に送れます。",
       };
     }),
   );

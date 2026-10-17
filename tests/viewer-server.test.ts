@@ -261,7 +261,7 @@ describe("実際のデータ", () => {
   });
 });
 
-describe("会議資料の筋書き", () => {
+describe("説明資料の筋書き", () => {
   const deck = {
     slides: [
       { kind: "problem" as const, title: "増える", message: "増え続ける", elements: ["Population"], now: 5 },

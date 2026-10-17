@@ -6,7 +6,7 @@ import { ImportError } from "./importer.js";
 import { describeLoop, LOOP_KIND_LABEL } from "./loops.js";
 import type { Issue } from "./validate.js";
 
-// 会議資料の筋書き（<モデル名>.slides.json）。ビューアの発表モードで、スライドを順に見せる。
+// 説明資料の筋書き（<モデル名>.slides.json）。ビューアの発表モードで、スライドを順に見せる。
 // エンジンは ModelJSON の決まったキー以外を受け付けないので、モデルのファイルには入れず、別のファイルに置く。
 // どのスライドにも見出し（title）と「言いたいこと」の 1 文（message）を持たせる。
 

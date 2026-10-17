@@ -153,7 +153,7 @@ async function actualData(store: ModelStore, name: string, model: ModelJSON): Pr
   }
 }
 
-/** 会議資料の筋書きを読み、モデルに合うか確かめて返す。ファイルがなければ undefined */
+/** 説明資料の筋書きを読み、モデルに合うか確かめて返す。ファイルがなければ undefined */
 async function slidesResult(store: ModelStore, name: string, model: ModelJSON, data: ActualData | undefined): Promise<SlidesResult | undefined> {
   const read = await store.readSlidesText(name);
   if (!read) return undefined;

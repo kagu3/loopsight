@@ -52,7 +52,8 @@ describe("MCP server", () => {
   test("クライアントから接続でき、19 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
-    expect(client.getInstructions()).toMatch(/「会議資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
+    expect(client.getInstructions()).toMatch(/「説明資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
+    expect(client.getInstructions()).toMatch(/「説明資料を作って」[^\n]*正式な提案資料の素材/);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
@@ -265,7 +266,7 @@ describe("MCP server", () => {
     expect(await callError("import_data", { model: "sir" })).toMatch(/path か content/);
   });
 
-  test("会議資料の筋書きを保存し、名前を変えると筋書きの中も直す", async () => {
+  test("説明資料の筋書きを保存し、名前を変えると筋書きの中も直す", async () => {
     await call("create_model", { model: "sir", simulation: { time_length: 100, time_units: "DAYS" } });
     await call("upsert_elements", { model: "sir", elements: SIR });
     await call("set_scenarios", { model: "sir", scenarios: [{ name: "外出を控える", description: "接触を半分にする", values: { "Contact Rate": 0.2 } }] });

@@ -8,7 +8,7 @@ import { TIME_UNIT_LABEL, formatTime, formatValue } from "./Chart.js";
 import { KIND_LABEL, changeFrom, isPrintFrom, nextSlide, scenarioChanges, slideIndexFrom, valueAt } from "./presentation.js";
 import { BASELINE_NAME } from "./scenarios.js";
 
-// 発表モード（?view=present#<モデル名>）。会議で、SD を知らない人にスライドを順に見せる。
+// 発表モード（?view=present#<モデル名>）。SD を知らない身近な人に、説明資料のスライドを順に見せる。
 // 筋書き（<モデル名>.slides.json）は AI が MCP の set_slides で作る。この画面では作らない。
 // 16:9 の枠に大きな文字で 1 枚ずつ出し、← → で進む。式や編集の欄、問題の一覧は出さない。グラフの縦軸は実際の値。
 // AI が筋書きやモデルを直すと、変更の知らせ（Server-Sent Events）で読み直して、その場で変わる。
@@ -134,7 +134,7 @@ export function Present() {
   else if (!name) content = <StageMessage text="アドレスの # のあとに、モデルの名前を付けて開いてください（例：?view=present#population）。" />;
   else if (!data) content = <StageMessage text="読み込んでいます…" />;
   else if (!data.slides) {
-    content = <StageMessage text={`このモデルには会議資料の筋書きがありません。AI に「会議資料を作って」と頼むと、筋書き（${name}.slides.json）ができて、ここに出ます。`} />;
+    content = <StageMessage text={`このモデルには説明資料の筋書きがありません。AI に「説明資料を作って」と頼むと、筋書き（${name}.slides.json）ができて、ここに出ます。`} />;
   } else if (!deck) content = <StageMessage text={data.slides.issues[0]?.message ?? "筋書きを読めません。"} />;
   else if (!count) content = <StageMessage text="筋書きにスライドがありません。" />;
   else if (print) {

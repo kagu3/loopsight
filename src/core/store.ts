@@ -103,7 +103,7 @@ export class ModelStore {
     }
   }
 
-  /** 会議資料の筋書きのファイル（<モデル名>.slides.json）。モデルの一覧には出さない */
+  /** 説明資料の筋書きのファイル（<モデル名>.slides.json）。モデルの一覧には出さない */
   slidesPathOf(name: string): string {
     return path.join(this.dir, `${checkModelName(name)}.slides.json`);
   }

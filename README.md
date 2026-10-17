@@ -64,10 +64,10 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 
 作業フォルダの中には、ほかに次のものが作られる。
 
-- `exports/`：`export_model` で書き出した Web 版向けのファイルと、`export_slides` で書き出した会議資料の PDF
+- `exports/`：`export_model` で書き出した Web 版向けのファイルと、`export_slides` で書き出した説明資料の PDF
 - `output/`：`run_simulation` で保存した CSV
 - `<モデル名>.data.csv`：`import_data` で取り込んだ実際のデータ（1 列目が時刻、ほかの列が要素名）。モデルの一覧には出さない。要素の名前を変えると、列名も直す
-- `<モデル名>.slides.json`：`set_slides` で保存した会議資料の筋書き。モデルの一覧には出さない。要素やシナリオの名前を変えると、筋書きの中の名前も直す
+- `<モデル名>.slides.json`：`set_slides` で保存した説明資料の筋書き。モデルの一覧には出さない。要素やシナリオの名前を変えると、筋書きの中の名前も直す
 
 ## ツール
 
@@ -89,7 +89,7 @@ claude mcp add --scope user sd-modeler -- node /absolute/path/to/sd-modeler/dist
 | `run_simulation` | 実行して要約（初期値、最終値、最小と最大、間引いた時系列）を返す。CSV にも保存できる |
 | `sweep_parameter` | パラメータを振って比較する（感度分析）。複数の値を変えた組（scenarios）や、set_scenarios で保存したシナリオも比べられる |
 | `import_data` | 実際のデータ（実績や観測値）の CSV を取り込み、`<モデル名>.data.csv` に保存する。ビューアのグラフで、要素の線に点で重ねる。要素名と合わない列は「もしかして」を付けて知らせる |
-| `set_slides` | 会議資料の筋書き（問題 → 原因 → 解決案 → 比較 → 結論のスライド）を `<モデル名>.slides.json` に保存する。要素名、シナリオの名前、実際のデータの列名が実在するか、原因のループがループになっていて R / B がリンクの極性と合うかを確かめ、合わなければ保存せずに「もしかして」などを付けて返す |
+| `set_slides` | 説明資料の筋書き（問題 → 原因 → 解決案 → 比較 → 結論のスライド）を `<モデル名>.slides.json` に保存する。要素名、シナリオの名前、実際のデータの列名が実在するか、原因のループがループになっていて R / B がリンクの極性と合うかを確かめ、合わなければ保存せずに「もしかして」などを付けて返す |
 | `view_slides` | 筋書きのスライドを、ビューアの発表モードと同じ描き方で 1 枚ずつ PNG の画像にして返す（画像には Edge か Chrome が必要） |
 | `export_slides` | 筋書きのスライドを、発表モードと同じ描き方で 1 スライド 1 ページ（16:9）の PDF に書き出す。フォントを埋め込むので、ほかの PC でもそのまま開ける（Edge か Chrome が必要） |
 
@@ -107,9 +107,9 @@ Claude Code に次のように頼む。
 
 > 「出生率を 4% に上げる」と「移民を毎年 20 人受け入れる」の 2 つのシナリオを保存して。ビューアで元のモデルと比べたい。
 
-> 会議資料を作って。（問題 → 原因 → 解決案 → 比較 → 結論の筋書きができ、ビューアの発表モードで見せられる）
+> 説明資料を作って。（問題 → 原因 → 解決案 → 比較 → 結論の筋書きができ、ビューアの発表モードで見せられる）
 
-> 会議資料を PDF にして。（`exports/<モデル名>.pdf` にでき、そのまま送れる。中身は止まった絵で、受け取った人は値を変えられない）
+> 説明資料を PDF にして。（`exports/<モデル名>.pdf` にでき、そのまま送れる。中身は止まった絵で、受け取った人は値を変えられない）
 
 > ~/Downloads/model.InsightMaker を取り込んで、どんなモデルか説明して。
 
@@ -129,7 +129,7 @@ Claude Code に次のように頼む。
    - Import/Export は、エディタ右上の共有アイコン（3 つの点を線でつないだ形）を押すと、メニューの下のほうに出てくる。上向きの矢印が読み込み
    - モデルにグラフや表の設定がなければ、書き出すときにストックの時系列グラフを 1 つ足す（`chart: false` で足さない）。ほかの要素を見たいときは、SIMULATE のあと「ADD DISPLAY」で足す
 
-[examples/population.json](examples/population.json) は、この MCP で作って書き出した例（シナリオを 2 つ保存してある）。[examples/population.data.csv](examples/population.data.csv) は、その実際のデータの例（`import_data` で取り込むと、ビューアのグラフに点で重なる）。[examples/population.slides.json](examples/population.slides.json) は、その会議資料の筋書きの例（3 つのファイルを作業フォルダに置くと、ビューアの発表モードで見られる）。
+[examples/population.json](examples/population.json) は、この MCP で作って書き出した例（シナリオを 2 つ保存してある）。[examples/population.data.csv](examples/population.data.csv) は、その実際のデータの例（`import_data` で取り込むと、ビューアのグラフに点で重なる）。[examples/population.slides.json](examples/population.slides.json) は、その説明資料の筋書きの例（3 つのファイルを作業フォルダに置くと、ビューアの発表モードで見られる）。
 
 ## ビューア（Web 画面）
 

@@ -49,7 +49,7 @@ function story(): SlideDeck {
 
 const data = () => parseDataCSV("Year,Population\n0,100\n30,240\n");
 
-describe("会議資料の筋書きを読む", () => {
+describe("説明資料の筋書きを読む", () => {
   test("決まったキーだけの筋書きにする。知らないキーは捨てる", () => {
     const deck = toSlideDeck({ slides: [{ kind: "conclusion", title: "結論", message: "進める", extra: 1 }] });
     expect(deck).toEqual({ slides: [{ kind: "conclusion", title: "結論", message: "進める" }] });
