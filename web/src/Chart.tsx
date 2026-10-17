@@ -22,6 +22,7 @@ import {
   type CompareRuns,
   type MatrixCell,
 } from "./scenarios.js";
+import { formatTime, formatValue } from "./format.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
 // 実行結果の時系列グラフと表。
@@ -45,18 +46,8 @@ export const TIME_UNIT_LABEL: Record<string, string> = {
   years: "年",
 };
 
-export function formatValue(v: number | null | undefined): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  const abs = Math.abs(v);
-  if (abs !== 0 && (abs >= 1e9 || abs < 1e-3)) return v.toExponential(3);
-  return v.toLocaleString("ja-JP", { maximumFractionDigits: abs >= 100 ? 2 : 4 });
-}
-
-/** 時刻は桁区切りなし（2014.5 年のように） */
-export function formatTime(t: number | null | undefined): string {
-  if (t === null || t === undefined || !Number.isFinite(t)) return "—";
-  return t.toLocaleString("ja-JP", { useGrouping: false, maximumFractionDigits: 4 });
-}
+// 値と時刻の書き方は、図（diagramValues.ts）と同じものを使う
+export { formatTime, formatValue };
 
 /** グラフに出せる要素（数値の結果があるもの）を、モデルの並び順で */
 function candidatesOf(model: ModelJSON, run: RunResult): SeriesCandidate[] {
@@ -160,6 +151,8 @@ export interface ChartProps {
   onRemoveScenarioValue?(element: string): Promise<string | undefined>;
   /** シナリオの凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「元のモデル」では呼ばない */
   onFocusScenario?(name: string | undefined): void;
+  /** グラフにカーソルを乗せている時刻が変わった（外したら undefined）。図の要素に、その時刻の値を出す */
+  onHoverTime?(t: number | undefined): void;
 }
 
 /** 「元のモデル」の線の色と点線 */
@@ -190,6 +183,7 @@ export function Chart({
   onRemoveScenario,
   onRemoveScenarioValue,
   onFocusScenario,
+  onHoverTime,
 }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
@@ -241,10 +235,13 @@ export function Chart({
       if (err) refocusToolbarAdd.current = false;
       return err;
     });
-  // シナリオを重ねたグラフにカーソルを乗せている時点（シナリオの中身の表の、結果の行に出す）
+  // グラフにカーソルを乗せている時点（シナリオの中身の表の、結果の行に出す。図の要素の値にも使う）
   const [hoverTime, setHoverTime] = useState<number | undefined>();
   // マウスが出ないままグラフが消えたり（要素を外す・表にする）、別のモデルを開いたりしたら、時点を忘れる
   useEffect(() => setHoverTime(undefined), [modelName, view, visible]);
+  // 図に知らせる。知らせる先が変わったり、グラフが消えたりしたら、前の先には「外した」と知らせる
+  useEffect(() => onHoverTime?.(hoverTime), [hoverTime, onHoverTime]);
+  useEffect(() => () => onHoverTime?.(undefined), [onHoverTime]);
   const setScale = (s: Scale) => {
     setScaleState(s);
     saveScale(s);
@@ -473,7 +470,17 @@ export function Chart({
       ) : view === "chart" ? (
         <div className="chart-area">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={withActual.rows} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+            <LineChart
+              data={withActual.rows}
+              margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
+              // 時点を使うのは、図に値を出しているときと、表でシナリオを足しているときだけ。使わないときは、カーソルを動かしても描き直さない
+              onMouseMove={
+                onHoverTime || adding
+                  ? (s) => setHoverTime(s.isTooltipActive && s.activeTooltipIndex != null ? (withActual.rows[Number(s.activeTooltipIndex)]?.t ?? undefined) : undefined)
+                  : undefined
+              }
+              onMouseLeave={() => setHoverTime(undefined)}
+            >
               <CartesianGrid stroke="var(--grid)" vertical={false} />
               <XAxis
                 dataKey="t"

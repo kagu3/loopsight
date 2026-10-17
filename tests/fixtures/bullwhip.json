@@ -1,0 +1,490 @@
+{
+  "engine": "SIMULATION_PACKAGE",
+  "name": "ブルウィップ効果",
+  "simulation": {
+    "algorithm": "RK1",
+    "time_start": 0,
+    "time_length": 60,
+    "time_step": 1,
+    "time_units": "WEEKS"
+  },
+  "elements": [
+    {
+      "type": "VARIABLE",
+      "name": "消費者の需要",
+      "description": "週あたりの需要。5 週目に 100 から 120 へ上がる",
+      "behavior": {
+        "value": "100 + Step(5, 20)"
+      },
+      "display": {
+        "coordinates": [
+          1140,
+          180
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "予測の期間",
+      "description": "注文をならして予測するときの期間（週）",
+      "behavior": {
+        "value": 4
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 1,
+        "interactive_max": 12,
+        "coordinates": [
+          260,
+          460
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "在庫の目安週数",
+      "description": "何週分の在庫を持ちたいか",
+      "behavior": {
+        "value": 4
+      },
+      "display": {
+        "coordinates": [
+          480,
+          460
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "在庫の調整時間",
+      "description": "在庫の不足を何週で埋めようとするか。短いほど慌てて発注する",
+      "behavior": {
+        "value": 2
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 1,
+        "interactive_max": 10,
+        "coordinates": [
+          700,
+          460
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "出荷の遅れ",
+      "description": "注文を受けてから品物が届くまで（週）",
+      "behavior": {
+        "value": 2
+      },
+      "display": {
+        "coordinates": [
+          920,
+          460
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "生産の遅れ",
+      "description": "生産指示から完成まで（週）",
+      "behavior": {
+        "value": 3
+      },
+      "display": {
+        "coordinates": [
+          40,
+          460
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "小売の在庫",
+      "behavior": {
+        "initial_value": 400,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          920,
+          300
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "卸の在庫",
+      "behavior": {
+        "initial_value": 400,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          560,
+          300
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "工場の在庫",
+      "behavior": {
+        "initial_value": 400,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          200,
+          300
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "販売",
+      "from": "小売の在庫",
+      "to": null,
+      "behavior": {
+        "value": "Min([消費者の需要], [小売の在庫])"
+      },
+      "display": {
+        "to_coordinates": [
+          1180,
+          320
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "卸から小売への出荷",
+      "from": "卸の在庫",
+      "to": "小売の在庫",
+      "behavior": {
+        "value": "Min(Delay([小売の発注], [出荷の遅れ], 100), [卸の在庫])"
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "工場から卸への出荷",
+      "from": "工場の在庫",
+      "to": "卸の在庫",
+      "behavior": {
+        "value": "Min(Delay([卸の発注], [出荷の遅れ], 100), [工場の在庫])"
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "生産",
+      "from": null,
+      "to": "工場の在庫",
+      "behavior": {
+        "value": "Delay([工場の生産指示], [生産の遅れ], 100)"
+      },
+      "display": {
+        "from_coordinates": [
+          60,
+          320
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "小売の需要予測",
+      "behavior": {
+        "value": "Smooth([消費者の需要], [予測の期間], 100)"
+      },
+      "display": {
+        "coordinates": [
+          980,
+          60
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "小売の目標在庫",
+      "behavior": {
+        "value": "[小売の需要予測] * [在庫の目安週数]"
+      },
+      "display": {
+        "coordinates": [
+          980,
+          180
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "小売の発注",
+      "description": "卸へ出す注文。届いていない注文は考えない",
+      "behavior": {
+        "value": "Max(0, [小売の需要予測] + ([小売の目標在庫] - [小売の在庫]) / [在庫の調整時間])"
+      },
+      "display": {
+        "coordinates": [
+          780,
+          180
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "卸の需要予測",
+      "behavior": {
+        "value": "Smooth([小売の発注], [予測の期間], 100)"
+      },
+      "display": {
+        "coordinates": [
+          620,
+          60
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "卸の目標在庫",
+      "behavior": {
+        "value": "[卸の需要予測] * [在庫の目安週数]"
+      },
+      "display": {
+        "coordinates": [
+          620,
+          180
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "卸の発注",
+      "description": "工場へ出す注文",
+      "behavior": {
+        "value": "Max(0, [卸の需要予測] + ([卸の目標在庫] - [卸の在庫]) / [在庫の調整時間])"
+      },
+      "display": {
+        "coordinates": [
+          420,
+          180
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "工場の需要予測",
+      "behavior": {
+        "value": "Smooth([卸の発注], [予測の期間], 100)"
+      },
+      "display": {
+        "coordinates": [
+          260,
+          60
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "工場の目標在庫",
+      "behavior": {
+        "value": "[工場の需要予測] * [在庫の目安週数]"
+      },
+      "display": {
+        "coordinates": [
+          260,
+          180
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "工場の生産指示",
+      "description": "工場が生産ラインに出す指示",
+      "behavior": {
+        "value": "Max(0, [工場の需要予測] + ([工場の目標在庫] - [工場の在庫]) / [在庫の調整時間])"
+      },
+      "display": {
+        "coordinates": [
+          60,
+          180
+        ]
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要",
+      "to": "販売"
+    },
+    {
+      "type": "LINK",
+      "from": "小売の発注",
+      "to": "卸から小売への出荷"
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "卸から小売への出荷"
+    },
+    {
+      "type": "LINK",
+      "from": "卸の発注",
+      "to": "工場から卸への出荷"
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "工場から卸への出荷"
+    },
+    {
+      "type": "LINK",
+      "from": "工場の生産指示",
+      "to": "生産"
+    },
+    {
+      "type": "LINK",
+      "from": "生産の遅れ",
+      "to": "生産"
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要",
+      "to": "小売の需要予測"
+    },
+    {
+      "type": "LINK",
+      "from": "予測の期間",
+      "to": "小売の需要予測"
+    },
+    {
+      "type": "LINK",
+      "from": "小売の需要予測",
+      "to": "小売の目標在庫"
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の目安週数",
+      "to": "小売の目標在庫"
+    },
+    {
+      "type": "LINK",
+      "from": "小売の需要予測",
+      "to": "小売の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "小売の目標在庫",
+      "to": "小売の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "小売の在庫",
+      "to": "小売の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の調整時間",
+      "to": "小売の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "小売の発注",
+      "to": "卸の需要予測"
+    },
+    {
+      "type": "LINK",
+      "from": "予測の期間",
+      "to": "卸の需要予測"
+    },
+    {
+      "type": "LINK",
+      "from": "卸の需要予測",
+      "to": "卸の目標在庫"
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の目安週数",
+      "to": "卸の目標在庫"
+    },
+    {
+      "type": "LINK",
+      "from": "卸の需要予測",
+      "to": "卸の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "卸の目標在庫",
+      "to": "卸の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "卸の在庫",
+      "to": "卸の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の調整時間",
+      "to": "卸の発注"
+    },
+    {
+      "type": "LINK",
+      "from": "卸の発注",
+      "to": "工場の需要予測"
+    },
+    {
+      "type": "LINK",
+      "from": "予測の期間",
+      "to": "工場の需要予測"
+    },
+    {
+      "type": "LINK",
+      "from": "工場の需要予測",
+      "to": "工場の目標在庫"
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の目安週数",
+      "to": "工場の目標在庫"
+    },
+    {
+      "type": "LINK",
+      "from": "工場の需要予測",
+      "to": "工場の生産指示"
+    },
+    {
+      "type": "LINK",
+      "from": "工場の目標在庫",
+      "to": "工場の生産指示"
+    },
+    {
+      "type": "LINK",
+      "from": "工場の在庫",
+      "to": "工場の生産指示"
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の調整時間",
+      "to": "工場の生産指示"
+    }
+  ],
+  "description": "消費者・小売・卸・工場の 4 段のサプライチェーン。5 週目に消費者の需要が 100 から 120 へ 20% だけ上がる。各段は「受けた注文の予測」に「在庫の不足分」を足して上流へ発注するが、すでに発注済みで届いていない分（輸送中・生産中）を考えない。そのため上流に行くほど発注量の振れが大きくなり（ブルウィップ効果）、工場では需要の 20% の変化が大きな波になる。比べるには「小売の発注」「卸の発注」「工場の生産指示」を「消費者の需要」と並べてグラフで見る。",
+  "visualizations": [
+    {
+      "type": "TIME_SERIES",
+      "name": "発注の振れ",
+      "elements": [
+        "消費者の需要",
+        "小売の発注",
+        "卸の発注",
+        "工場の生産指示"
+      ]
+    },
+    {
+      "type": "TIME_SERIES",
+      "name": "在庫",
+      "elements": [
+        "小売の在庫",
+        "卸の在庫",
+        "工場の在庫"
+      ]
+    }
+  ]
+}

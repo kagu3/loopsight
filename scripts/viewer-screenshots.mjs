@@ -265,6 +265,43 @@ try {
   await setColorScheme("dark");
   await b.open(url("disease"));
   await shot("dark");
+
+  // 図の「値を表示」：ブルウィップ効果のモデルで、要素ごとの最大の振れを出したところ。
+  // 一覧の場面に出ないよう、モデルはここで足す（ページは開き直さず、# だけ変える）。図を広く見せるため、左の欄をたたむ
+  await setColorScheme("light");
+  const bullwhip = JSON.parse(readFileSync(path.join(root, "tests/fixtures/bullwhip.json"), "utf8"));
+  await store.write("bullwhip", bullwhip);
+  await b.evaluate("location.hash = 'bullwhip'");
+  await b.waitFor("document.querySelector('.react-flow__node[data-id=\"el:工場の生産指示\"]')");
+  await b.click(".sidebar-collapse");
+  await sleep(500);
+  await b.clickText(".value-tools .edit-toggle", "値を表示");
+  await b.waitFor("document.querySelector('.live-value')");
+  await sleep(300);
+  await shot("diagram-values");
+
+  // グラフにカーソルを乗せて、その時刻（9 週あたり）の値を出したところ
+  const bwChart = await b.rectOf(".chart-area");
+  await b.hover(bwChart.x + bwChart.width * 0.2, bwChart.y + bwChart.height * 0.5);
+  await b.waitFor("document.querySelector('.value-caption')?.textContent.endsWith('週の値')");
+  await sleep(200);
+  // 範囲を決めずに撮ると、カーソルがグラフから外れたことになるので、右側（図とグラフ）の範囲で撮る
+  await shot("diagram-values-hover", ".main");
+  await b.hover(W - 4, 60);
+
+  // シナリオを保存して、そのシナリオの値を出したところ（図の欄だけを撮る）
+  core.setScenarios(bullwhip, [{ name: "在庫をゆっくり直す", description: "在庫の不足を 8 週かけて埋める", values: { 在庫の調整時間: 8 } }]);
+  await store.write("bullwhip", bullwhip);
+  await b.waitFor("document.querySelector('.value-scenario')");
+  await b.evaluate(`(() => {
+    const s = document.querySelector('.value-scenario');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, '在庫をゆっくり直す');
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await sleep(300);
+  await shot("diagram-values-scenario", ".diagram");
+  // 覚えた「値を表示」は、次に撮るときのために消しておく
+  await b.evaluate("localStorage.removeItem('viewer.diagramValues')");
 } finally {
   await b.close();
   await viewer.close();

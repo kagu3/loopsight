@@ -2,9 +2,10 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
 import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
-import { Chart, formatValue, scenarioColor } from "./Chart.js";
+import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details } from "./Details.js";
-import { Diagram, type LinkEnds, type ScenarioMarks } from "./Diagram.js";
+import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type ValueTools } from "./Diagram.js";
+import { nodeValues, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
 import { addElementPatches, linkProblem, linkRemoveProblem, reconnectPatches, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
@@ -80,6 +81,23 @@ function saveModelsOpen(open: boolean) {
   }
 }
 
+/** 図の要素に値を出すか（図の欄の「値を表示」）。ブラウザに覚えておく（使えなければ毎回オフ） */
+const SHOW_VALUES_KEY = "viewer.diagramValues";
+function loadShowValues(): boolean {
+  try {
+    return localStorage.getItem(SHOW_VALUES_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveShowValues(on: boolean) {
+  try {
+    localStorage.setItem(SHOW_VALUES_KEY, on ? "1" : "0");
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
 /** 下の欄（グラフ・表）の高さの割合。境界線のドラッグで変え、ブラウザに覚えておく（使えなければ毎回はじめの高さ） */
 const RESULTS_RATIO_KEY = "viewer.resultsRatio";
 function loadResultsRatio(): number {
@@ -136,6 +154,16 @@ export function App() {
   }, []);
   // グラフの上のシナリオの凡例にカーソルを乗せているシナリオ
   const [hoveredScenario, setHoveredScenario] = useState<string>();
+  // 図の要素に値を出すか（ふだんはオフ。分析や説明のときだけオンにする）
+  const [showValues, setShowValuesState] = useState(loadShowValues);
+  const setShowValues = useCallback((on: boolean) => {
+    setShowValuesState(on);
+    saveShowValues(on);
+  }, []);
+  // 図に値を出すシナリオ（undefined は「元のモデル」）
+  const [valuesScenario, setValuesScenario] = useState<string>();
+  // グラフにカーソルを乗せている時刻（図に値を出している間だけ受け取る）
+  const [hoverTime, setHoverTime] = useState<number>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
   // いま出している版で名前の変わった要素（画面で名前を変えた・元に戻したとき）。グラフに出す要素を新しい名前に合わせる
   const [renamed, setRenamed] = useState<[string, string][]>(NO_RENAMES);
@@ -305,6 +333,7 @@ export function App() {
     setSelectedLink(undefined);
     setScenario(undefined);
     setHoveredScenario(undefined);
+    setValuesScenario(undefined);
     setNotice(undefined);
     void loadModel(current);
   }, [current, loadModel]);
@@ -396,7 +425,11 @@ export function App() {
         const err = applyWrite(result);
         // 名前は、新しい版と同じ描画で差し替える（左の欄が一瞬「見つかりません」になって作り直されないように）
         const to = patch.rename_to;
-        if (!err && result.ok && to !== undefined) setScenario((s) => (s && sameName(s.name, patch.name) ? { ...s, name: to } : s));
+        if (!err && result.ok && to !== undefined) {
+          setScenario((s) => (s && sameName(s.name, patch.name) ? { ...s, name: to } : s));
+          // 図に値を出しているシナリオも、新しい名前で選んだままにする
+          setValuesScenario((s) => (s !== undefined && sameName(s, patch.name) ? to : s));
+        }
         return err;
       }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
@@ -645,6 +678,32 @@ export function App() {
     const color = (data.run && scenarioColor(data.run, data.scenarios ?? [], name)) ?? "var(--text-secondary)";
     return { badges: scenarioBadges(data.model, s.values), color };
   }, [data, hoveredScenario, scenario?.name]);
+  // 図に値を出すシナリオの実行結果。選んだシナリオが実行できなかった・消されたときは、「元のモデル」に戻す
+  const valuesRun = valueScenarioRun(data?.scenarios, valuesScenario);
+  useEffect(() => {
+    if (valuesScenario !== undefined && data && !valuesRun) setValuesScenario(undefined);
+  }, [valuesScenario, data, valuesRun]);
+  // 図の要素に出す値。グラフにカーソルを乗せていればその時刻、なければ要素ごとの最大の振れ。AI が実行し直したら、新しい結果で出し直す
+  const hoverIndex = showValues && data?.run && hoverTime !== undefined ? timeIndex(data.run.times, hoverTime) : undefined;
+  const liveValues = useMemo<NodeValues | undefined>(() => {
+    const run = data?.run;
+    if (!showValues || !run) return undefined;
+    const unit = TIME_UNIT_LABEL[run.time_units.toLowerCase()] ?? run.time_units;
+    return { values: nodeValues({ times: run.times, series: valuesRun?.series ?? run.series }, hoverIndex), unit };
+  }, [showValues, data, valuesRun, hoverIndex]);
+  const valueTools = useMemo<ValueTools>(() => {
+    const run = data?.run;
+    const unit = run ? (TIME_UNIT_LABEL[run.time_units.toLowerCase()] ?? run.time_units) : "";
+    return {
+      on: showValues,
+      onChange: setShowValues,
+      scenarios: valueScenarioNames(data?.scenarios),
+      scenario: valuesRun?.name,
+      onScenario: setValuesScenario,
+      // いまどちらを出しているか（図の欄の上の帯に出す）
+      caption: !run ? "実行できないため、値を出せません" : hoverIndex !== undefined ? `${formatTime(run.times[hoverIndex])} ${unit}の値` : "それぞれの最大の振れ",
+    };
+  }, [data, showValues, setShowValues, valuesRun, hoverIndex]);
   // 名前は大文字と小文字を区別しない（AI が表記だけ変えても選んだままにする）
   const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
   // 選んでいるリンク（AI などが消していれば、ない）
@@ -868,6 +927,8 @@ export function App() {
                 onReconnect={reconnectFlow}
                 removable={removable}
                 onRemove={removeSelected}
+                liveValues={liveValues}
+                valueTools={valueTools}
               />
             </ReactFlowProvider>
           ) : (
@@ -918,6 +979,7 @@ export function App() {
               onRemoveScenario={removeScenario}
               onRemoveScenarioValue={removeScenarioValue}
               onFocusScenario={setHoveredScenario}
+              onHoverTime={showValues ? setHoverTime : undefined}
             />
           ) : data ? (
             <p className="muted pad">エラーがあるため実行できません。左の欄の「問題」を見てください。</p>

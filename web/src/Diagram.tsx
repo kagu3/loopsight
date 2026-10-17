@@ -26,12 +26,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
+import type { NodeValue } from "./diagramValues.js";
 import { NEW_ELEMENT_LABEL, type FlowEnd, type NewElementType } from "./editing.js";
-import { nameKey, type ScenarioBadge } from "./scenarios.js";
+import { formatTime } from "./format.js";
+import { BASELINE_NAME, nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
 // 編集モード（図の左上の「図を編集」で切り替える）のときだけ、箱と雲をドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
+// 右上の「値を表示」をオンにすると、ストック・フロー・変数に、その時点の値と最初からの変化を出す（分析や説明のときだけ使う）。
 // 編集モードでは、左上の道具で要素を足す（種類を選んでから図の置きたい場所を押す）・選んだ要素やリンクを消すこともできる。
 // リンクは、要素の縁からドラッグして別の要素の上で離すか、[＋線] を押してから元の要素 → 先の要素の順に押して引く。
 // フローの端は、端の近くの丸（つまみ）をドラッグして、ストックの上で離すとそのストックに、何もないところで離すとそこに置いた雲につなぎ替える。
@@ -41,6 +44,7 @@ import { nameKey, type ScenarioBadge } from "./scenarios.js";
 // badge：シナリオに注目している間、そのシナリオで変えた要素に付ける札（いまの値 → シナリオの値）
 // linkable：編集モードで、縁からドラッグしてリンクを引ける（雲はモデルの要素でないので引けない）。linkFrom：[＋線] で元に選んだ要素
 // dropTarget：フローの端をドラッグしている間、離すとつなぐストック
+// live：「値を表示」がオンのとき、その時点の値と最初からの変化（unit は時点に添える時間の単位）
 type NodeData = {
   g: GraphNode;
   selected: boolean;
@@ -51,6 +55,7 @@ type NodeData = {
   linkable: boolean;
   linkFrom: boolean;
   dropTarget: boolean;
+  live?: { v: NodeValue; unit: string };
 };
 // grip：編集モードで、つなぎ替えられるフローの端（:in の線は元の側＝from、:out の線は先の側＝to）。grabbed：その端をドラッグしている
 type EdgeData = {
@@ -70,8 +75,24 @@ const hidden = { opacity: 0, pointerEvents: "none" as const };
 /** リンクを引き始める縁（上下左右の細い帯）。React Flow の接続の口（Handle）にして、引いている線の描画や離した先の判定に使う */
 const LINK_EDGES = [Position.Top, Position.Right, Position.Bottom, Position.Left] as const;
 
+/** 「値を表示」の値（120（+20%）・12 週）。増えたか減ったかで色を変え、変化が大きいほど濃くする */
+function LiveValue({ live, className }: { live: { v: NodeValue; unit: string }; className: string }) {
+  const { v, unit } = live;
+  return (
+    <span className={`${className} live-value is-${v.direction} level-${v.level}`}>
+      {v.value}
+      {v.change !== undefined && <span className="live-change">（{v.change}）</span>}
+      {v.time !== undefined && (
+        <span className="live-time">
+          ・{formatTime(v.time)} {unit}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ModelNode({ data }: NodeProps<ModelNodeT>) {
-  const { g, badge } = data;
+  const { g, badge, live } = data;
   const cls = [
     "node",
     `node-${g.kind.toLowerCase()}`,
@@ -128,7 +149,11 @@ function ModelNode({ data }: NodeProps<ModelNodeT>) {
           <svg viewBox="0 0 18 18" width={g.width} height={g.height} aria-hidden>
             <path d="M2 3 L16 15 L16 3 L2 15 Z" className="valve-shape" />
           </svg>
-          <span className={`valve-label side-${g.labelSide ?? "below"}`}>{g.label}</span>
+          <span className={`valve-label side-${g.labelSide ?? "below"} ${live ? "has-value" : ""}`}>
+            {g.label}
+            {/* 値は弁の名前の下に並べる（弁の横に出す） */}
+            {live && <LiveValue live={live} className="valve-value" />}
+          </span>
         </>
       ) : g.kind === "CLOUD" ? (
         <svg viewBox="0 0 36 26" width={g.width} height={g.height} aria-label="モデルの外">
@@ -153,6 +178,8 @@ function ModelNode({ data }: NodeProps<ModelNodeT>) {
           {data.value !== undefined && <span className="node-value">{data.value}</span>}
         </div>
       )}
+      {/* 値は箱の下に出す。ストックは、下に並ぶフローの名前と重ならないよう箱の上に出す（シナリオの札があるときは、札が上なので下） */}
+      {live && g.kind !== "VALVE" && <LiveValue live={live} className={g.kind === "STOCK" && !badge ? "node-live is-above" : "node-live"} />}
     </div>
   );
 }
@@ -268,6 +295,31 @@ export interface DiagramProps {
   /** 編集モードで消せる、選んでいる要素の名前かリンク（label は「A → B」）。なければ「削除」を押せない */
   removable?: { label: string; link: boolean };
   onRemove?(): void;
+  /** 「値を表示」がオンのときの、要素に出す値。あれば、ストックの最後の値（values）は出さない */
+  liveValues?: NodeValues;
+  /** 図の右上の「値を表示」の切り替えと、値を出すシナリオの選択。渡したときだけ出す（図だけの表示では渡さない） */
+  valueTools?: ValueTools;
+}
+
+/** 図の要素に出す値 */
+export interface NodeValues {
+  /** 要素名（nameKey）→ 値 */
+  values: Map<string, NodeValue>;
+  /** 時点に添える時間の単位（週など） */
+  unit: string;
+}
+
+/** 図の右上の「値を表示」 */
+export interface ValueTools {
+  on: boolean;
+  onChange(on: boolean): void;
+  /** 値を出せるシナリオの名前。なければ選択を出さない */
+  scenarios: string[];
+  /** 値を出しているシナリオ（undefined は「元のモデル」） */
+  scenario?: string;
+  onScenario(name: string | undefined): void;
+  /** いまどの時点の値を出しているか（「12 週の値」「それぞれの最大の振れ」） */
+  caption: string;
 }
 
 /** リンクの両端の要素名 */
@@ -283,7 +335,7 @@ export interface ScenarioMarks {
 type Pos = { x: number; y: number };
 
 export function Diagram(props: DiagramProps) {
-  const { graph, selected, changed, values, onMove, scenario, editable } = props;
+  const { graph, selected, changed, values, onMove, scenario, editable, liveValues } = props;
   const flow = useReactFlow();
   // 足そうとしている要素の種類（ボタンを押してから、図の置きたい場所を押すまで）。LINK は [＋線] を押してから、元と先の要素を押すまで。
   // 編集モードを終えたり、別のモデルを開いたりしたらやめる
@@ -463,7 +515,9 @@ export function Diagram(props: DiagramProps) {
             changed: !!g.element && changed.has(g.element.toLowerCase()),
             // [＋線] で元に選んだ要素は、薄くしない
             dimmed: !!focus && !focus.nodes.has(g.id) && !isLinkFrom,
-            value: g.kind === "STOCK" && g.element ? values[g.element] : undefined,
+            // 「値を表示」がオンのときは、ストックの最後の値を出さない（同じところに値が 2 つ並ばないように）
+            value: g.kind === "STOCK" && g.element && !liveValues ? values[g.element] : undefined,
+            live: liveValues && g.element && LIVE_KINDS.has(g.kind) ? liveOf(liveValues, g.element) : undefined,
             badge: g.element ? scenario?.badges.get(nameKey(g.element)) : undefined,
             linkable: !!editable && !!g.element,
             linkFrom: isLinkFrom,
@@ -475,7 +529,7 @@ export function Diagram(props: DiagramProps) {
           connectable: !!editable && !!g.element,
         };
       }),
-    [placed, selected, changed, values, focus, scenario, editable, placing, linkFrom, dropTarget],
+    [placed, selected, changed, values, focus, scenario, editable, placing, linkFrom, dropTarget, liveValues],
   );
 
   const onNodesChange = useCallback((changes: NodeChange<ModelNodeT>[]) => {
@@ -616,7 +670,16 @@ export function Diagram(props: DiagramProps) {
         if (placing !== "LINK") props.onAdd?.(placing, flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
       }}
     >
-      <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} keepView={props.keepView} holdView={props.holdView} />
+      <FitOnChange
+        modelName={props.modelName}
+        layoutKey={nodeIds}
+        nodes={graph.nodes}
+        embed={props.embed}
+        badge={!!props.loop}
+        keepView={props.keepView}
+        holdView={props.holdView}
+        toolsSpace={!!props.valueTools?.on}
+      />
       <Background gap={20} size={1} />
       {/* フローの端をドラッグしている間、弁からマウスまでの線 */}
       {grab && (
@@ -638,7 +701,8 @@ export function Diagram(props: DiagramProps) {
           onRemove={props.onRemove}
         />
       )}
-      {!props.embed && <Controls showInteractive={false} fitViewOptions={VIEWER_FIT} />}
+      {props.valueTools && <ValueToolsPanel {...props.valueTools} />}
+      {!props.embed && <Controls showInteractive={false} fitViewOptions={props.valueTools?.on ? VIEWER_TOOLS_FIT : VIEWER_FIT} />}
       {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
       {!props.embed && <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} ariaLabel="図の全体" style={{ width: 150, height: 90 }} />}
     </ReactFlow>
@@ -730,6 +794,46 @@ function EditTools({
   );
 }
 
+/**
+ * 「値を表示」の切り替えと、値を出すシナリオの選択（図の右上）。オンの間は、いまどの時点の値を出しているかを左に添える。
+ * 図の左上の編集の道具とは反対の角に置く
+ */
+function ValueToolsPanel({ on, onChange, scenarios, scenario, onScenario, caption }: ValueTools) {
+  return (
+    <Panel position="top-right" className={`value-tools ${on ? "on" : ""}`}>
+      {on && <span className="value-caption">{caption}</span>}
+      {on && scenarios.length > 0 && (
+        <select
+          className="value-scenario"
+          aria-label="値を出すシナリオ"
+          title="どのシナリオの値を出すかを選びます。変化は、そのシナリオの中の最初の時点と比べます"
+          value={scenario ?? ""}
+          onChange={(e) => onScenario(e.target.value === "" ? undefined : e.target.value)}
+        >
+          <option value="">{BASELINE_NAME}</option>
+          {scenarios.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        className={`edit-toggle ${on ? "on" : ""}`}
+        onClick={() => onChange(!on)}
+        aria-pressed={on}
+        title={
+          on
+            ? "図の要素の値を隠します"
+            : "ストック・フロー・変数に、その時点の値と最初の時点からの変化を出します。グラフにカーソルを乗せるとその時刻の値、乗せていなければそれぞれの最大の振れを出します"
+        }
+      >
+        値を表示
+      </button>
+    </Panel>
+  );
+}
+
 /** 目立たせているループの名前と R / B */
 function LoopBadge({ loop }: { loop: LoopView }) {
   return (
@@ -752,6 +856,13 @@ const EMBED_FIT = { padding: 0.04, maxZoom: 1.5 };
 const BADGE_SPACE = "76px" as const;
 const EMBED_LOOP_FIT = { padding: { top: BADGE_SPACE, bottom: 0.04, x: 0.04 }, maxZoom: 1.5 };
 const VIEWER_FIT = { padding: FIT_PADDING, maxZoom: 1.5, minZoom: MIN_FIT_ZOOM };
+/**
+ * 「値を表示」がオンの間は、右上の道具（シナリオの選択を出すと横に長くなる）の分だけ上を空ける。
+ * 図を合わせたとき、右上の要素が道具の下に隠れて押せなくならないように
+ */
+const TOOLS_SPACE = "56px" as const;
+const VIEWER_TOOLS_PADDING = { top: TOOLS_SPACE, bottom: FIT_PADDING, x: FIT_PADDING };
+const VIEWER_TOOLS_FIT = { ...VIEWER_FIT, padding: VIEWER_TOOLS_PADDING };
 
 /**
  * 線を押せる幅（React Flow の既定は 20px）。線の上からは見る場所を動かせないので、細めにして、図をドラッグしやすくする
@@ -772,6 +883,13 @@ function sameLink(graph: Graph, e: GraphEdge, l: LinkEnds): boolean {
   return nameKey(name(e.source)) === nameKey(l.from) && nameKey(name(e.target)) === nameKey(l.to);
 }
 
+/** 「値を表示」で値を出す要素の種類（ストック・フロー（弁）・変数。変換器も変数と同じく出す） */
+const LIVE_KINDS = new Set(["STOCK", "VALVE", "VARIABLE", "CONVERTER"]);
+const liveOf = (live: NodeValues, element: string) => {
+  const v = live.values.get(nameKey(element));
+  return v && { v, unit: live.unit };
+};
+
 const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stock-border)" : "var(--link)");
 
 /**
@@ -779,6 +897,7 @@ const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stoc
  * 式や値が変わっただけのとき（AI が値を調整したなど）は動かさない。画面で要素を足した・消した・名前を変えたとき（keepView）も、増減では動かさない。
  * 境界線のドラッグで図の欄の大きさが変わったとき（holdView）も動かさない（ズームや位置を保つ）。
  * 全体が名前の読める大きさで入らないときは、ストックが入るように合わせる（ほかはドラッグやミニマップで見る）。
+ * 「値を表示」をオンにした・オフにしたとき（toolsSpace）も合わせ直す。オンの間は、右上の道具の分だけ上を空ける。
  */
 function FitOnChange({
   modelName,
@@ -788,6 +907,7 @@ function FitOnChange({
   badge,
   keepView,
   holdView,
+  toolsSpace,
 }: {
   modelName: string;
   layoutKey: string;
@@ -796,12 +916,13 @@ function FitOnChange({
   badge?: boolean;
   keepView?: boolean;
   holdView?: boolean;
+  toolsSpace?: boolean;
 }) {
   const flow = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
   // 要素の並び（layoutKey）と、それ以外（モデル、図の欄の大きさ）を分けて覚える
-  const view = `${modelName}:${Math.round(width / 40)}:${Math.round(height / 40)}`;
+  const view = `${modelName}:${Math.round(width / 40)}:${Math.round(height / 40)}:${toolsSpace ? "tools" : ""}`;
   const domNode = useStore((s) => s.domNode);
   const last = useRef({ view, layoutKey, modelName });
   // 境界線のドラッグで変わった大きさが、まだ届いていないか（届くのはドラッグを終えたあとのこともある）
@@ -825,7 +946,8 @@ function FitOnChange({
     // 全体が名前の読める大きさで入らなければ、ストックが入るように合わせる
     const fit = fitTargets(nodesRef.current, width, height, FIT_PADDING);
     const targets = fit.nodes.map((n) => ({ id: n.id }));
-    requestAnimationFrame(() => flow.fitView({ nodes: targets, padding: FIT_PADDING, maxZoom: fit.maxZoom, minZoom: MIN_FIT_ZOOM, duration: 200 }));
-  }, [view, layoutKey, modelName, keepView, holdView, domNode, flow, embed, badge, width, height]);
+    const padding = toolsSpace ? VIEWER_TOOLS_PADDING : FIT_PADDING;
+    requestAnimationFrame(() => flow.fitView({ nodes: targets, padding, maxZoom: fit.maxZoom, minZoom: MIN_FIT_ZOOM, duration: 200 }));
+  }, [view, layoutKey, modelName, keepView, holdView, domNode, flow, embed, badge, width, height, toolsSpace]);
   return null;
 }

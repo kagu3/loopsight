@@ -30,6 +30,9 @@
   --loop-b: #2a78d6;
   /* 編集モードの図の窓 */
   --editing-bg: #e3eefb;
+  /* 図に出す値の、最初からの変化（増えた・減った） */
+  --value-up: #c4431a;
+  --value-down: #1f66c2;
 
   /* グラフの系列（dataviz の検証済みパレット、明るい表示） */
   --series-1: #2a78d6;
@@ -75,6 +78,8 @@
     --loop-r: #e66767;
     --loop-b: #5598e7;
     --editing-bg: #1c2a3d;
+    --value-up: #f28c5e;
+    --value-down: #6eaaf0;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -796,6 +801,106 @@ button.link.danger-link {
   font-size: 10px;
   font-weight: 400;
   color: var(--text-secondary);
+}
+/* 「値を表示」：要素の値と、最初からの変化。箱の下（弁は名前の下）に小さく出す。
+   増えたか減ったかで色を変え、変化が大きいほど地の色を濃くする。変わらないときは目立たせない。
+   値はマウスを通す（下の要素や背景を押せるように） */
+.live-value {
+  padding: 0 5px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  pointer-events: none;
+  --tint: 0%;
+}
+.live-value.is-up {
+  color: var(--value-up);
+  border-color: var(--value-up);
+  background: color-mix(in srgb, var(--value-up) var(--tint), var(--surface-1));
+}
+.live-value.is-down {
+  color: var(--value-down);
+  border-color: var(--value-down);
+  background: color-mix(in srgb, var(--value-down) var(--tint), var(--surface-1));
+}
+.live-value.level-2 {
+  --tint: 10%;
+}
+.live-value.level-3 {
+  --tint: 18%;
+  font-weight: 600;
+}
+.live-value.level-4 {
+  --tint: 28%;
+  font-weight: 700;
+}
+.live-value.is-flat {
+  color: var(--text-muted);
+}
+.live-time {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.node-live {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+}
+.node-live.is-above {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 4px;
+}
+/* シナリオの枠（点線）があるときは、枠の外に出す */
+.node.is-scenario .node-live {
+  margin-top: calc(var(--scenario-gap) + 4px);
+}
+.valve-label.has-value {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.valve-label.side-right.has-value {
+  align-items: flex-start;
+}
+.node.is-dimmed .live-value {
+  opacity: 0.35;
+}
+/* 図の右上の「値を表示」と、値を出すシナリオの選択 */
+.value-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.value-tools.on {
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
+  border-color: var(--border);
+}
+.value-caption {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+select.value-scenario {
+  font: inherit;
+  font-size: 12px;
+  max-width: 180px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
 }
 /* ループを見せているとき：ループの線を太くし、R か B の色にする。リンクも実線にして、一周をたどりやすくする */
 .loop-r {
