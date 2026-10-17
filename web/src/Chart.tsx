@@ -5,12 +5,14 @@ import { sameTime, withActualPoints } from "./actualPoints.js";
 import { renamedName } from "./editing.js";
 import { normalize, normalizeLike, normalizeTogether } from "./normalize.js";
 import {
+  addableValues,
   BASELINE_NAME,
   canEditValue,
   cellPatchOf,
   compareRuns,
   copyNameOf,
   describeRun,
+  nameKey,
   newScenarioPatchOf,
   resultRows,
   scenarioName,
@@ -148,6 +150,8 @@ export interface ChartProps {
   onEditScenario?(name?: string): void;
   /** 施策を直す（MCP の set_scenarios と同じ形）。失敗したらエラーの文を返す。あれば、施策の中身の表で値をその場で直せる */
   onSaveScenario?(patch: ScenarioPatch): Promise<string | undefined>;
+  /** すべての施策で、その要素の値を変えないことにする（施策の中身の表の行を消す）。失敗したらエラーの文を返す */
+  onRemoveScenarioValue?(element: string): Promise<string | undefined>;
   /** 施策の凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「何もしない場合」では呼ばない */
   onFocusScenario?(name: string | undefined): void;
 }
@@ -167,7 +171,7 @@ export function scenarioColor(run: RunResult, scenarios: ScenarioRunResult[], na
 /** 施策を重ねているときの、実際のデータの点の色 */
 const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
-export function Chart({ modelName, model, run, scenarios, actual, renamed, editingScenario, onEditScenario, onSaveScenario, onFocusScenario }: ChartProps) {
+export function Chart({ modelName, model, run, scenarios, actual, renamed, editingScenario, onEditScenario, onSaveScenario, onRemoveScenarioValue, onFocusScenario }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
   // グラフに出す要素と線の色。名前を変えた版を受け取った描画では、下の effect が直すまで、前の名前のままになっている
@@ -342,6 +346,8 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
 
       {comparing && (
         <ScenarioLegend
+          // 表で足した行は、モデルごとに持つ（別のモデルを開いたら持ち越さない）
+          key={modelName}
           compare={compare}
           model={model}
           times={run.times}
@@ -351,6 +357,7 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
           editing={editingScenario}
           onEdit={onEditScenario}
           onSave={onSaveScenario}
+          onRemoveValue={onRemoveScenarioValue}
           onFocus={onFocusScenario}
         />
       )}
@@ -492,7 +499,7 @@ const MATRIX_ROWS = 6;
  * 施策の凡例。「何もしない場合」は灰色の点線。実行できなかった施策と、色が足りずに出さない施策も知らせる。
  * onEdit があれば、施策の名前を押すと左の欄で直せる。最後に「＋ 施策を足す」を置く。
  * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、施策ごとに変えた値と結果（グラフで選んでいる要素の値）を並べる。
- * onSave があれば、表の施策の値をその場で直せる
+ * onSave があれば、表の施策の値をその場で直せる。onRemoveValue があれば、表の行（変える値）を消せる
  */
 function ScenarioLegend({
   compare,
@@ -504,6 +511,7 @@ function ScenarioLegend({
   editing,
   onEdit,
   onSave,
+  onRemoveValue,
   onFocus,
 }: {
   compare: CompareRuns;
@@ -517,6 +525,7 @@ function ScenarioLegend({
   editing?: string;
   onEdit?(name?: string): void;
   onSave?(patch: ScenarioPatch): Promise<string | undefined>;
+  onRemoveValue?(element: string): Promise<string | undefined>;
   onFocus?(name: string | undefined): void;
 }) {
   const [open, setOpenState] = useState(loadMatrixOpen);
@@ -583,7 +592,19 @@ function ScenarioLegend({
     <div className={`scenario-bar ${isOpen ? "open" : ""}`}>
       <div className="scenario-head">
         {isOpen ? (
-          <ScenarioMatrix compare={compare} model={model} times={times} visible={visible} at={at} unit={unit} chip={chip} showAll={showAll} onShowAll={setShowAll} onSave={onSave} />
+          <ScenarioMatrix
+            compare={compare}
+            model={model}
+            times={times}
+            visible={visible}
+            at={at}
+            unit={unit}
+            chip={chip}
+            showAll={showAll}
+            onShowAll={setShowAll}
+            onSave={onSave}
+            onRemoveValue={onRemoveValue}
+          />
         ) : (
           <ul className="scenario-legend" aria-label="重ねている施策">
             {compare.runs.map((r, k) => (
@@ -621,7 +642,9 @@ function ScenarioLegend({
  * 施策の中身の表。列は凡例と同じ並び（「何もしない場合」と、重ねている施策）。
  * 行は、どれかの施策で変えた値と、結果（グラフで選んでいる要素の、ある時点の値）。
  * onSave があれば、変えた値の行の施策の列（「—」も）をその場で直せる。「何もしない場合」の列と結果の行は直せない。
- * また、見出しの右端の「＋」で施策を足し、施策の見出しの「複製」で同じ値の施策を作れる（名前を付けて Enter で保存する）
+ * また、見出しの右端の「＋」で施策を足し、施策の見出しの「複製」で同じ値の施策を作れる（名前を付けて Enter で保存する）。
+ * 変えた値の行の下の「＋ 値を追加」で、どの施策でも変えていない値の行（全部「—」）を足せる。足した行は消すまで残す（モデルには保存しない）。
+ * onRemoveValue があれば、行の名前にカーソルを乗せると出る × で、すべての施策でその値を変えないことにして行を消せる
  */
 function ScenarioMatrix({
   compare,
@@ -634,6 +657,7 @@ function ScenarioMatrix({
   showAll,
   onShowAll,
   onSave,
+  onRemoveValue,
 }: {
   compare: CompareRuns;
   model: ModelJSON;
@@ -645,9 +669,14 @@ function ScenarioMatrix({
   showAll: boolean;
   onShowAll(all: boolean): void;
   onSave?(patch: ScenarioPatch): Promise<string | undefined>;
+  onRemoveValue?(element: string): Promise<string | undefined>;
 }) {
   const runs = compare.runs;
-  const rows = useMemo(() => valueRows(model, runs), [model, runs]);
+  // 「＋ 値を追加」で足した行の要素（モデルの表記）。値を入れて施策で変えた行になっても、消すまで残す
+  const [added, setAdded] = useState<string[]>([]);
+  // 足した行の要素がモデルから消えたら（名前が変わったときも）、その行も外す
+  useEffect(() => setAdded((a) => (a.every((n) => canEditValue(model, n)) ? a : a.filter((n) => canEditValue(model, n)))), [model]);
+  const rows = useMemo(() => valueRows(model, runs, added), [model, runs, added]);
   const results = resultRows(runs, times, visible, at);
   const folding = rows.length > MATRIX_ROWS;
   const shown = folding && !showAll ? rows.slice(0, MATRIX_ROWS) : rows;
@@ -700,6 +729,43 @@ function ScenarioMatrix({
   const cancelAdding = () => {
     refocus.current = { cancel: true, source: adding?.source };
     setAdding(undefined);
+  };
+  // 「＋ 値を追加」で選んでいる途中か。足したら、その行の最初の施策のマスにフォーカスを移す（そのまま Enter で値を入れられる）
+  const [picking, setPicking] = useState(false);
+  // 選び欄で選んでいる要素（まだ足していない）。閉じた選び欄で ↓ ↑ や頭文字を押すと、その場で change が起きる（Windows）ので、
+  // キーで選んでいる間は足さず、Enter で決める。マウスで一覧から選んだときは、そのまま足す。欄から外れたら取りやめる
+  const [pick, setPick] = useState("");
+  const keyed = useRef(false);
+  const focusRow = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const element = focusRow.current;
+    if (element === undefined) return;
+    focusRow.current = undefined;
+    const tr = [...(tableRef.current?.querySelectorAll<HTMLTableRowElement>("tr[data-element]") ?? [])].find((t) => t.dataset.element === element);
+    tr?.querySelector<HTMLElement>("td.matrix-editable")?.focus();
+  }, [added]);
+  const addables = onSave ? addableValues(model, rows) : [];
+  const closePicker = (focusTable: boolean) => {
+    setPicking(false);
+    setPick("");
+    keyed.current = false;
+    if (focusTable) tableRef.current?.focus({ preventScroll: true });
+  };
+  const addRow = (element: string) => {
+    closePicker(false);
+    if (!element) return;
+    const next = [...added, element];
+    // 足した行が畳んだところに入るなら、全部を開いて見せる
+    if (valueRows(model, runs, next).findIndex((r) => nameKey(r.element) === nameKey(element)) >= MATRIX_ROWS) onShowAll(true);
+    focusRow.current = element;
+    setAdded(next);
+  };
+  // 行を消す。すべての施策でその値を変えないことにし（保存は App が 1 回にまとめる）、足した行なら外す
+  const removeRow = (element: string) => {
+    setAdded((a) => a.filter((n) => nameKey(n) !== nameKey(element)));
+    // 押した × は行ごと消えるので、キーボードで続けられるよう表にフォーカスを移しておく
+    tableRef.current?.focus({ preventScroll: true });
+    void onRemoveValue?.(element);
   };
   // マスに入れた文字を、その施策の変更にして送る。書けない値ならエラーの文を返す（送らない）
   const saveValue = (r: CompareRun, element: string) => async (text: string) => {
@@ -760,10 +826,21 @@ function ScenarioMatrix({
             </tr>
           )}
           {shown.map((row) => (
-            <tr key={row.element}>
-              <th scope="row" title={row.element}>
+            <tr key={row.element} data-element={row.element}>
+              <th scope="row" title={row.element} className={onRemoveValue ? "matrix-row-head" : undefined}>
                 <span className="matrix-element">{row.element}</span>
                 {row.initial && <small className="matrix-sub">初期値</small>}
+                {/* モデルにない要素の値は保存できない（サーバーが受け付けない）ので、消す × も出さない */}
+                {onRemoveValue && canEditValue(model, row.element) && (
+                  <button
+                    className="matrix-remove-row"
+                    onClick={() => removeRow(row.element)}
+                    aria-label={`「${row.element}」の行を消す`}
+                    title="すべての施策で、この値を変えないことにして行を消します（Ctrl+Z で戻せます）"
+                  >
+                    ×
+                  </button>
+                )}
               </th>
               {/* マスの key は施策の名前（施策の列が減っても、入力している途中の状態が隣の列に移らないように） */}
               {row.cells.map((c, k) =>
@@ -793,6 +870,53 @@ function ScenarioMatrix({
                 <button className="link" onClick={() => onShowAll(!showAll)}>
                   {showAll ? "畳む" : `ほか ${rows.length - MATRIX_ROWS} 件`}
                 </button>
+              </td>
+            </tr>
+          )}
+          {onSave && (
+            <tr>
+              <td colSpan={colSpan} className="matrix-add-row">
+                {picking ? (
+                  <select
+                    className="matrix-select"
+                    value={pick}
+                    onChange={(e) => {
+                      setPick(e.target.value);
+                      if (!keyed.current) addRow(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (pick) addRow(pick);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        closePicker(true);
+                      } else keyed.current = true;
+                    }}
+                    onKeyUp={() => (keyed.current = false)}
+                    onBlur={() => closePicker(false)}
+                    autoFocus
+                    aria-label="表に足す値"
+                    title="↓ ↑ で選んで Enter で足す、Esc でやめる"
+                  >
+                    <option value="">値を選ぶ…</option>
+                    {addables.map((e) => (
+                      <option key={e.name} value={e.name}>
+                        {e.name}
+                        {e.type === "STOCK" ? "（初期値）" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <button
+                    className="link"
+                    onClick={() => addables.length > 0 && setPicking(true)}
+                    aria-disabled={addables.length === 0}
+                    title={addables.length ? "どの施策でも変えていない値を、比べる行に足します" : "施策で変えられる値は、すべて表にあります"}
+                  >
+                    ＋ 値を追加
+                  </button>
+                )}
               </td>
             </tr>
           )}

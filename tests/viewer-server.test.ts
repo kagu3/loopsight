@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ModelStore, emptyModel, toGraph, upsertElements } from "../src/core/index.js";
 import type { ChangeEvent, EditErrorResponse, EditResponse, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
-import { cellPatchOf, newScenarioPatchOf } from "../web/src/scenarios.js";
+import { cellPatchOf, clearValuePatches, newScenarioPatchOf } from "../web/src/scenarios.js";
 import { tempDir } from "./helpers.js";
 
 let dir: string;
@@ -502,6 +502,46 @@ describe("ビューアからの施策の編集", () => {
     const u2 = await post<EditResponse>("/api/models/pop/undo", { version: copy.body.model.version });
     expect(u2.body.model.version).toBe(v0.version);
     expect(u2.body.model.model.scenarios).toEqual(m.scenarios);
+  });
+
+  test("表の行を消す（すべての施策でその値を変えない）は、複数の施策をまとめた 1 回の保存で、1 回の「元に戻す」で全部戻る", async () => {
+    const store = new ModelStore(dir);
+    const m = population();
+    m.scenarios = [
+      { name: "高い", values: { Rate: 0.2, Population: 200 } },
+      { name: "低い", values: { rate: 0.05 } },
+      { name: "多い", values: { Population: 300 } },
+    ];
+    await store.write("pop", m);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+    const patches = clearValuePatches(v0.model, "Rate");
+    // Rate を変えていない「多い」には送らない
+    expect(patches.map((p) => p.name)).toEqual(["高い", "低い"]);
+
+    const removed = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: patches });
+    expect(removed.status).toBe(200);
+    expect(removed.body.model.model.scenarios).toEqual([
+      { name: "高い", values: { Population: 200 } },
+      { name: "低い", values: {} },
+      { name: "多い", values: { Population: 300 } },
+    ]);
+    expect(removed.body.model.undo_available).toBe(1);
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: removed.body.model.version });
+    expect(u.body.model.version).toBe(v0.version);
+    expect(u.body.model.model.scenarios).toEqual(m.scenarios);
+  });
+
+  test("表の行を消すとき、名前のない施策（scenario N）や表記の違う名前（rate）にも当たる", async () => {
+    const store = new ModelStore(dir);
+    const m = population();
+    m.scenarios = [{ name: "高い", values: { Population: 200 } }, { values: { rate: 0.3, Population: 50 } }];
+    await store.write("pop", m);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+    const patches = clearValuePatches(v0.model, "Rate");
+    expect(patches).toEqual([{ name: "scenario 2", values: { rate: null } }]);
+    const removed = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: patches });
+    expect(removed.status).toBe(200);
+    expect(removed.body.model.model.scenarios).toEqual([{ name: "高い", values: { Population: 200 } }, { values: { Population: 50 } }]);
   });
 
   test("施策の名前を変えると筋書きの中も直し、元に戻すと筋書きも戻す", async () => {

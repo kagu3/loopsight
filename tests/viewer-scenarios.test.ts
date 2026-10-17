@@ -1,10 +1,12 @@
 import { describe, expect, test } from "vitest";
 import type { ModelJSON, RunResult, ScenarioRunResult } from "../src/viewer/api.js";
 import {
+  addableValues,
   BASELINE_NAME,
   canEditValue,
   cellPatchOf,
   changeLabel,
+  clearValuePatches,
   compareRuns,
   copyNameOf,
   currentValueOf,
@@ -404,5 +406,56 @@ describe("施策の中身の表の見出しで施策を足す・複製する", (
     expect(c.runs.map((r) => r.name)).toEqual([BASELINE_NAME, "a", "空"]);
     const m: ModelJSON = { elements: [{ type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } }] };
     expect(valueRows(m, c.runs).map((r) => r.cells.map((x) => x.value ?? "—"))).toEqual([["0.1", "0.2", "—"]]);
+  });
+});
+
+describe("施策の中身の表で行（変える値）を足す・消す", () => {
+  const model: ModelJSON = {
+    elements: [
+      { type: "STOCK", name: "Pop", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } },
+      { type: "FLOW", name: "Births", behavior: { value: "[Pop]*[Rate]" } },
+      { type: "CONVERTER", name: "Table" },
+      { type: "VARIABLE", name: "Cap", behavior: { value: 500 } },
+    ],
+    scenarios: [
+      { name: "a", values: { rate: 0.2, Pop: 80 } },
+      { name: "b", values: { Pop: 90 } },
+      { values: { Rate: 0.3 } },
+    ],
+  };
+  const runs = compareRuns(
+    run,
+    [scenario("a", { values: { rate: 0.2, Pop: 80 } }), scenario("b", { values: { Pop: 90 } }), scenario("scenario 3", { values: { Rate: 0.3 } })],
+    8,
+  ).runs;
+
+  test("足した行は、どの施策でも変えていなくても全部「—」で出し、モデルの並び順に並べる", () => {
+    const rows = valueRows(model, runs, ["Cap", "Births"]);
+    expect(rows.map((r) => r.element)).toEqual(["Pop", "Rate", "Births", "Cap"]);
+    expect(rows[2]!.cells.map((c) => c.value ?? "—")).toEqual(["[Pop]*[Rate]", "—", "—", "—"]);
+    expect(rows[3]!.cells.map((c) => c.changed)).toEqual([false, false, false, false]);
+  });
+
+  test("足した行に値を入れても二重に出さない。施策で変えられない要素やモデルにない要素は出さない", () => {
+    expect(valueRows(model, runs, ["rate", "Pop"]).map((r) => r.element)).toEqual(["Pop", "Rate"]);
+    expect(valueRows(model, runs, ["Table", "消えた要素"]).map((r) => r.element)).toEqual(["Pop", "Rate"]);
+  });
+
+  test("「＋ 値を追加」で選べるのは、施策で変えられる値のうち、まだ行にないもの", () => {
+    const rows = valueRows(model, runs, ["Cap"]);
+    expect(addableValues(model, rows).map((e) => e.name)).toEqual(["Births"]);
+  });
+
+  test("行を消すときは、その値を変えている施策だけに null を送る（名前のない施策も、表記の違う名前もそのまま）", () => {
+    expect(clearValuePatches(model, "Rate")).toEqual([
+      { name: "a", values: { rate: null } },
+      { name: "scenario 3", values: { Rate: null } },
+    ]);
+    expect(clearValuePatches(model, "pop")).toEqual([
+      { name: "a", values: { Pop: null } },
+      { name: "b", values: { Pop: null } },
+    ]);
+    expect(clearValuePatches(model, "Cap")).toEqual([]);
   });
 });

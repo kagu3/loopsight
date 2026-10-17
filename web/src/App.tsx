@@ -11,7 +11,7 @@ import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { findLink, sameName } from "../../src/core/modeljson.js";
 import { Problems } from "./Problems.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
-import { findScenario, scenarioBadges } from "./scenarios.js";
+import { clearValuePatches, findScenario, scenarioBadges } from "./scenarios.js";
 import { draggedResultsRatio, parseResultsRatio, RESULTS_RATIO } from "./split.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
@@ -122,7 +122,7 @@ export function App() {
   const [editMode, setEditMode] = useState(false);
   // 画面で要素を足した・消した・名前を変えた（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
   const [keepView, setKeepView] = useState<string>();
-  // 要素を消したときの知らせ。元に戻したら閉じる
+  // 要素や、施策の中身の表の行を消したときの知らせ。元に戻したら閉じる
   const removedNotice = useRef<string>(undefined);
   const [modelsOpen, setModelsOpen] = useState(loadModelsOpen);
   const toggleModels = () =>
@@ -365,6 +365,31 @@ export function App() {
   );
   /** 施策の中身の表で、施策の値をその場で直す。編集欄は開かない */
   const saveScenarioValue = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
+  /**
+   * 施策の中身の表で、行（変える値）を消す。すべての施策でその値を変えないことにする。
+   * 確かめずに消す代わりに、すべての施策の変更を 1 回の保存にし（Ctrl+Z 1 回で戻せる）、戻せることを知らせの帯に出す
+   */
+  const removeScenarioValue = useCallback(
+    async (element: string) => {
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 変えている施策は、順番が来たときの最新の内容で決める。どの施策も変えていなければ（続けて押したときなど）何もしない
+        const patches = clearValuePatches(d.model, element);
+        if (!patches.length) return undefined;
+        const result = await postScenarios(d.name, d.version, patches);
+        const err = applyWrite(result);
+        if (!err && result.ok) {
+          removedNotice.current = `「${element}」の行を消しました（Ctrl+Z で戻せます）`;
+          setNotice(removedNotice.current);
+        }
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+      return err;
+    },
+    [applyWrite, enqueueWrite],
+  );
   const removeScenario = useCallback(
     async (name: string) => {
       const [model, target] = [currentRef.current, scenarioRef.current];
@@ -783,6 +808,7 @@ export function App() {
               editingScenario={scenario?.name}
               onEditScenario={(name) => setScenario({ name })}
               onSaveScenario={saveScenarioValue}
+              onRemoveScenarioValue={removeScenarioValue}
               onFocusScenario={setHoveredScenario}
             />
           ) : data ? (

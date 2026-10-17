@@ -1552,9 +1552,60 @@ input.matrix-input.matrix-name {
   text-align: left;
   color: var(--text-muted);
 }
-.scenario-matrix .matrix-fold button.link {
+.scenario-matrix .matrix-fold button.link,
+.scenario-matrix .matrix-add-row button.link {
   margin-right: 0;
   font-size: 12px;
+}
+/* 変えた値の行の下の「＋ 値を追加」と、押したときに出す値の選び欄 */
+.scenario-matrix .matrix-add-row {
+  text-align: left;
+}
+.scenario-matrix .matrix-add-row button.link[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+select.matrix-select {
+  max-width: 260px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+}
+/* 行の名前にカーソルを乗せると出す、行を消す ×。幅は取らず、名前の右端に重ねる（フォーカスは受けられる） */
+.scenario-matrix tbody th.matrix-row-head {
+  position: relative;
+}
+button.matrix-remove-row {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  /* 見えないときは押せない（タッチ端末で、見えない × を押して行を消さないように）。キーボードのフォーカスは受けられる */
+  pointer-events: none;
+}
+.scenario-matrix tbody th.matrix-row-head:hover button.matrix-remove-row,
+button.matrix-remove-row:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+button.matrix-remove-row:hover {
+  background: var(--border);
+  color: var(--text-primary);
 }
 /* 結果の行は、変えた値の行と線で分ける */
 .scenario-matrix tr.matrix-result.first > * {

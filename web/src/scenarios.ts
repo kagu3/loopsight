@@ -104,16 +104,19 @@ export interface MatrixRow {
 
 /**
  * 変えた値の行。どれかの施策で変えた要素だけを、モデルの並び順で（モデルにない要素は最後に）。
+ * added（表で足した行の要素）は、どの施策でも変えていなくても出す（施策で値を変えられない要素や、モデルにない要素は出さない）。
  * 「何もしない場合」の列はいまの値（ストックは初期値、変数とフローは式）
  */
-export function valueRows(model: ModelJSON, runs: CompareRun[]): MatrixRow[] {
+export function valueRows(model: ModelJSON, runs: CompareRun[], added: string[] = []): MatrixRow[] {
   const scenarios = runs.filter((r) => !r.baseline);
   // 施策の値は、要素名の大文字と小文字を区別せずに引く
   const lookup = scenarios.map((r) => new Map(Object.entries(r.values).map(([k, v]) => [nameKey(k), v])));
+  const extra = new Set(added.map(nameKey));
   const changed = new Map<string, string>();
   for (const e of model.elements) {
     if (e.type === "LINK" || !e.name || changed.has(nameKey(e.name))) continue;
-    if (lookup.some((m) => m.has(nameKey(e.name!)))) changed.set(nameKey(e.name), e.name);
+    const key = nameKey(e.name);
+    if (lookup.some((m) => m.has(key)) || (extra.has(key) && VALUE_TYPES.has(e.type))) changed.set(key, e.name);
   }
   for (const r of scenarios) for (const k of Object.keys(r.values)) if (!changed.has(nameKey(k))) changed.set(nameKey(k), k);
 
@@ -396,4 +399,23 @@ export function newScenarioPatchOf(model: ModelJSON, name: string, source?: stri
   const description = from?.description?.trim();
   if (description) patch.description = description;
   return patch;
+}
+
+// ここから、施策の中身の表で、行（変える値）を足す・消すときの計算
+
+/** 表に足せる値。施策で値を変えられる要素のうち、まだ行にないもの（モデルの並び順） */
+export function addableValues(model: ModelJSON, rows: MatrixRow[]): ModelElement[] {
+  const shown = new Set(rows.map((r) => nameKey(r.element)));
+  return valueTargets(model).filter((e) => !shown.has(nameKey(e.name!)));
+}
+
+/**
+ * 行を消すときの変更。その値を変えている施策ごとに値を null にする（すべての施策でその値を変えない）。
+ * 重ねていない施策（実行できなかった・色が足りない）も含める。1 回の保存で送ると、元に戻すも 1 回で済む。変えている施策がなければ空
+ */
+export function clearValuePatches(model: ModelJSON, element: string): ScenarioPatch[] {
+  return (model.scenarios ?? []).flatMap((s, i) => {
+    const keys = Object.keys(s.values).filter((k) => nameKey(k) === nameKey(element));
+    return keys.length ? [{ name: scenarioName(s, i), values: Object.fromEntries(keys.map((k) => [k, null])) }] : [];
+  });
 }
