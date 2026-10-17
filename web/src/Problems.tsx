@@ -1,18 +1,9 @@
-import type { Issue, ModelResponse } from "../../src/viewer/api.js";
+import type { ModelResponse } from "../../src/viewer/api.js";
+import { listProblems } from "./problemList.js";
 
 // 検証のエラーと警告の一覧。要素の名前を押すと、その要素を選ぶ
 export function Problems({ data, onSelect }: { data: ModelResponse; onSelect(name: string): void }) {
-  const issues: { level: "error" | "warning"; issue: Issue }[] = [
-    ...data.validation.errors.map((issue) => ({ level: "error" as const, issue })),
-    ...(data.run_error ? (data.run_error.issues.length ? data.run_error.issues : [{ message: data.run_error.message }]) : []).map((issue) => ({
-      level: "error" as const,
-      issue,
-    })),
-    ...data.validation.warnings.map((issue) => ({ level: "warning" as const, issue })),
-    ...(data.actual?.issues ?? []).map((issue) => ({ level: "warning" as const, issue })),
-    // 説明資料の筋書きの問題は、作業画面でだけ知らせる（発表モードには出さない）
-    ...(data.slides?.issues ?? []).map((issue) => ({ level: "warning" as const, issue })),
-  ];
+  const issues = listProblems(data);
   if (!issues.length) return null;
   return (
     <section className="panel">

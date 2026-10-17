@@ -9,6 +9,7 @@ import { addElementPatches, linkProblem, linkRemoveProblem, reconnectPatches, re
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { findLink, sameName } from "../../src/core/modeljson.js";
+import { countProblems, describeProblemCount, listProblems, stripCount } from "./problemList.js";
 import { Problems } from "./Problems.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
 import { clearValuePatches, findScenario, scenarioBadges } from "./scenarios.js";
@@ -120,6 +121,9 @@ export function App() {
     moveSidebarFocus.current = true;
     setSidebarOpen(open);
   };
+  // たたんだ帯に出す「問題」の件数（左の欄の「問題」の一覧と同じものを数える）
+  const problemCount = useMemo(() => (data ? countProblems(listProblems(data)) : { errors: 0, warnings: 0 }), [data]);
+  const problemText = describeProblemCount(problemCount);
   useEffect(() => {
     if (!moveSidebarFocus.current) return;
     moveSidebarFocus.current = false;
@@ -777,13 +781,19 @@ export function App() {
         className="sidebar-strip"
         ref={stripRef}
         onClick={() => toggleSidebar(true)}
-        title="左の欄（選んだ要素の詳細・問題・モデルの一覧）を開きます"
-        aria-label="左の欄を開く"
+        title={`左の欄（選んだ要素の詳細・問題・モデルの一覧）を開きます${problemText ? `（${problemText}）` : ""}`}
+        aria-label={`左の欄を開く${problemText ? `（${problemText}）` : ""}`}
         aria-expanded={sidebarOpen}
         aria-controls="sidebar"
       >
         <span aria-hidden="true">▶</span>
         <span className="sidebar-strip-label">左の欄</span>
+        {problemText && (
+          <span className={problemCount.errors ? "sidebar-strip-problems error" : "sidebar-strip-problems warning"} aria-hidden="true">
+            ⚠<br />
+            {stripCount(problemCount.errors || problemCount.warnings)}
+          </span>
+        )}
       </button>
 
       <main className="main" ref={mainRef}>
@@ -910,7 +920,7 @@ export function App() {
               onFocusScenario={setHoveredScenario}
             />
           ) : data ? (
-            <p className="muted pad">エラーがあるため実行できません。左の「問題」を見てください。</p>
+            <p className="muted pad">エラーがあるため実行できません。左の欄の「問題」を見てください。</p>
           ) : null}
         </div>
       </main>
