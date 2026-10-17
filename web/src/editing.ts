@@ -100,6 +100,8 @@ export const NEW_ELEMENT_LABEL: Record<NewElementType, string> = { STOCK: "ス�
 
 /** フローの両端の雲を、置いた場所から左右にどれだけ離すか（雲の中心まで） */
 const FLOW_HALF = 70;
+/** 図の雲の大きさ（core/diagram.ts と同じ） */
+const CLOUD_SIZE = [36, 26] as const;
 
 /** 足す要素の仮の名前。「新しいストック」、重なれば「新しいストック 2」のように番号を付ける（大文字と小文字は区別しない） */
 export function newElementName(model: ModelJSON, type: NewElementType): string {
@@ -117,7 +119,7 @@ export function addElementPatches(model: ModelJSON, graph: Graph, type: NewEleme
   const name = newElementName(model, type);
   const added: GraphNode[] = [];
   if (type === "FLOW") {
-    const [w, h] = [36, 26]; // 図の雲と同じ大きさ（core/diagram.ts）
+    const [w, h] = CLOUD_SIZE;
     for (const [end, dx] of [["from", -FLOW_HALF], ["to", FLOW_HALF]] as const) {
       added.push({ id: `new:${end}`, kind: "CLOUD", label: "", cloudOf: { flow: name, end }, x: at.x + dx - w / 2, y: at.y - h / 2, width: w, height: h, shape: "rect" });
     }
@@ -161,4 +163,35 @@ export function linkRemoveProblem(model: ModelJSON, from: string, to: string): s
   if (canReference(without, target, from)) return undefined;
   const uses = equationsOf(target).some((eq) => referencesIn(eq.text).some((r) => sameName(r, from)));
   return uses ? `「${target.name}」の式が [${from}] を使っているので、このリンクは消せません。先に「${target.name}」の式を直してください。` : undefined;
+}
+
+/** フローの端。from は入ってくる側、to は出ていく側 */
+export type FlowEnd = "from" | "to";
+
+/**
+ * 編集モードで、フローの端をつなぎ替える変更。to がストックの名前ならそのストックにつなぎ、雲の座標を消す。
+ * 図の座標なら、そこに雲を置く（つながっていたストックから外す。もとから雲なら雲を動かすだけ）。
+ * つなぎ替えられないときはその理由、変えることがなければ空の配列を返す。
+ * 雲を置くときは、要素を足すときと同じく、座標のない要素を仮に並べているときや、左や上にはみ出すときは、見えている配置もまとめて保存する
+ */
+export function reconnectPatches(model: ModelJSON, graph: Graph, flow: string, end: FlowEnd, to: string | { x: number; y: number }): ElementPatch[] | string {
+  const f = findElement(model, flow);
+  if (!f || f.type !== "FLOW") return `フロー「${flow}」が見つかりません。消された可能性があります。`;
+  const key = end === "from" ? "from_coordinates" : "to_coordinates";
+  if (typeof to === "string") {
+    const s = findElement(model, to);
+    if (!s) return `「${to}」が見つかりません。消された可能性があります。`;
+    if (s.type !== "STOCK") return `フローの端は、ストックにだけつなげます（「${s.name}」はストックではありません）。`;
+    if (sameName(f[end], s.name)) return [];
+    if (sameName(f[end === "from" ? "to" : "from"], s.name)) return `「${f.name}」の両端を、同じストック「${s.name}」にはつなげません。`;
+    return [{ name: f.name!, [end]: s.name!, display: { [key]: null } }];
+  }
+  const [w, h] = CLOUD_SIZE;
+  const cloud: GraphNode = { id: `cloud:${end}`, kind: "CLOUD", label: "", cloudOf: { flow: f.name!, end }, x: to.x - w / 2, y: to.y - h / 2, width: w, height: h, shape: "rect" };
+  // もとの雲（あれば）の代わりに、新しい雲を置く
+  const all = [...graph.nodes.filter((n) => !(n.cloudOf && sameName(n.cloudOf.flow, f.name) && n.cloudOf.end === end)), cloud];
+  const shifted = shiftIntoView(all);
+  const detach: ElementPatch[] = f[end] ? [{ name: f.name!, [end]: null }] : [];
+  if (graph.missingCoordinates || shifted) return [...detach, ...positionPatches(shifted ?? all)];
+  return [{ name: f.name!, ...(f[end] ? { [end]: null } : {}), display: { [key]: [Math.round(to.x), Math.round(to.y)] } }];
 }

@@ -5,7 +5,7 @@ import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, t
 import { Chart, formatValue, scenarioColor } from "./Chart.js";
 import { Details } from "./Details.js";
 import { Diagram, type LinkEnds, type ScenarioMarks } from "./Diagram.js";
-import { addElementPatches, linkProblem, linkRemoveProblem, renamedName, type NewElementType } from "./editing.js";
+import { addElementPatches, linkProblem, linkRemoveProblem, reconnectPatches, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { findLink, sameName } from "../../src/core/modeljson.js";
@@ -569,6 +569,30 @@ export function App() {
     [applyWrite, enqueueWrite, selectLink],
   );
 
+  /**
+   * 編集モードで、フローの端をつなぎ替える。to がストックの名前ならそのストックに、図の座標ならそこに置いた雲につなぐ。
+   * つなげないとき（ストックでない、両端が同じストックになるなど）は、知らせの帯に理由を出す
+   */
+  const reconnectFlow = useCallback(
+    async (flow: string, end: FlowEnd, to: string | { x: number; y: number }) => {
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 順番が来たときの最新の内容で確かめる
+        const patches = reconnectPatches(d.model, toGraph(d.model), flow, end, to);
+        if (typeof patches === "string") return patches;
+        if (!patches.length) return undefined;
+        const result = await postEdit(d.name, d.version, patches);
+        const err = applyWrite(result);
+        // 雲が増えたり減ったりしても、図の見る場所は動かさない
+        if (!err && result.ok) setKeepView(result.data.model.version);
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+    },
+    [applyWrite, enqueueWrite],
+  );
+
   /** 編集モードで、リンクを消す。先の要素の式が元の要素を使っているリンクは消さず、知らせの帯に理由を出す */
   const removeLink = useCallback(
     async (link: LinkEnds) => {
@@ -831,6 +855,7 @@ export function App() {
                 selectedLink={selectedLink}
                 onSelectLink={selectLink}
                 onLink={addLink}
+                onReconnect={reconnectFlow}
                 removable={removable}
                 onRemove={removeSelected}
               />

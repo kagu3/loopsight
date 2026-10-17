@@ -3,8 +3,9 @@ import { request } from "node:http";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ModelStore, emptyModel, toGraph, upsertElements } from "../src/core/index.js";
-import type { ChangeEvent, EditErrorResponse, EditResponse, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
+import type { ChangeEvent, EditErrorResponse, EditResponse, ElementPatch, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
+import { reconnectPatches } from "../web/src/editing.js";
 import { cellPatchOf, clearValuePatches, newScenarioPatchOf } from "../web/src/scenarios.js";
 import { tempDir } from "./helpers.js";
 
@@ -417,6 +418,31 @@ describe("ビューアからの編集", () => {
     const u = await post<EditResponse>("/api/models/pop.json/undo", { version: e1.body.model.version });
     expect(u.status).toBe(200);
     expect(u.body.model.version).toBe(v0);
+  });
+
+  test("画面でフローの端をつなぎ替えると、端と雲の座標をまとめて保存し、元に戻せる", async () => {
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    const v0 = before.version;
+    // ストックにつながっている端を、何もないところで離して雲にする
+    const toCloud = reconnectPatches(before.model, toGraph(before.model), "Births", "to", { x: 500, y: 300 }) as ElementPatch[];
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: toCloud });
+    expect(e1.status).toBe(200);
+    const saved = (await new ModelStore(dir).read("pop")).elements.find((e) => e.name === "Births")!;
+    expect(saved.to).toBeNull();
+    expect(saved.display!.to_coordinates).toEqual([500, 300]);
+    // 雲の端を、もう一度ストックにつなぐ
+    const toStock = reconnectPatches(e1.body.model.model, toGraph(e1.body.model.model), "Births", "to", "Population") as ElementPatch[];
+    const e2 = await post<EditResponse>("/api/models/pop/edit", { version: e1.body.model.version, elements: toStock });
+    const again = e2.body.model.model.elements.find((e) => e.name === "Births")!;
+    expect(again.to).toBe("Population");
+    expect(again.display?.to_coordinates).toBeUndefined();
+    expect(e2.body.model.validation.ok).toBe(true);
+    // 元に戻すと、雲に戻り、もう一度戻すと最初の形に戻る
+    const u1 = await post<EditResponse>("/api/models/pop/undo", { version: e2.body.model.version });
+    expect(u1.body.model.model.elements.find((e) => e.name === "Births")!.to).toBeNull();
+    const u2 = await post<EditResponse>("/api/models/pop/undo", { version: u1.body.model.version });
+    expect(u2.body.model.version).toBe(v0);
+    expect(u2.body.model.model.elements.find((e) => e.name === "Births")!.to).toBe("Population");
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { emptyModel, toGraph, upsertElements, type ModelElement } from "../src/core/index.js";
-import { addElementPatches, formOf, linkProblem, linkRemoveProblem, newElementName, parseEquation, parseTable, patchOf, renamedName } from "../web/src/editing.js";
+import { emptyModel, toGraph, upsertElements, type ElementPatch, type ModelElement } from "../src/core/index.js";
+import { addElementPatches, formOf, linkProblem, linkRemoveProblem, newElementName, parseEquation, parseTable, patchOf, reconnectPatches, renamedName } from "../web/src/editing.js";
 
 describe("編集フォームの値", () => {
   test("数字だけなら数値、それ以外は式の文字列", () => {
@@ -188,5 +188,63 @@ describe("編集モードでリンクを引く・消す", () => {
     ]);
     expect(linkRemoveProblem(m, "人口", "効果")).toMatch(/入力が「人口」/);
     expect(linkRemoveProblem(m, "出生率", "効果")).toBeUndefined();
+  });
+});
+
+describe("編集モードでフローの端をつなぎ替える", () => {
+  const model = () => {
+    const m = emptyModel("m");
+    upsertElements(m, [
+      { type: "STOCK", name: "在庫", behavior: { initial_value: 100 }, display: { coordinates: [400, 100] } },
+      { type: "STOCK", name: "倉庫", behavior: { initial_value: 0 }, display: { coordinates: [600, 100] } },
+      { type: "VARIABLE", name: "率", behavior: { value: 0.1 }, display: { coordinates: [300, 300] } },
+      { type: "FLOW", name: "入荷", from: null, to: null, behavior: { value: 1 }, display: { from_coordinates: [100, 120], to_coordinates: [240, 120] } },
+    ]);
+    return m;
+  };
+  const flow = (m: ReturnType<typeof model>) => m.elements.find((e) => e.name === "入荷")!;
+
+  test("雲の端をストックにつなぐと、その端の雲の座標を消す", () => {
+    const m = model();
+    const patches = reconnectPatches(m, toGraph(m), "入荷", "to", "在庫");
+    expect(patches).toEqual([{ name: "入荷", to: "在庫", display: { to_coordinates: null } }]);
+    upsertElements(m, patches as ElementPatch[]);
+    expect(flow(m)).toMatchObject({ from: null, to: "在庫", display: { from_coordinates: [100, 120] } });
+    expect(flow(m).display!.to_coordinates).toBeUndefined();
+    // 図でも、雲が 1 つになり、フローがストックにつながる
+    const g = toGraph(m);
+    expect(g.nodes.filter((n) => n.kind === "CLOUD")).toHaveLength(1);
+    expect(g.edges.find((e) => e.id.endsWith(":out") && e.element === "入荷")!.target).toBe(g.nodes.find((n) => n.element === "在庫")!.id);
+  });
+
+  test("ストックの端を何もないところで離すと、そこに雲を置いてつなぐ", () => {
+    const m = model();
+    upsertElements(m, reconnectPatches(m, toGraph(m), "入荷", "from", "在庫") as ElementPatch[]);
+    const patches = reconnectPatches(m, toGraph(m), "入荷", "from", { x: 150.4, y: 200.6 });
+    expect(patches).toEqual([{ name: "入荷", from: null, display: { from_coordinates: [150, 201] } }]);
+    upsertElements(m, patches as ElementPatch[]);
+    expect(flow(m)).toMatchObject({ from: null, display: { from_coordinates: [150, 201] } });
+    // もとから雲なら、雲を動かすだけ
+    expect(reconnectPatches(m, toGraph(m), "入荷", "to", { x: 260, y: 140 })).toEqual([{ name: "入荷", display: { to_coordinates: [260, 140] } }]);
+  });
+
+  test("左や上にはみ出す場所に雲を置くと、全体をずらしてまとめて保存する", () => {
+    const m = model();
+    const patches = reconnectPatches(m, toGraph(m), "入荷", "from", { x: 0, y: 120 }) as ElementPatch[];
+    upsertElements(m, patches);
+    const cloud = toGraph(m).nodes.find((n) => n.kind === "CLOUD" && n.cloudOf?.end === "from")!;
+    expect(cloud.x).toBeGreaterThanOrEqual(20);
+    // ほかの要素も同じだけずれる
+    expect(m.elements.find((e) => e.name === "在庫")!.display!.coordinates![0] - flow(m).display!.from_coordinates![0]).toBe(400);
+  });
+
+  test("ストックのほか、両端を同じストックにすることはできない。同じストックにつなぎ直すなら何もしない", () => {
+    const m = model();
+    expect(reconnectPatches(m, toGraph(m), "入荷", "to", "率")).toMatch(/ストックにだけ/);
+    expect(reconnectPatches(m, toGraph(m), "入荷", "to", "ない")).toMatch(/「ない」が見つかりません/);
+    expect(reconnectPatches(m, toGraph(m), "出荷", "to", "在庫")).toMatch(/フロー「出荷」が見つかりません/);
+    upsertElements(m, reconnectPatches(m, toGraph(m), "入荷", "from", "在庫") as ElementPatch[]);
+    expect(reconnectPatches(m, toGraph(m), "入荷", "to", "在庫")).toMatch(/同じストック/);
+    expect(reconnectPatches(m, toGraph(m), "入荷", "from", "在庫")).toEqual([]);
   });
 });

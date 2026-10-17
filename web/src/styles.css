@@ -936,6 +936,35 @@ button.edit-tool.danger {
 .react-flow.is-linking .node:not(.node-cloud) {
   cursor: crosshair;
 }
+/* フローの端のつまみ（編集モードのときだけ出る）。ドラッグしてつなぎ替える */
+.flow-end-grip {
+  fill: var(--surface-1);
+  stroke: var(--flow);
+  stroke-width: 1.5;
+  pointer-events: all;
+  cursor: grab;
+}
+.flow-end-grip:hover {
+  fill: var(--flow);
+}
+/* ドラッグしている端の線は薄くし、弁からマウスまでの線を出す */
+.react-flow__edge-path.is-grabbed {
+  opacity: 0.3;
+}
+.flow-end-drag {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+.flow-end-drag line {
+  stroke: var(--flow);
+  stroke-width: 3;
+  stroke-dasharray: 6 4;
+}
+/* フローの端をドラッグしている間、離すとつなぐストック */
+.node.is-drop-target {
+  box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 5px var(--flow);
+}
 /* [＋線] で元に選んだ要素 */
 .node.is-link-from {
   outline: 2px dashed var(--link);

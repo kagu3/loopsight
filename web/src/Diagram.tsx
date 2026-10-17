@@ -14,6 +14,7 @@ import {
   useInternalNode,
   useReactFlow,
   useStore,
+  ViewportPortal,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -25,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
-import { NEW_ELEMENT_LABEL, type NewElementType } from "./editing.js";
+import { NEW_ELEMENT_LABEL, type FlowEnd, type NewElementType } from "./editing.js";
 import { nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
@@ -33,11 +34,13 @@ import { nameKey, type ScenarioBadge } from "./scenarios.js";
 // 編集モード（図の左上の「図を編集」で切り替える）のときだけ、箱と雲をドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
 // 編集モードでは、左上の道具で要素を足す（種類を選んでから図の置きたい場所を押す）・選んだ要素やリンクを消すこともできる。
 // リンクは、要素の縁からドラッグして別の要素の上で離すか、[＋線] を押してから元の要素 → 先の要素の順に押して引く。
+// フローの端は、端の近くの丸（つまみ）をドラッグして、ストックの上で離すとそのストックに、何もないところで離すとそこに置いた雲につなぎ替える。
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
 // badge：シナリオに注目している間、そのシナリオで変えた要素に付ける札（いまの値 → シナリオの値）
 // linkable：編集モードで、縁からドラッグしてリンクを引ける（雲はモデルの要素でないので引けない）。linkFrom：[＋線] で元に選んだ要素
+// dropTarget：フローの端をドラッグしている間、離すとつなぐストック
 type NodeData = {
   g: GraphNode;
   selected: boolean;
@@ -47,8 +50,19 @@ type NodeData = {
   badge?: ScenarioBadge;
   linkable: boolean;
   linkFrom: boolean;
+  dropTarget: boolean;
 };
-type EdgeData = { g: GraphEdge; selected: boolean; changed: boolean; dimmed: boolean; inLoop: boolean };
+// grip：編集モードで、つなぎ替えられるフローの端（:in の線は元の側＝from、:out の線は先の側＝to）。grabbed：その端をドラッグしている
+type EdgeData = {
+  g: GraphEdge;
+  selected: boolean;
+  changed: boolean;
+  dimmed: boolean;
+  inLoop: boolean;
+  grip?: FlowEnd;
+  grabbed: boolean;
+  onGrip?(e: React.PointerEvent, flow: string, end: FlowEnd, valve: Pos): void;
+};
 type ModelNodeT = Node<NodeData, "model">;
 type ModelEdgeT = Edge<EdgeData, "floating">;
 
@@ -66,6 +80,7 @@ function ModelNode({ data }: NodeProps<ModelNodeT>) {
     data.dimmed ? "is-dimmed" : "",
     badge ? "is-scenario" : "",
     data.linkFrom ? "is-link-from" : "",
+    data.dropTarget ? "is-drop-target" : "",
   ].join(" ");
   // リンクを引いている間だけ、要素全体を離す先にする（ふだんは要素を押す・動かすのを邪魔しない）
   const connecting = useConnection((c) => c.inProgress);
@@ -154,11 +169,40 @@ function FloatingEdge({ id, source, target, markerEnd, data }: EdgeProps<ModelEd
   // 弁には縁ではなく中心でつなぐ
   const endAt = (n: typeof a, c: [number, number], toward: [number, number]) => (n.kind === "VALVE" ? c : borderPoint(n, toward[0], toward[1]));
 
-  const cls = ["edge", `edge-${data.g.kind}`, data.selected ? "is-selected" : "", data.changed ? "is-changed" : "", data.dimmed ? "is-dimmed" : "", data.inLoop ? "is-loop" : ""].join(" ");
+  const cls = [
+    "edge",
+    `edge-${data.g.kind}`,
+    data.selected ? "is-selected" : "",
+    data.changed ? "is-changed" : "",
+    data.dimmed ? "is-dimmed" : "",
+    data.inLoop ? "is-loop" : "",
+    data.grabbed ? "is-grabbed" : "",
+  ].join(" ");
   if (data.g.kind !== "link") {
     const p1 = endAt(a, ca, cb);
     const p2 = endAt(b, cb, ca);
-    return <BaseEdge id={id} path={`M${p1[0]},${p1[1]} L${p2[0]},${p2[1]}`} markerEnd={markerEnd} className={cls} interactionWidth={EDGE_HIT} />;
+    const { grip, onGrip } = data;
+    // つまみは、端から少し弁の側に寄せて置く（端の上は要素の縁と重なり、リンクを引き始める口に隠れるため）。先の側は矢じりの手前に置く
+    const [end, valve] = grip === "from" ? [p1, cb] : [p2, ca];
+    const len = Math.hypot(valve[0] - end[0], valve[1] - end[1]) || 1;
+    const k = Math.min(grip === "from" ? GRIP_OFFSET : GRIP_OFFSET + ARROW_SIZE, len / 3) / len;
+    const at: [number, number] = [end[0] + (valve[0] - end[0]) * k, end[1] + (valve[1] - end[1]) * k];
+    return (
+      <>
+        <BaseEdge id={id} path={`M${p1[0]},${p1[1]} L${p2[0]},${p2[1]}`} markerEnd={markerEnd} className={cls} interactionWidth={EDGE_HIT} />
+        {grip && onGrip && (
+          <circle
+            className="flow-end-grip nodrag nopan"
+            cx={at[0]}
+            cy={at[1]}
+            r={5}
+            onPointerDown={(e) => onGrip(e, data.g.element!, grip, { x: valve[0], y: valve[1] })}
+          >
+            <title>ドラッグして、ストックの上で離すとそのストックに、何もないところで離すと雲（モデルの外）につなぎ替えます</title>
+          </circle>
+        )}
+      </>
+    );
   }
   // リンクは少し曲げる（フローの線と見分けやすく）
   const ctrl = linkControlPoint(ca, cb);
@@ -219,6 +263,8 @@ export interface DiagramProps {
   onSelectLink?(link: LinkEnds): void;
   /** 編集モードで、from から to へリンクを引く（ドラッグか [＋線]）。引けるかどうかは呼ぶ側で確かめる */
   onLink?(from: string, to: string): void;
+  /** 編集モードで、フローの端をつなぎ替える。to はストックの名前か、雲を置く図の座標。つなげるかどうかは呼ぶ側で確かめる */
+  onReconnect?(flow: string, end: FlowEnd, to: string | Pos): void;
   /** 編集モードで消せる、選んでいる要素の名前かリンク（label は「A → B」）。なければ「削除」を押せない */
   removable?: { label: string; link: boolean };
   onRemove?(): void;
@@ -296,6 +342,94 @@ export function Diagram(props: DiagramProps) {
     return graph.nodes.map((n) => byId.get(n.id)!);
   }, [graph, moved, valveEnds]);
 
+  // ドラッグしているフローの端。valve は弁の中心、at はいまのマウスの位置、target は離すとつなぐストックのノード（図の座標）
+  const [grab, setGrab] = useState<{ flow: string; end: FlowEnd; valve: Pos; at: Pos; target?: string }>();
+  const placedRef = useRef(placed);
+  placedRef.current = placed;
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
+  const { onReconnect } = props;
+  // ドラッグをやめて、window に付けた listener を外す（図を閉じたときにも呼ぶ）
+  const endGrab = useRef<() => void>(undefined);
+  useEffect(() => () => endGrab.current?.(), []);
+  /**
+   * フローの端のつまみを押した。離すまでマウスを追い、離した場所でつなぎ替える。Esc でやめる。
+   * 離したあとの click は 1 回だけ捨てる（何もないところで離すと、図を押したことになり、選ぶのをやめたり、置く場所を選んでいる途中なら要素を足したりしてしまうため）
+   */
+  const onGrip = useCallback(
+    (e: React.PointerEvent, flowName: string, end: FlowEnd, valve: Pos) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      endGrab.current?.();
+      const start = { x: e.clientX, y: e.clientY };
+      // 押した指（マウス）だけを追う。2 本目の指で終わらないように
+      const pointer = e.pointerId;
+      // 図の窓。外（左の欄やグラフの上）で離したら、見えないところに雲を置かないよう、やめにする
+      const pane = (e.currentTarget as Element).closest(".react-flow");
+      // 離した点の下のノード（雲は除く。雲の上で離したときは、そこに雲を置く）
+      const under = (p: Pos) => placedRef.current.find((n) => n.kind !== "CLOUD" && p.x >= n.x && p.x <= n.x + n.width && p.y >= n.y && p.y <= n.y + n.height);
+      const track = (ev: { clientX: number; clientY: number }) => {
+        const at = flow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+        return { at, node: under(at) };
+      };
+      setGrab({ flow: flowName, end, valve, at: track(e).at });
+      const move = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointer) return;
+        const { at, node } = track(ev);
+        setGrab((g) => g && { ...g, at, target: node?.kind === "STOCK" ? node.id : undefined });
+      };
+      /** 離したすぐあとの click を捨てる。click は pointerup と同じ流れで続けて起きるので、そのあとのタイマーで外す */
+      const swallowClick = () => {
+        const swallow = (ev: MouseEvent) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+        };
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+      };
+      const finish = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", cancelled);
+        window.removeEventListener("keydown", onKey);
+        endGrab.current = undefined;
+        setGrab(undefined);
+      };
+      const cancelled = (ev: PointerEvent) => ev.pointerId === pointer && finish();
+      const up = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointer) return;
+        finish();
+        // 押しただけ（ほとんど動かしていない）なら、つなぎ替えない（押したつまみの線を選ぶ）
+        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return;
+        swallowClick();
+        if (!editableRef.current) return;
+        const r = pane?.getBoundingClientRect();
+        if (r && (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom)) return;
+        const { at, node } = track(ev);
+        onReconnect?.(flowName, end, node?.element ?? at);
+      };
+      const onKey = (ev: KeyboardEvent) => {
+        if (ev.key !== "Escape") return;
+        finish();
+        // まだボタンを押したままなので、離したときの click も捨てる
+        window.addEventListener("pointerup", swallowClick, { capture: true, once: true });
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", cancelled);
+      window.addEventListener("keydown", onKey);
+      endGrab.current = finish;
+    },
+    [flow, onReconnect],
+  );
+
+  // マウスを動かすたびに線とノードを作り直さないよう、ドラッグしている端と離す先だけを取り出す
+  const dropTarget = grab?.target;
+  const grabFlow = grab?.flow;
+  const grabEnd = grab?.end;
+  const grabbed = useMemo(() => (grabFlow && grabEnd ? { flow: grabFlow, end: grabEnd } : undefined), [grabFlow, grabEnd]);
+
   // 選んだ要素につながる線とノード。ほかは薄くする（配置を変えずに、見たいところを読めるように）。
   // ループを見せているときは、ループの要素と線
   // 呼ぶ側が毎回新しい配列を渡しても作り直さないよう、要素名の並びで覚える
@@ -333,6 +467,7 @@ export function Diagram(props: DiagramProps) {
             badge: g.element ? scenario?.badges.get(nameKey(g.element)) : undefined,
             linkable: !!editable && !!g.element,
             linkFrom: isLinkFrom,
+            dropTarget: !!dropTarget && dropTarget === g.id,
           },
           // 札がほかの要素の下に隠れないように、札の付いた要素を上に重ねる
           zIndex: g.element && scenario?.badges.has(nameKey(g.element)) ? 1 : undefined,
@@ -340,7 +475,7 @@ export function Diagram(props: DiagramProps) {
           connectable: !!editable && !!g.element,
         };
       }),
-    [placed, selected, changed, values, focus, scenario, editable, placing, linkFrom],
+    [placed, selected, changed, values, focus, scenario, editable, placing, linkFrom, dropTarget],
   );
 
   const onNodesChange = useCallback((changes: NodeChange<ModelNodeT>[]) => {
@@ -354,8 +489,6 @@ export function Diagram(props: DiagramProps) {
   }, []);
 
   // 離したら位置を保存する
-  const placedRef = useRef(placed);
-  placedRef.current = placed;
   const onNodeDragStop = useCallback(
     async (_: unknown, _node: ModelNodeT, dragged: ModelNodeT[]) => {
       // 座標のない要素を仮に並べているときは、見えている配置をまとめて保存する（座標のない要素を残さない）。
@@ -388,6 +521,10 @@ export function Diagram(props: DiagramProps) {
           changed: !!g.element && changed.has(g.element.toLowerCase()),
           dimmed: !!focus && !focus.edges.has(g.id),
           inLoop: !!loop?.edges.has(g.id),
+          // つなぎ替えられるのは、編集モードのフローの端（遷移の端は状態なので、ここでは扱わない）
+          grip: editable && !props.embed && onReconnect && g.kind === "flow" ? (g.id.endsWith(":in") ? "from" : "to") : undefined,
+          grabbed: !!grabbed && g.kind === "flow" && nameKey(g.element ?? "") === nameKey(grabbed.flow) && g.id.endsWith(grabbed.end === "from" ? ":in" : ":out"),
+          onGrip,
         },
         // 矢印の色は線と同じトークンにする（React Flow は色を style に入れるので CSS 変数が効く）
         markerEnd: g.arrow
@@ -399,7 +536,7 @@ export function Diagram(props: DiagramProps) {
           : undefined,
         selectable: false,
       })),
-    [graph, selected, changed, focus, loop, linkEdge],
+    [graph, selected, changed, focus, loop, linkEdge, editable, props.embed, onReconnect, grabbed, onGrip],
   );
 
   // ノードの id → 要素名（弁はフローの名前。雲はなし）
@@ -481,6 +618,14 @@ export function Diagram(props: DiagramProps) {
     >
       <FitOnChange modelName={props.modelName} layoutKey={nodeIds} nodes={graph.nodes} embed={props.embed} badge={!!props.loop} keepView={props.keepView} holdView={props.holdView} />
       <Background gap={20} size={1} />
+      {/* フローの端をドラッグしている間、弁からマウスまでの線 */}
+      {grab && (
+        <ViewportPortal>
+          <svg className="flow-end-drag" width={1} height={1} aria-hidden>
+            <line x1={grab.valve.x} y1={grab.valve.y} x2={grab.at.x} y2={grab.at.y} />
+          </svg>
+        </ViewportPortal>
+      )}
       {props.loop && <LoopBadge loop={props.loop} />}
       {props.onEditableChange && (
         <EditTools
@@ -538,7 +683,7 @@ function EditTools({
         title={
           editable
             ? "図の編集を終えます。オンの間は、要素をドラッグで動かしたり、要素の縁からドラッグして別の要素の上で離し、線（リンク）を引いたりできます"
-            : "図の形を変えられるようにします（要素を動かす・足す・消す、線を引く）。値やシナリオは、オフのままでもいつでも直せます"
+            : "図の形を変えられるようにします（要素を動かす・足す・消す、線を引く、フローの端をつなぎ替える）。値やシナリオは、オフのままでもいつでも直せます"
         }
       >
         ✎ 図を編集
@@ -612,6 +757,11 @@ const VIEWER_FIT = { padding: FIT_PADDING, maxZoom: 1.5, minZoom: MIN_FIT_ZOOM }
  * 線を押せる幅（React Flow の既定は 20px）。線の上からは見る場所を動かせないので、細めにして、図をドラッグしやすくする
  */
 const EDGE_HIT = 10;
+
+/** フローの端のつまみを、端から弁の側にどれだけ寄せるか（要素の縁の、リンクを引き始める口より外に出す） */
+const GRIP_OFFSET = 14;
+/** フローの矢じりの長さ（markerEnd の大きさ） */
+const ARROW_SIZE = 12;
 
 /** リンクを引いている間の線。図のリンクと同じ色と点線にする */
 const CONNECTION_LINE = { stroke: "var(--link)", strokeWidth: 1.5, strokeDasharray: "5 4" };
