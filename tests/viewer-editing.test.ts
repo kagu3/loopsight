@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { emptyModel, toGraph, upsertElements, type ModelElement } from "../src/core/index.js";
-import { addElementPatches, formOf, newElementName, parseEquation, parseTable, patchOf } from "../web/src/editing.js";
+import { addElementPatches, formOf, linkProblem, linkRemoveProblem, newElementName, parseEquation, parseTable, patchOf } from "../web/src/editing.js";
 
 describe("編集フォームの値", () => {
   test("数字だけなら数値、それ以外は式の文字列", () => {
@@ -112,5 +112,55 @@ describe("編集モードで要素を足す", () => {
     // ほかの要素も同じだけずれる（並びは変わらない）
     const [a, b] = ["人口", "新しい変数"].map((n) => m.elements.find((e) => e.name === n)!.display!.coordinates!);
     expect(b![0] - a![0]).toBe(200);
+  });
+});
+
+describe("編集モードでリンクを引く・消す", () => {
+  const model = () => {
+    const m = emptyModel("m");
+    upsertElements(m, [
+      { type: "STOCK", name: "人口", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "出生率", behavior: { value: 0.1 } },
+      { type: "FLOW", name: "出生", to: "人口", behavior: { value: "[人口]*[出生率]" } },
+    ]);
+    return m;
+  };
+
+  test("引けるなら理由はない。フロー（弁）にもつなげる", () => {
+    const m = model();
+    expect(linkProblem(m, "人口", "出生率")).toBeUndefined();
+    expect(linkProblem(m, "出生", "出生率")).toBeUndefined();
+    // 逆向きは別のリンク
+    expect(linkProblem(m, "出生", "人口")).toBeUndefined();
+  });
+
+  test("同じ向きのリンク、自分自身へのリンク、ない要素へは引けない（大文字と小文字は区別しない）", () => {
+    const m = model();
+    expect(linkProblem(m, "出生率", "出生")).toMatch(/すでにあります/);
+    expect(linkProblem(m, "人口", "人口")).toMatch(/自身/);
+    expect(linkProblem(m, "人口", "死亡")).toMatch(/「死亡」が見つかりません/);
+    upsertElements(m, [{ type: "VARIABLE", name: "Rate", behavior: { value: 1 } }]);
+    expect(linkProblem(m, "rate", "RATE")).toMatch(/自身/);
+  });
+
+  test("先の要素の式が元の要素を使っているリンクは消せない。使っていなければ消せる", () => {
+    const m = model();
+    expect(linkRemoveProblem(m, "出生率", "出生")).toMatch(/「出生」の式が \[出生率\] を使っている/);
+    upsertElements(m, [{ type: "LINK", from: "人口", to: "出生率" }]);
+    expect(linkRemoveProblem(m, "人口", "出生率")).toBeUndefined();
+    // フローは自分の端のストックをリンクなしで使えるので、そのリンクは消せる
+    upsertElements(m, [{ type: "LINK", from: "人口", to: "出生" }]);
+    expect(linkRemoveProblem(m, "人口", "出生")).toBeUndefined();
+  });
+
+  test("コンバーターの入力元からのリンクは消せない", () => {
+    const m = model();
+    upsertElements(m, [
+      { type: "CONVERTER", name: "効果", behavior: { input: "ELEMENT", input_element: "人口", data: [[0, 1]] } },
+      { type: "LINK", from: "人口", to: "効果" },
+      { type: "LINK", from: "出生率", to: "効果" },
+    ]);
+    expect(linkRemoveProblem(m, "人口", "効果")).toMatch(/入力が「人口」/);
+    expect(linkRemoveProblem(m, "出生率", "効果")).toBeUndefined();
   });
 });

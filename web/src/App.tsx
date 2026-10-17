@@ -4,10 +4,11 @@ import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelR
 import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatValue, scenarioColor } from "./Chart.js";
 import { Details } from "./Details.js";
-import { Diagram, type ScenarioMarks } from "./Diagram.js";
-import { addElementPatches, type NewElementType } from "./editing.js";
+import { Diagram, type LinkEnds, type ScenarioMarks } from "./Diagram.js";
+import { addElementPatches, linkProblem, linkRemoveProblem, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
+import { findLink, sameName } from "../../src/core/modeljson.js";
 import { Problems } from "./Problems.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
 import { findScenario, scenarioBadges } from "./scenarios.js";
@@ -15,7 +16,7 @@ import { findScenario, scenarioBadges } from "./scenarios.js";
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
 // 画面からの編集（式などの変更、位置の変更、施策の変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
-// 図の形を変える操作（配置のドラッグ、要素を足す・消す）は、上の帯の「編集モード」をオンにしたときだけできる。
+// 図の形を変える操作（配置のドラッグ、要素を足す・消す、線を引く・消す）は、上の帯の「編集モード」をオンにしたときだけできる。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
@@ -50,6 +51,9 @@ function changedElements(prev: ModelResponse | undefined, next: ModelResponse): 
 /** 順番待ちのあいだに AI などの変更が画面に出たため、送らなかった書き込みの知らせ */
 const SKIPPED_MESSAGE = "画面の変更を送る前に、ほかのところ（AI など）でモデルが変わったため、送りませんでした。いまの内容を確かめて、もう一度直してください。";
 
+/** 両端が同じリンクか（大文字と小文字は区別しない） */
+const sameLink = (a: LinkEnds, b: LinkEnds) => sameName(a.from, b.from) && sameName(a.to, b.to);
+
 /** 入力欄で打っているときは、元に戻すのショートカットを横取りしない */
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
@@ -78,6 +82,8 @@ export function App() {
   const [notice, setNotice] = useState<string>();
   const [connected, setConnected] = useState(false);
   const [selected, setSelected] = useState<string>();
+  // 図で線を押して選んだリンク。要素を選ぶと外す
+  const [selectedLink, setSelectedLink] = useState<LinkEnds>();
   // 左の欄で直している施策。name がなければ、施策を足している
   const [scenario, setScenario] = useState<{ name?: string }>();
   // 保存を待つあいだに、ほかのモデルや要素、施策を開いたかを確かめるため
@@ -220,6 +226,7 @@ export function App() {
     dataRef.current = undefined;
     setData(undefined);
     setSelected(undefined);
+    setSelectedLink(undefined);
     setScenario(undefined);
     setHoveredScenario(undefined);
     setNotice(undefined);
@@ -318,9 +325,16 @@ export function App() {
     [editScenarios],
   );
   /** 図で要素を選ぶと、施策の編集欄を閉じて、その要素を出す */
-  const selectElement = useCallback((name: string) => {
+  const selectElement = useCallback((name: string | undefined) => {
     setScenario(undefined);
     setSelected(name);
+    setSelectedLink(undefined);
+  }, []);
+  /** 図で線を押してリンクを選ぶ。要素を選んだときと同じく、施策の編集欄を閉じる */
+  const selectLink = useCallback((link: LinkEnds) => {
+    setScenario(undefined);
+    setSelected(undefined);
+    setSelectedLink(link);
   }, []);
 
   const undo = useCallback(
@@ -335,6 +349,8 @@ export function App() {
           // 足した・消した要素が戻っても、図の見る場所は動かさない。消したときの知らせは、戻したので閉じる
           setKeepView(result.data.model.version);
           setNotice((n) => (n !== undefined && n === removedNotice.current ? undefined : n));
+          // 元に戻してなくなったリンクは、選ぶのをやめる（「見つかりません」と出さないように）
+          setSelectedLink((l) => (l && findLink(result.data.model.model, l.from, l.to) ? l : undefined));
         }
         return err;
       }, SKIPPED_MESSAGE).then((err) => {
@@ -409,6 +425,48 @@ export function App() {
     [applyWrite, enqueueWrite],
   );
 
+  /** 編集モードで、from から to へリンクを引き、引いたリンクを選ぶ。引けないとき（同じ向きのリンクがある、自分自身へなど）は、知らせの帯に理由を出す */
+  const addLink = useCallback(
+    async (from: string, to: string) => {
+      const model = currentRef.current;
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 順番が来たときの最新の内容で確かめる
+        const problem = linkProblem(d.model, from, to);
+        if (problem) return problem;
+        const result = await postEdit(d.name, d.version, [{ type: "LINK", from, to }]);
+        const err = applyWrite(result);
+        if (!err && result.ok) setKeepView(result.data.model.version);
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+      else if (currentRef.current === model) selectLink({ from, to });
+    },
+    [applyWrite, enqueueWrite, selectLink],
+  );
+
+  /** 編集モードで、リンクを消す。先の要素の式が元の要素を使っているリンクは消さず、知らせの帯に理由を出す */
+  const removeLink = useCallback(
+    async (link: LinkEnds) => {
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 同じリンクを続けて消そうとしたときは、先に消えているので何もしない
+        if (!findLink(d.model, link.from, link.to)) return undefined;
+        const problem = linkRemoveProblem(d.model, link.from, link.to);
+        if (problem) return problem;
+        const result = await postRemove(d.name, d.version, [link]);
+        const err = applyWrite(result);
+        if (!err && result.ok) setKeepView(result.data.model.version);
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+      else setSelectedLink((l) => (l && sameLink(l, link) ? undefined : l));
+    },
+    [applyWrite, enqueueWrite],
+  );
+
   /** 図で動かした位置を保存する */
   const move = useCallback(
     async (patches: ElementPatch[]) => {
@@ -438,26 +496,40 @@ export function App() {
   }, [data, hoveredScenario, scenario?.name]);
   // 名前は大文字と小文字を区別しない（AI が表記だけ変えても選んだままにする）
   const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
-  // 編集モードで消せる要素（足せる種類と同じく、状態と遷移は消さない）。
+  // 選んでいるリンク（AI などが消していれば、ない）
+  const selectedLinkEl = selectedLink && data ? findLink(data.model, selectedLink.from, selectedLink.to) : undefined;
+  // 編集モードで消せる要素（足せる種類と同じく、状態と遷移は消さない）か、リンク。
   // 施策の編集欄を開いている間は、左に出ていない要素を消さないよう、消せないことにする
-  const removable =
+  const removableName =
     editMode && !scenario && selectedEl && selectedEl.type !== "STATE" && selectedEl.type !== "TRANSITION" ? selectedEl.name : undefined;
+  // 先の要素の式が使っているなど、消せないリンクの理由（左の欄に出し、「削除」は押せなくする）
+  const linkLocked = selectedLinkEl && data ? linkRemoveProblem(data.model, selectedLinkEl.from!, selectedLinkEl.to!) : undefined;
+  const [linkFrom, linkTo] = editMode && !scenario && selectedLinkEl && !linkLocked ? [selectedLinkEl.from!, selectedLinkEl.to!] : [];
+  const removable = useMemo(
+    () => (removableName ? { label: removableName, link: false } : linkFrom && linkTo ? { label: `${linkFrom} → ${linkTo}`, link: true } : undefined),
+    [removableName, linkFrom, linkTo],
+  );
+  const removeSelected = useCallback(() => {
+    if (removableName) void removeElement(removableName);
+    else if (linkFrom && linkTo) void removeLink({ from: linkFrom, to: linkTo });
+  }, [removableName, linkFrom, linkTo, removeElement, removeLink]);
 
-  // 編集モードで要素を選んでいるときは、Delete キーで消す。
+  // 編集モードで要素かリンクを選んでいるときは、Delete キーで消す。
   // 文字を消すつもりで押されやすい Backspace は使わない。押しっぱなしの繰り返しは無視する。
   // 入力欄で打っているときと、左の欄（詳細欄の編集のボタンなど）にいるときは消さない（打ちかけの内容を失わないように）
+  const canRemove = !!removable;
   useEffect(() => {
-    if (!removable) return;
+    if (!canRemove) return;
     const onKey = (e: KeyboardEvent) => {
       const inSidebar = e.target instanceof Element && !!e.target.closest(".sidebar");
       if (e.key === "Delete" && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target) && !inSidebar) {
         e.preventDefault();
-        void removeElement(removable);
+        removeSelected();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [removable, removeElement]);
+  }, [canRemove, removeSelected]);
   const title = data?.model.name || current;
 
   if (EMBED) {
@@ -486,7 +558,7 @@ export function App() {
         </header>
 
         <section className="panel">
-          <h2>{scenario ? "施策" : "選んだ要素"}</h2>
+          <h2>{scenario ? "施策" : selectedLink ? "選んだ線" : "選んだ要素"}</h2>
           {scenario && data ? (
             <ScenarioEditor
               key={scenario.name?.toLowerCase() ?? "（新しい施策）"}
@@ -498,6 +570,16 @@ export function App() {
             />
           ) : selectedEl ? (
             <Details el={selectedEl} value={finalValues[selectedEl.name!]} onSave={(patch) => edit([patch])} />
+          ) : selectedLinkEl ? (
+            // リンクは直せる項目がないので、何から何への線かだけを出す
+            <p className="link-details">
+              <span>
+                <strong>{selectedLinkEl.from}</strong> → <strong>{selectedLinkEl.to}</strong> のリンク
+              </span>
+              <span className="muted">{linkLocked ?? (editMode ? "「削除」か Delete キーで消せます。" : "消すときは、編集モードをオンにします。")}</span>
+            </p>
+          ) : selectedLink && data ? (
+            <p className="muted">選んでいたリンクが見つかりません。消された可能性があります。</p>
           ) : selected && data ? (
             <p className="muted">選んでいた「{selected}」が見つかりません。名前が変わったか、消された可能性があります。図で選び直してください。</p>
           ) : (
@@ -553,8 +635,8 @@ export function App() {
                 aria-pressed={editMode}
                 title={
                   editMode
-                    ? "編集モードを終えます（図の要素を動かす・足す・消すことができなくなります）"
-                    : "図の要素を動かす・足す・消すことができるようにします。要素の中身は、左の「編集」でいつでも直せます"
+                    ? "編集モードを終えます（図の要素を動かす・足す・消す、線を引くことができなくなります）"
+                    : "図の要素を動かす・足す・消す、線を引くことができるようにします。要素の中身は、左の「編集」でいつでも直せます"
                 }
               >
                 ✎ 編集モード
@@ -609,8 +691,11 @@ export function App() {
                 editable={editMode}
                 keepView={data.version === keepView}
                 onAdd={addElement}
+                selectedLink={selectedLink}
+                onSelectLink={selectLink}
+                onLink={addLink}
                 removable={removable}
-                onRemove={removeElement}
+                onRemove={removeSelected}
               />
             </ReactFlowProvider>
           ) : (

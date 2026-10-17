@@ -559,6 +559,24 @@ describe("ビューアからの要素の削除", () => {
     expect(Math.abs(into[1] - center[1])).toBeLessThan(10);
   });
 
+  test("画面で引いたリンク（編集で LINK を足す）を保存し、from と to で消せる。元に戻すと戻る", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const added = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ type: "LINK", from: "Population", to: "Rate" }] });
+    expect(added.status).toBe(200);
+    expect(added.body.report!.added).toEqual(["LINK Population → Rate"]);
+    const isLink = (e: { type: string; from?: string | null; to?: string | null }) => e.type === "LINK" && e.from === "Population" && e.to === "Rate";
+    expect((await new ModelStore(dir).read("pop")).elements.some(isLink)).toBe(true);
+    const removed = await post<EditResponse>("/api/models/pop/remove", { version: added.body.model.version, elements: [{ from: "Population", to: "Rate" }] });
+    expect(removed.status).toBe(200);
+    expect(removed.body.report!.removed).toEqual(["LINK Population → Rate"]);
+    expect((await new ModelStore(dir).read("pop")).elements.some(isLink)).toBe(false);
+    // 消したリンクを元に戻し、もう一度戻すと引く前に戻る
+    const u1 = await post<EditResponse>("/api/models/pop/undo", { version: removed.body.model.version });
+    expect(u1.body.model.model.elements.some(isLink)).toBe(true);
+    const u2 = await post<EditResponse>("/api/models/pop/undo", { version: u1.body.model.version });
+    expect(u2.body.model.version).toBe(v0);
+  });
+
   test("ない要素や、要素の指定でないものは 400 で、ファイルは変えない。版が違えば書き込まない", async () => {
     const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
     const missing = await post<EditErrorResponse>("/api/models/pop/remove", { version: v0, elements: [{ name: "Rat" }] });

@@ -113,6 +113,13 @@ export function findLink(model: ModelJSON, from: string, to: string): ModelEleme
   return model.elements.find((e) => e.type === "LINK" && sameName(e.from, from) && sameName(e.to, to));
 }
 
+/** el の式が ref を参照してよいか（リンクがあるか、フローが自分のストックを見ているか）。検証（validate.ts）と、画面でリンクを消せるかの判断で使う */
+export function canReference(model: ModelJSON, el: ModelElement, ref: string): boolean {
+  if (el.name && sameName(el.name, ref)) return true;
+  if ((el.type === "FLOW" || el.type === "TRANSITION") && (sameName(el.from, ref) || sameName(el.to, ref))) return true;
+  return model.elements.some((l) => l.type === "LINK" && sameName(l.from, ref) && sameName(l.to, el.name));
+}
+
 /** 要素の式（参照を含みうる値）を返す。型ごとに入っている場所が違う。 */
 export function equationsOf(el: ModelElement): { field: "initial_value" | "value"; text: string }[] {
   const out: { field: "initial_value" | "value"; text: string }[] = [];

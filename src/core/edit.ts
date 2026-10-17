@@ -1,6 +1,5 @@
 import type { ElementBehavior, ElementDisplay, ElementType, Equation, ModelElement, ModelJSON, Scenario, SimulationSettings } from "./modeljson.js";
-import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
-import { canReference } from "./validate.js";
+import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 
 export class EditError extends Error {
   override name = "EditError";

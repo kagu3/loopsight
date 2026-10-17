@@ -1,6 +1,6 @@
 import { loadModelJSON, type Model } from "simulation";
 import type { ModelElement, ModelJSON } from "./modeljson.js";
-import { ELEMENT_TYPES, didYouMean, equationsOf, findElement, isConnector, nameKey, referencesIn, sameName } from "./modeljson.js";
+import { ELEMENT_TYPES, canReference, didYouMean, equationsOf, findElement, isConnector, nameKey, referencesIn, sameName } from "./modeljson.js";
 
 export interface Issue {
   /** 問題のある要素の名前（わかる場合） */
@@ -177,13 +177,6 @@ export function staticCheck(model: ModelJSON): { errors: Issue[]; warnings: Issu
     warnings.push({ message: `刻み数が ${Math.round(sim.time_length / sim.time_step)} あり、実行に時間がかかります。`, hint: "time_step を大きくするか time_length を短くしてください。" });
   }
   return { errors, warnings };
-}
-
-/** el の式が ref を参照してよいか（リンクがあるか、フローが自分のストックを見ているか） */
-export function canReference(model: ModelJSON, el: ModelElement, ref: string): boolean {
-  if (el.name && sameName(el.name, ref)) return true;
-  if ((el.type === "FLOW" || el.type === "TRANSITION") && (sameName(el.from, ref) || sameName(el.to, ref))) return true;
-  return model.elements.some((l) => l.type === "LINK" && sameName(l.from, ref) && sameName(l.to, el.name));
 }
 
 /** ModelJSON から実行用の Model を作る。失敗したら ModelError を投げる。 */

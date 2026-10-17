@@ -888,6 +888,92 @@ button.edit-tool.danger {
 .react-flow.is-placing .react-flow__pane {
   cursor: crosshair;
 }
+/* リンクを引き始める縁（要素の外側の細い帯）。ふだんは見せず押せない。編集モードでは、乗せたときだけ色を付ける。
+   線の端（矢じりや管）を覆いすぎないよう、細くする */
+.react-flow__handle.link-handle {
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  transform: none;
+  pointer-events: none;
+}
+.react-flow__handle.link-handle.is-active {
+  pointer-events: all;
+  cursor: crosshair;
+}
+.react-flow__handle.link-handle.is-active:hover {
+  background: color-mix(in srgb, var(--link) 45%, transparent);
+}
+.react-flow__handle.link-handle-top,
+.react-flow__handle.link-handle-bottom {
+  left: -4px;
+  right: -4px;
+  width: auto;
+  height: 5px;
+}
+.react-flow__handle.link-handle-top {
+  top: -5px;
+}
+.react-flow__handle.link-handle-bottom {
+  top: auto;
+  bottom: -5px;
+}
+.react-flow__handle.link-handle-left,
+.react-flow__handle.link-handle-right {
+  top: -4px;
+  bottom: -4px;
+  width: 5px;
+  height: auto;
+}
+.react-flow__handle.link-handle-left {
+  left: -5px;
+}
+.react-flow__handle.link-handle-right {
+  left: auto;
+  right: -5px;
+}
+/* リンクを引いている間の離す先（要素全体）。乗せた要素に枠を出す */
+.react-flow__handle.link-drop {
+  inset: 0;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  transform: none;
+  opacity: 1;
+  pointer-events: none;
+}
+.react-flow__handle.link-drop.is-active {
+  pointer-events: all;
+}
+.react-flow__handle.link-drop.connectingto {
+  box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 5px var(--link);
+}
+/* [＋線] で線の両端を選んでいる間は、選べる要素の上だけ十字のカーソルにする */
+.react-flow.is-linking .node:not(.node-cloud) {
+  cursor: crosshair;
+}
+/* [＋線] で元に選んだ要素 */
+.node.is-link-from {
+  outline: 2px dashed var(--link);
+  outline-offset: 4px;
+}
+/* 線は押して選べる（リンクを選ぶ・フローを選ぶ）。図だけの表示では押せない（inactive）ので、指のカーソルにしない */
+.react-flow__edge-floating:not(.inactive) {
+  cursor: pointer;
+}
+/* 選んだリンクの説明（左の欄） */
+.link-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
 .loop-badge {
   display: flex;
   align-items: center;

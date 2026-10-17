@@ -1,8 +1,8 @@
-// 要素の編集フォームの中身と、送る変更の組み立て（編集モードで要素を足すときも）。React に依存しない（テストから直接使う）
+// 要素の編集フォームの中身と、送る変更の組み立て（編集モードで要素を足す・リンクを引くときも）。React に依存しない（テストから直接使う）
 import type { ElementPatch, ModelElement, ModelJSON } from "../../src/viewer/api.js";
 import { positionPatches, shiftIntoView, type Graph, type GraphNode } from "../../src/core/diagram.js";
 import { boxLayout } from "../../src/core/geometry.js";
-import { nameKey } from "../../src/core/modeljson.js";
+import { canReference, equationsOf, findElement, findLink, nameKey, referencesIn, sameName } from "../../src/core/modeljson.js";
 
 /** 数字だけなら数値、それ以外は式の文字列 */
 export function parseEquation(text: string): string | number {
@@ -101,4 +101,35 @@ export function addElementPatches(model: ModelJSON, graph: Graph, type: NewEleme
   const ids = graph.missingCoordinates || shifted ? undefined : new Set(added.map((n) => n.id));
   const behavior = type === "STOCK" ? { initial_value: 0 } : { value: 0 };
   return { name, patches: [{ type, name, behavior }, ...positionPatches(shifted ?? all, ids)] };
+}
+
+/**
+ * 編集モードで from から to へリンク（LINK）を引けないときの理由。引けるなら undefined。
+ * 中核の upsertElements は同じ向きのリンクがあれば上書きし、自分自身へのリンクも足してしまうので、送る前に画面で確かめる
+ */
+export function linkProblem(model: ModelJSON, from: string, to: string): string | undefined {
+  const a = findElement(model, from);
+  const b = findElement(model, to);
+  if (!a || !b) return `「${a ? to : from}」が見つかりません。消された可能性があります。`;
+  if (a === b) return `「${a.name}」から「${a.name}」自身へは、リンクを引けません。`;
+  if (findLink(model, a.name!, b.name!)) return `「${a.name}」から「${b.name}」へのリンクは、すでにあります。`;
+  return undefined;
+}
+
+/**
+ * 編集モードでリンクを消せないときの理由。消せるなら undefined。
+ * 先の要素の式が元の要素を参照しているリンクは、消すと式がエラーになり、ほかの編集のときに自動で付け直される（upsertElements）ので消さない。
+ * コンバーターの入力元からのリンクも、入力のつながりなので消さない
+ */
+export function linkRemoveProblem(model: ModelJSON, from: string, to: string): string | undefined {
+  const target = findElement(model, to);
+  if (!target) return undefined;
+  if (target.type === "CONVERTER" && target.behavior?.input === "ELEMENT" && typeof target.behavior?.input_element === "string" && sameName(target.behavior.input_element, from)) {
+    return `「${target.name}」の入力が「${from}」なので、このリンクは消せません。`;
+  }
+  // リンクを消しても参照できるなら（フローが自分の両端のストックを見ているときなど）、消せる。判断は検証（canReference）と同じ
+  const without = { ...model, elements: model.elements.filter((e) => !(e.type === "LINK" && sameName(e.from, from) && sameName(e.to, to))) };
+  if (canReference(without, target, from)) return undefined;
+  const uses = equationsOf(target).some((eq) => referencesIn(eq.text).some((r) => sameName(r, from)));
+  return uses ? `「${target.name}」の式が [${from}] を使っているので、このリンクは消せません。先に「${target.name}」の式を直してください。` : undefined;
 }
