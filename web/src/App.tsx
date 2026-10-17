@@ -4,8 +4,9 @@ import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelR
 import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details } from "./Details.js";
-import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type ValueTools } from "./Diagram.js";
-import { nodeValues, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
+import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
+import { nodeValues, peakIndex, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
+import { formulaView } from "./formulaValues.js";
 import { addElementPatches, linkProblem, linkRemoveProblem, reconnectPatches, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
@@ -704,6 +705,25 @@ export function App() {
       caption: !run ? "実行できないため、値を出せません" : hoverIndex !== undefined ? `${formatTime(run.times[hoverIndex])} ${unit}の値` : "それぞれの最大の振れ",
     };
   }, [data, showValues, setShowValues, valuesRun, hoverIndex]);
+  // 選んだ要素の式に、その時点の値を入れたもの（「値を表示」がオンで、要素を選んでいるときだけ）。
+  // 時点は図の値と同じ：グラフにカーソルを乗せていればその時刻、なければその要素の最大の振れの時点
+  const selectedFormula = useMemo<SelectedFormula | undefined>(() => {
+    const run = data?.run;
+    if (!showValues || !run || !selected) return undefined;
+    const series = valuesRun?.series ?? run.series;
+    const own = Object.entries(series).find(([k]) => sameName(k, selected))?.[1];
+    const at = hoverIndex ?? (own && peakIndex(own)) ?? 0;
+    const view = formulaView(data.model, selected, series, at);
+    if (!view) return undefined;
+    const unit = TIME_UNIT_LABEL[run.time_units.toLowerCase()] ?? run.time_units;
+    // 最大の振れを出しているときは、そう添える（どの時点も同じ値の要素は、時点を出さない）
+    const caption =
+      hoverIndex !== undefined ? `${formatTime(run.times[at])} ${unit}の値` : own?.every((v) => v === own[0]) ? "どの時点も同じ値" : `${formatTime(run.times[at])} ${unit}の値（最大の振れ）`;
+    // ストックの最大の振れの時点は、出入りがほぼ釣り合って増え方が 0 に近いので、ほかの時点の見方を添える
+    const stock = data.model.elements.some((e) => e.type === "STOCK" && sameName(e.name, selected));
+    const hint = stock && hoverIndex === undefined ? "グラフにカーソルを乗せると、その時点の出入りが見られます" : undefined;
+    return { element: selected, view, caption, hint };
+  }, [data, showValues, selected, valuesRun, hoverIndex]);
   // 名前は大文字と小文字を区別しない（AI が表記だけ変えても選んだままにする）
   const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
   // 選んでいるリンク（AI などが消していれば、ない）
@@ -929,6 +949,7 @@ export function App() {
                 onRemove={removeSelected}
                 liveValues={liveValues}
                 valueTools={valueTools}
+                formula={selectedFormula}
               />
             </ReactFlowProvider>
           ) : (

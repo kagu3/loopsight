@@ -22,12 +22,13 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import type { NodeValue } from "./diagramValues.js";
 import { NEW_ELEMENT_LABEL, type FlowEnd, type NewElementType } from "./editing.js";
+import { formulaText, type FormulaToken, type FormulaView } from "./formulaValues.js";
 import { formatTime } from "./format.js";
 import { BASELINE_NAME, nameKey, type ScenarioBadge } from "./scenarios.js";
 
@@ -35,6 +36,7 @@ import { BASELINE_NAME, nameKey, type ScenarioBadge } from "./scenarios.js";
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
 // 編集モード（図の左上の「図を編集」で切り替える）のときだけ、箱と雲をドラッグで動かせて、離すと位置を保存する（弁は両端の真ん中についてくる）。
 // 右上の「値を表示」をオンにすると、ストック・フロー・変数に、その時点の値と最初からの変化を出す（分析や説明のときだけ使う）。
+// オンの間に要素を選ぶと、その要素の式に値を入れたものを、箱の横（ほかの箱に重なりにくい側）に出す。
 // 編集モードでは、左上の道具で要素を足す（種類を選んでから図の置きたい場所を押す）・選んだ要素やリンクを消すこともできる。
 // リンクは、要素の縁からドラッグして別の要素の上で離すか、[＋線] を押してから元の要素 → 先の要素の順に押して引く。
 // フローの端は、端の近くの丸（つまみ）をドラッグして、ストックの上で離すとそのストックに、何もないところで離すとそこに置いた雲につなぎ替える。
@@ -299,6 +301,19 @@ export interface DiagramProps {
   liveValues?: NodeValues;
   /** 図の右上の「値を表示」の切り替えと、値を出すシナリオの選択。渡したときだけ出す（図だけの表示では渡さない） */
   valueTools?: ValueTools;
+  /** 「値を表示」がオンで要素を選んでいるときの、値を入れた式。選んだ要素の横に出す */
+  formula?: SelectedFormula;
+}
+
+/** 選んだ要素の、値を入れた式 */
+export interface SelectedFormula {
+  /** 選んだ要素の名前（式を出す箱） */
+  element: string;
+  view: FormulaView;
+  /** どの時点の値か（「12 週の値（最大の振れ）」など） */
+  caption: string;
+  /** 添える一言（ストックの最大の振れの時点は出入りがほぼ釣り合うので、カーソルを乗せる案内など） */
+  hint?: string;
 }
 
 /** 図の要素に出す値 */
@@ -702,6 +717,7 @@ export function Diagram(props: DiagramProps) {
         />
       )}
       {props.valueTools && <ValueToolsPanel {...props.valueTools} />}
+      {props.formula && <FormulaCard formula={props.formula} nodes={placed} />}
       {!props.embed && <Controls showInteractive={false} fitViewOptions={props.valueTools?.on ? VIEWER_TOOLS_FIT : VIEWER_FIT} />}
       {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
       {!props.embed && <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} ariaLabel="図の全体" style={{ width: 150, height: 90 }} />}
@@ -831,6 +847,141 @@ function ValueToolsPanel({ on, onChange, scenarios, scenario, onScenario, captio
         値を表示
       </button>
     </Panel>
+  );
+}
+
+/** 式の箱と選んだ箱のあいだ（画面の px） */
+const FORMULA_GAP = 12;
+/** 式の箱と図の欄の縁のあいだ（はみ出すときに寄せる） */
+const FORMULA_MARGIN = 8;
+/** 箱の下に出す「値を表示」の値の高さの目安。下に置くときは、その下に出す */
+const LIVE_VALUE_SPACE = 22;
+
+/**
+ * 選んだ要素の式に値を入れたもの。図を動かしたり拡大したりしても、選んだ箱の横についていく（字の大きさは変えない）。
+ * 右・左・上・下のうち、ほかの箱と重なる面積と図の欄からはみ出す面積がいちばん小さい側に置く（同じなら右を先に選ぶ）。
+ * マウスは通す（下の要素や背景を押せるように）
+ */
+function FormulaCard({ formula, nodes }: { formula: SelectedFormula; nodes: GraphNode[] }) {
+  const [tx, ty, zoom] = useStore((s) => s.transform);
+  const width = useStore((s) => s.width);
+  const height = useStore((s) => s.height);
+  const ref = useRef<HTMLDivElement>(null);
+  // 式の箱の大きさ（描いてから測る。測るまでは見せない）。幅は中身で決まり（.formula-card の width: max-content）、置く場所によらない。
+  // 中身や図の欄の幅（幅の上限）が変わったら測り直す
+  const [size, setSize] = useState<{ w: number; h: number }>();
+  // そろえた形が箱の幅に収まらなかった式（幅の目安より字が広いとき）。一覧の形で出し直す。
+  // 時点が変わって値だけが変わっても一覧のままにする（カーソルを動かすたびに形が変わらないように）
+  const [overflowed, setOverflowed] = useState<string>();
+  const { view, caption, hint } = formula;
+  const formulaKey = `${view.name}=${formulaText(view.tokens)}`;
+  const layout = view.layout === "list" || overflowed === formulaKey ? "list" : "aligned";
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    setSize((s) => (s && s.w === w && s.h === h ? s : { w, h }));
+    const grid = el.querySelector<HTMLElement>(".formula-grid");
+    if (grid && grid.scrollWidth > grid.clientWidth + 1) setOverflowed(formulaKey);
+  }, [formulaKey]);
+  useLayoutEffect(measure, [measure, view, caption, hint, layout]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure]);
+  const target = nodes.find((n) => n.element && nameKey(n.element) === nameKey(formula.element));
+  if (!target) return null;
+  const box = { x: target.x * zoom + tx, y: target.y * zoom + ty, w: target.width * zoom, h: target.height * zoom };
+  const w = size?.w ?? 0;
+  const h = size?.h ?? 0;
+  const candidates = [
+    { x: box.x + box.w + FORMULA_GAP, y: box.y + box.h / 2 - h / 2 },
+    { x: box.x - FORMULA_GAP - w, y: box.y + box.h / 2 - h / 2 },
+    { x: box.x + box.w / 2 - w / 2, y: box.y - FORMULA_GAP - h },
+    { x: box.x + box.w / 2 - w / 2, y: box.y + box.h + LIVE_VALUE_SPACE + FORMULA_GAP },
+  ];
+  const others = nodes.filter((n) => n !== target).map((n) => ({ x: n.x * zoom + tx, y: n.y * zoom + ty, w: n.width * zoom, h: n.height * zoom }));
+  const overlap = (a: { x: number; y: number; w: number; h: number }, b: typeof a) =>
+    Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const pane = { x: 0, y: 0, w: width, h: height };
+  const cost = (c: { x: number; y: number }) => {
+    const r = { ...c, w, h };
+    return others.reduce((sum, o) => sum + overlap(r, o), 0) + (w * h - overlap(r, pane)) * 2;
+  };
+  const side = candidates.reduce((a, b) => (cost(b) < cost(a) ? b : a));
+  // どの側でもはみ出すときは、図の欄の中に寄せる（読めなくなるよりは、箱に少し重なるほうがよい）
+  const clamp = (v: number, max: number) => Math.max(FORMULA_MARGIN, Math.min(v, max - FORMULA_MARGIN));
+  const best = { x: clamp(side.x, width - w), y: clamp(side.y, height - h) };
+  return (
+    <div
+      ref={ref}
+      className={`formula-card ${layout === "list" ? "is-list" : ""}`}
+      style={{ left: best.x, top: best.y, visibility: size ? undefined : "hidden" }}
+      aria-label={`${view.name}の式と値`}
+    >
+      <div className="formula-caption">{caption}</div>
+      {layout === "aligned" ? <AlignedFormula view={view} /> : <FormulaList view={view} />}
+      {view.note && <div className="formula-note">{view.note}</div>}
+      {hint && <div className="formula-note">{hint}</div>}
+    </div>
+  );
+}
+
+/** 式の片の、下の行に出すもの。参照はその時点の値（時間をまたぐ関数に渡す参照は名前のまま）、それ以外は上の行と同じ */
+function tokenValue(t: FormulaToken) {
+  if (t.kind !== "ref") return <span className={`formula-${t.kind}`}>{t.text}</span>;
+  if (t.held || t.value === undefined) return <span className="formula-held" title={t.held ? "過去の値を使うので、いまの値は入れません" : "値がありません"}>{t.text}</span>;
+  return <span className="formula-value">{t.value}</span>;
+}
+
+/** 上の行に式、下の行に同じ並びで値を入れたもの。片ごとに列をそろえる */
+function AlignedFormula({ view }: { view: FormulaView }) {
+  // 決まった値の変数（式が数だけ）や、フローが出入りしないストックは、左辺の値だけ
+  if (!view.tokens.length)
+    return (
+      <div className="formula-list-head">
+        <span className="formula-lhs">{view.name}</span> = <span className="formula-lhs-value">{view.value}</span>
+      </div>
+    );
+  const cols = view.tokens.length + 2;
+  return (
+    <div className="formula-grid" style={{ gridTemplateColumns: `repeat(${cols}, auto)` }}>
+      <span className="formula-lhs">{view.name}</span>
+      <span>=</span>
+      {view.tokens.map((t, i) => (
+        <span key={i} className={t.kind === "ref" ? "formula-ref" : `formula-${t.kind}`}>
+          {t.text}
+        </span>
+      ))}
+      <span className="formula-lhs-value">{view.value}</span>
+      <span>=</span>
+      {view.tokens.map((t, i) => (
+        <span key={`v${i}`}>{tokenValue(t)}</span>
+      ))}
+    </div>
+  );
+}
+
+/** 式が長いとき：上に左辺の値と式、下に参照ごとの値の一覧 */
+function FormulaList({ view }: { view: FormulaView }) {
+  return (
+    <>
+      <div className="formula-list-head">
+        <span className="formula-lhs">{view.name}</span> = <span className="formula-lhs-value">{view.value}</span>
+      </div>
+      <div className="formula-text">= {formulaText(view.tokens)}</div>
+      <ul className="formula-refs">
+        {view.refs.map((r) => (
+          <li key={r.name}>
+            {r.name} = <span className={r.held ? "formula-held" : "formula-value"}>{r.value}</span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 

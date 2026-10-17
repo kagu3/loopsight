@@ -280,6 +280,29 @@ try {
   await sleep(300);
   await shot("diagram-values");
 
+  // 「値を表示」で要素を選んで、式にその時点の値を入れたものを出したところ（変数・ストック・時間をまたぐ関数を含むフロー）
+  await b.click('.react-flow__node[data-id="el:小売の発注"]');
+  await b.waitFor("document.querySelector('.formula-card')?.style.visibility === ''");
+  await sleep(200);
+  await shot("formula-values", ".diagram");
+  // ストックは、グラフにカーソルを乗せた時刻（在庫が減っていくところ）の、入る量と出る量
+  await b.click('.react-flow__node[data-id="el:小売の在庫"]');
+  const formulaChart = await b.rectOf(".chart-area");
+  await b.hover(formulaChart.x + formulaChart.width * 0.4, formulaChart.y + formulaChart.height * 0.5);
+  await b.waitFor("document.querySelector('.formula-caption')?.textContent.endsWith('週の値')");
+  await sleep(200);
+  await shot("formula-stock", ".diagram");
+  await b.hover(W - 4, 60);
+  // カーソルを外すと最大の振れの時点に戻り、ストックには、カーソルを乗せる案内を添える
+  await b.waitFor("document.querySelector('.formula-caption')?.textContent.endsWith('（最大の振れ）') && document.querySelector('.formula-card').textContent.includes('グラフにカーソルを乗せると')");
+  await b.click('.react-flow__node[data-id="valve:卸から小売への出荷"]');
+  await b.waitFor("document.querySelector('.formula-card')?.textContent.includes('Delay')");
+  await sleep(200);
+  await shot("formula-function", ".diagram");
+  // 選ぶのをやめると消える（次の場面に出さない）
+  await b.click(".react-flow__pane");
+  await b.waitFor("!document.querySelector('.formula-card')");
+
   // グラフにカーソルを乗せて、その時刻（9 週あたり）の値を出したところ
   const bwChart = await b.rectOf(".chart-area");
   await b.hover(bwChart.x + bwChart.width * 0.2, bwChart.y + bwChart.height * 0.5);
@@ -300,6 +323,31 @@ try {
   })()`);
   await sleep(300);
   await shot("diagram-values-scenario", ".diagram");
+
+  // 名前の長い参照が多く、下の行をそろえると箱に収まらない式は、参照ごとの値の一覧で出す
+  const inputs = { 来店客数: 100, 購入する人の割合: 0.3, 一人あたりの購入点数: 2.5, 季節による売れ行きの変化: 1.1, 値引きによる売れ行きの上乗せ: 1.05, 在庫切れで売れなかった分: 12, 返品された分: 3 };
+  const names = Object.keys(inputs);
+  await store.write("sales", {
+    name: "販売の見込み",
+    simulation: { time_start: 0, time_length: 10, time_step: 1, time_units: "WEEKS" },
+    elements: [
+      ...names.map((n, i) => ({ type: "VARIABLE", name: n, behavior: { value: inputs[n] }, display: { coordinates: [40 + (i % 4) * 230, i < 4 ? 40 : 320] } })),
+      {
+        type: "VARIABLE",
+        name: "販売の見込み",
+        behavior: { value: names.slice(0, 5).map((n) => `[${n}]`).join(" * ") + " - [在庫切れで売れなかった分] - [返品された分]" },
+        display: { coordinates: [380, 180] },
+      },
+      ...names.map((n) => ({ type: "LINK", from: n, to: "販売の見込み" })),
+    ],
+  });
+  await b.evaluate("location.hash = 'sales'");
+  await b.waitFor("document.querySelector('.react-flow__node[data-id=\"el:販売の見込み\"]')");
+  await sleep(700);
+  await b.click('.react-flow__node[data-id="el:販売の見込み"]');
+  await b.waitFor("document.querySelector('.formula-card.is-list')?.style.visibility === ''");
+  await sleep(200);
+  await shot("formula-list", ".diagram");
   // 覚えた「値を表示」は、次に撮るときのために消しておく
   await b.evaluate("localStorage.removeItem('viewer.diagramValues')");
 } finally {

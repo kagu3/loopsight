@@ -62,6 +62,18 @@ export function timeIndex(times: number[], at: number): number | undefined {
 /** 最初の時点の値。最初の時点に値がなければ、値のある最初の時点 */
 const initialOf = (values: (number | null)[]) => (finite(values[0]) ? values[0] : values.find(finite));
 
+/** 最初の値から一番大きく離れた時点（同じ離れ方なら早いほう）の行の番号。値がひとつもなければ undefined */
+export function peakIndex(values: (number | null)[]): number | undefined {
+  const v0 = initialOf(values);
+  if (v0 === undefined) return undefined;
+  let peak = -1;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (finite(v) && (peak < 0 || Math.abs(v - v0) > Math.abs(values[peak]! - v0))) peak = i;
+  }
+  return peak;
+}
+
 /**
  * 要素ごとの、図に出す値。要素名（nameKey）→ 値。
  * at（行の番号）があればその時点、なければ要素ごとに最初の値から一番大きく離れた時点（同じ離れ方なら早いほう）の値
@@ -76,11 +88,7 @@ export function nodeValues(run: Pick<RunResult, "times" | "series">, at?: number
       out.set(nameKey(name), finite(v) ? { value: formatValue(v), ...changeOf(v0, v) } : { value: formatValue(v), direction: "flat", level: 0 });
       continue;
     }
-    let peak = -1;
-    for (let i = 0; i < values.length; i++) {
-      const v = values[i];
-      if (finite(v) && (peak < 0 || Math.abs(v - v0) > Math.abs(values[peak]! - v0))) peak = i;
-    }
+    const peak = peakIndex(values)!;
     const v = values[peak]!;
     const change = changeOf(v0, v);
     // 変わらない要素は、時点を添えない（どの時点も同じ値なので）

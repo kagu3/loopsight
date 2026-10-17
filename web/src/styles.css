@@ -902,6 +902,70 @@ select.value-scenario {
   background: var(--surface-1);
   color: var(--text-primary);
 }
+/* 「値を表示」で選んだ要素の式と値。選んだ箱の横に出す（図を動かしてもついていく）。
+   上の行に式、下の行に同じ並びで値を入れたもの。マウスは通す */
+.formula-card {
+  position: absolute;
+  z-index: 5;
+  /* 幅は中身で決める（置く場所や右端までの空きで幅が変わらないように） */
+  width: max-content;
+  max-width: min(640px, calc(100% - 16px));
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  pointer-events: none;
+}
+/* 一覧の形は、式を折り返して読みやすい幅にする */
+.formula-card.is-list {
+  max-width: min(420px, calc(100% - 16px));
+}
+.formula-caption {
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.formula-grid {
+  display: grid;
+  column-gap: 5px;
+  justify-items: center;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.formula-lhs,
+.formula-lhs-value {
+  font-weight: 600;
+}
+.formula-func {
+  color: var(--text-secondary);
+}
+.formula-value {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.formula-lhs-value {
+  font-variant-numeric: tabular-nums;
+}
+/* 値を入れない参照（時間をまたぐ関数に渡すもの）は、名前のまま薄く出す */
+.formula-held {
+  color: var(--text-muted);
+}
+.formula-text {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.formula-refs {
+  margin: 4px 0 0;
+  padding: 0 0 0 14px;
+}
+.formula-note {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
 /* ループを見せているとき：ループの線を太くし、R か B の色にする。リンクも実線にして、一周をたどりやすくする */
 .loop-r {
   --loop: var(--loop-r);
