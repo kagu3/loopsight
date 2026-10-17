@@ -208,6 +208,17 @@ describe("実際のデータ", () => {
     expect(u.body.model.actual!.series).toEqual({ Population: [100] });
   });
 
+  test("名前を変えた・元に戻したときは、変わった名前を返す（画面で選んでいる要素を合わせるため）", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [{ name: "Population", rename_to: "人口" }] });
+    expect(e1.body.renamed).toEqual([["Population", "人口"]]);
+    expect(e1.body.model.model.elements.find((e) => e.name === "Births")!.behavior!.value).toMatch(/\[人口\]/);
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: e1.body.model.version });
+    expect(u.body.renamed).toEqual([["人口", "Population"]]);
+    const e2 = await post<EditResponse>("/api/models/pop/edit", { version: u.body.model.version, elements: [{ name: "Population", behavior: { initial_value: 5 } }] });
+    expect(e2.body.renamed).toBeUndefined();
+  });
+
   test("列名を直せなくても、編集は保存して元に戻せるようにし、知らせを添える", async () => {
     const store = new ModelStore(dir);
     // 変えると列名が重なるので、CSV は直せない

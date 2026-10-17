@@ -30,6 +30,7 @@ export function parseTable(text: string): [number, number][] {
 export const tableText = (data: unknown) => (Array.isArray(data) ? (data as [number, number][]).map(([x, y]) => `${x}, ${y}`).join("\n") : "");
 
 export interface Form {
+  name: string;
   equation: string;
   table: string;
   units: string;
@@ -41,6 +42,7 @@ export function formOf(el: ModelElement): Form {
   const b = el.behavior ?? {};
   const eq = el.type === "STOCK" ? b.initial_value : b.value;
   return {
+    name: el.name ?? "",
     equation: eq === undefined ? "" : String(eq),
     table: tableText(b.data),
     units: b.units ? String(b.units) : "",
@@ -53,6 +55,11 @@ export function formOf(el: ModelElement): Form {
 export function patchOf(el: ModelElement, before: Form, after: Form): ElementPatch | undefined {
   const behavior: Record<string, unknown> = {};
   const patch: ElementPatch = { name: el.name! };
+  // 名前を変えると、サーバーが式・施策・実際のデータの列名などの参照も書き換える
+  if (after.name.trim() !== before.name.trim()) {
+    if (!after.name.trim()) throw new Error("名前が空です。");
+    patch.rename_to = after.name.trim();
+  }
   if (el.type !== "CONVERTER" && after.equation.trim() !== before.equation.trim()) {
     if (!after.equation.trim()) throw new Error(el.type === "STOCK" ? "初期値が空です。" : "式が空です。");
     behavior[el.type === "STOCK" ? "initial_value" : "value"] = parseEquation(after.equation);
@@ -63,6 +70,11 @@ export function patchOf(el: ModelElement, before: Form, after: Form): ElementPat
   if (Object.keys(behavior).length) patch.behavior = behavior;
   if (after.description.trim() !== before.description.trim()) patch.description = after.description.trim() || null;
   return Object.keys(patch).length > 1 ? patch : undefined;
+}
+
+/** 名前を変えたあとの名前。変えていなければそのまま（大文字と小文字、前後の空白は区別しない） */
+export function renamedName(name: string, renamed: [string, string][]): string {
+  return renamed.find(([from]) => sameName(from, name))?.[1] ?? name;
 }
 
 /** 編集モードで図に足せる要素の種類 */

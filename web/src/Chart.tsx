@@ -2,6 +2,7 @@ import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } fr
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import type { ActualDataResult, ModelJSON, RunResult, ScenarioRunResult } from "../../src/viewer/api.js";
 import { sameTime, withActualPoints } from "./actualPoints.js";
+import { renamedName } from "./editing.js";
 import { normalize, normalizeLike, normalizeTogether } from "./normalize.js";
 import { BASELINE_NAME, compareRuns, describeRun, resultRows, valueRows, type CompareRun, type CompareRuns } from "./scenarios.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
@@ -73,6 +74,9 @@ function assignSlots(visible: string[], prev: Map<string, number>): Map<string, 
   return next;
 }
 
+/** 線の色の割り当てを、名前を変えたあとの名前にする */
+const renamedKeys = (slots: Map<string, number>, renamed: [string, string][]) => new Map([...slots].map(([n, slot]) => [renamedName(n, renamed), slot]));
+
 /**
  * 縦軸の決め方。
  * - value: 値そのまま
@@ -122,6 +126,8 @@ export interface ChartProps {
   scenarios?: ScenarioRunResult[];
   /** 実際のデータ。あれば点で重ねる */
   actual?: ActualDataResult;
+  /** いまの版で名前の変わった要素の [前の名前, 新しい名前]。グラフに出している要素を新しい名前で出し続ける */
+  renamed?: [string, string][];
   /** 左の欄で直している施策の名前（凡例で目立たせる） */
   editingScenario?: string;
   /** 施策の編集欄を開く。name がなければ施策を足す */
@@ -145,11 +151,15 @@ export function scenarioColor(run: RunResult, scenarios: ScenarioRunResult[], na
 /** 施策を重ねているときの、実際のデータの点の色 */
 const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
-export function Chart({ modelName, model, run, scenarios, actual, editingScenario, onEditScenario, onFocusScenario }: ChartProps) {
+export function Chart({ modelName, model, run, scenarios, actual, renamed, editingScenario, onEditScenario, onFocusScenario }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
-  const [visible, setVisible] = useState<string[]>(() => defaultVisible(model, names));
-  const [slots, setSlots] = useState<Map<string, number>>(() => assignSlots(visible, new Map()));
+  // グラフに出す要素と線の色。名前を変えた版を受け取った描画では、下の effect が直すまで、前の名前のままになっている
+  const [chosen, setVisible] = useState<string[]>(() => defaultVisible(model, names));
+  const [chosenSlots, setSlots] = useState<Map<string, number>>(() => assignSlots(chosen, new Map()));
+  // そのあいだも線が消えないように、描くときは新しい名前に読み替える
+  const visible = useMemo(() => (renamed?.length ? chosen.map((n) => renamedName(n, renamed)) : chosen), [chosen, renamed]);
+  const slots = useMemo(() => (renamed?.length ? renamedKeys(chosenSlots, renamed) : chosenSlots), [chosenSlots, renamed]);
   const [view, setView] = useState<"chart" | "table">("chart");
   const [scale, setScaleState] = useState<Scale>(loadScale);
   // 施策を重ねるか。施策が保存されていれば、はじめは重ねる
@@ -166,7 +176,7 @@ export function Chart({ modelName, model, run, scenarios, actual, editingScenari
     saveScale(s);
   };
 
-  // 別のモデルを開いたら選び直す。同じモデルの更新では、消えた要素だけ外す
+  // 別のモデルを開いたら選び直す。同じモデルの更新では、名前の変わった要素は新しい名前にし、消えた要素だけ外す
   const [shownModel, setShownModel] = useState(modelName);
   useEffect(() => {
     if (shownModel !== modelName) {
@@ -176,11 +186,13 @@ export function Chart({ modelName, model, run, scenarios, actual, editingScenari
       setSlots(assignSlots(v, new Map()));
       return;
     }
-    const keep = visible.filter((n) => names.includes(n));
-    if (keep.length !== visible.length) {
+    const pairs = renamed ?? [];
+    const keep = chosen.map((n) => renamedName(n, pairs)).filter((n) => names.includes(n));
+    if (keep.length !== chosen.length || keep.some((n, i) => n !== chosen[i])) {
       const v = keep.length ? keep : defaultVisible(model, names);
       setVisible(v);
-      setSlots((s) => assignSlots(v, s));
+      // 線の色は、名前を変えても同じにする
+      setSlots((s) => assignSlots(v, renamedKeys(s, pairs)));
     }
   }, [modelName, model, names]); // eslint-disable-line react-hooks/exhaustive-deps
 

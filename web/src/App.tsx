@@ -5,7 +5,7 @@ import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, t
 import { Chart, formatValue, scenarioColor } from "./Chart.js";
 import { Details } from "./Details.js";
 import { Diagram, type LinkEnds, type ScenarioMarks } from "./Diagram.js";
-import { addElementPatches, linkProblem, linkRemoveProblem, type NewElementType } from "./editing.js";
+import { addElementPatches, linkProblem, linkRemoveProblem, renamedName, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { findLink, sameName } from "../../src/core/modeljson.js";
@@ -51,6 +51,9 @@ function changedElements(prev: ModelResponse | undefined, next: ModelResponse): 
 /** 順番待ちのあいだに AI などの変更が画面に出たため、送らなかった書き込みの知らせ */
 const SKIPPED_MESSAGE = "画面の変更を送る前に、ほかのところ（AI など）でモデルが変わったため、送りませんでした。いまの内容を確かめて、もう一度直してください。";
 
+/** 名前の変わった要素がないとき。いつも同じ配列にして、表示するたびにグラフを描き直させない */
+const NO_RENAMES: [string, string][] = [];
+
 /** 両端が同じリンクか（大文字と小文字は区別しない） */
 const sameLink = (a: LinkEnds, b: LinkEnds) => sameName(a.from, b.from) && sameName(a.to, b.to);
 
@@ -92,11 +95,13 @@ export function App() {
   // グラフの上の施策の凡例にカーソルを乗せている施策
   const [hoveredScenario, setHoveredScenario] = useState<string>();
   const [changed, setChanged] = useState<Set<string>>(new Set());
+  // いま出している版で名前の変わった要素（画面で名前を変えた・元に戻したとき）。グラフに出す要素を新しい名前に合わせる
+  const [renamed, setRenamed] = useState<[string, string][]>(NO_RENAMES);
   const [updatedAt, setUpdatedAt] = useState<Date>();
   const [busy, setBusy] = useState(false);
   // 編集モード（図の形を変える操作をできるようにする）。うっかり動かさないよう、開くたびにオフから始める（ブラウザに覚えさせない）
   const [editMode, setEditMode] = useState(false);
-  // 画面で要素を足した・消した（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
+  // 画面で要素を足した・消した・名前を変えた（元に戻した）あとの版。この版を出している間は、要素が増減しても図の見る場所を合わせ直さない
   const [keepView, setKeepView] = useState<string>();
   // 要素を消したときの知らせ。元に戻したら閉じる
   const removedNotice = useRef<string>(undefined);
@@ -128,14 +133,24 @@ export function App() {
     }
   }, []);
 
-  /** 新しい内容を表示する。highlight なら、変わった要素に枠を付ける（ほかで変わったとき） */
-  const show = useCallback((next: ModelResponse, highlight: boolean) => {
+  /**
+   * 新しい内容を表示する。highlight なら、変わった要素に枠を付ける（ほかで変わったとき）。
+   * renames は、前の版から名前の変わった要素。選んでいる要素や線を新しい名前で選んだままにし、図の見る場所も動かさない
+   */
+  const show = useCallback((next: ModelResponse, highlight: boolean, renames = NO_RENAMES) => {
     // これより前に始めた読み込みの結果は捨てる
     loadSeq.current++;
     if (highlight) externalSeq.current++;
     const diff = highlight ? changedElements(dataRef.current, next) : new Set<string>();
     dataRef.current = next;
     setData(next);
+    setRenamed(renames);
+    if (renames.length) {
+      setSelected((s) => s && renamedName(s, renames));
+      setSelectedLink((l) => l && { from: renamedName(l.from, renames), to: renamedName(l.to, renames) });
+      // 名前を変えると図のノードの ID も変わるが、要素は増えも減りもしていないので、見る場所を合わせ直さない
+      setKeepView(next.version);
+    }
     setError(undefined);
     setUpdatedAt(new Date());
     if (diff.size) {
@@ -241,7 +256,7 @@ export function App() {
       if (shown && !sameModel(shown, currentRef.current)) return undefined;
       if (result.ok) {
         // 前の知らせ（衝突など）は、利用者が閉じるまで残す
-        show(result.data.model, false);
+        show(result.data.model, false, result.data.renamed);
         // 書き込めたが知らせたいこと（実際のデータの列名を直せなかったときなど）
         if (result.data.warning) setNotice(result.data.warning);
         return undefined;
@@ -711,6 +726,7 @@ export function App() {
               run={data.run}
               scenarios={data.scenarios}
               actual={data.actual}
+              renamed={renamed}
               editingScenario={scenario?.name}
               onEditScenario={(name) => setScenario({ name })}
               onFocusScenario={setHoveredScenario}

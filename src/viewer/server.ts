@@ -378,7 +378,7 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           if (slides.note) report.notes.push(slides.note);
           const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
           const model = await modelResponse(store, name, current.model, version, hist.length);
-          return [200, warning ? { report, model, warning } : { report, model }];
+          return [200, { report, model, ...(warning ? { warning } : {}), ...(renamed.length ? { renamed } : {}) }];
         }
         if (action === "scenarios") {
           if (!Array.isArray(body.scenarios)) throw new HttpError(400, "scenarios がありません。");
@@ -433,7 +433,7 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         const slides = await store.renameSlideNames(name, { elements: back, scenarios: backScenarios });
         const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
         const model = await loadModelResponse(store, name, hist.length);
-        return [200, warning ? { model, warning } : { model }];
+        return [200, { model, ...(warning ? { warning } : {}), ...(back.length ? { renamed: back } : {}) }];
       });
       sendJSON(res, result[0], result[1]);
     } catch (e) {

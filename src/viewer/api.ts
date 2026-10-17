@@ -110,6 +110,8 @@ export interface EditResponse {
   model: ModelResponse;
   /** 書き込めたが、知らせたいこと（実際のデータの列名を直せなかったときなど） */
   warning?: string;
+  /** 名前の変わった要素の [前の名前, 新しい名前]（名前を変えた・元に戻したとき）。画面で選んでいる要素を新しい名前に合わせるため */
+  renamed?: [string, string][];
 }
 
 /** 書き込めなかったとき。conflict はほかから先に変えられていた場合で、current に最新を入れる */

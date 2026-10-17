@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { emptyModel, toGraph, upsertElements, type ModelElement } from "../src/core/index.js";
-import { addElementPatches, formOf, linkProblem, linkRemoveProblem, newElementName, parseEquation, parseTable, patchOf } from "../web/src/editing.js";
+import { addElementPatches, formOf, linkProblem, linkRemoveProblem, newElementName, parseEquation, parseTable, patchOf, renamedName } from "../web/src/editing.js";
 
 describe("編集フォームの値", () => {
   test("数字だけなら数値、それ以外は式の文字列", () => {
@@ -54,6 +54,25 @@ describe("送る変更の組み立て", () => {
     const f = formOf(c);
     expect(f.table).toBe("0, 1");
     expect(patchOf(c, f, { ...f, table: "0, 1\n5, 2" })).toEqual({ name: "c", behavior: { data: [[0, 1], [5, 2]] } });
+  });
+
+  test("名前を変えると rename_to で送り、空の名前はエラー", () => {
+    const f = formOf(stock);
+    expect(f.name).toBe("S");
+    expect(patchOf(stock, f, { ...f, name: " 人口 " })).toEqual({ name: "S", rename_to: "人口" });
+    expect(patchOf(stock, f, { ...f, name: "人口", equation: "200" })).toEqual({ name: "S", rename_to: "人口", behavior: { initial_value: 200 } });
+    expect(patchOf(stock, f, { ...f, name: "S " })).toBeUndefined();
+    expect(() => patchOf(stock, f, { ...f, name: " " })).toThrow(/名前が空/);
+  });
+});
+
+describe("名前を変えたあとの名前", () => {
+  test("変えた要素は新しい名前、ほかはそのまま。大文字と小文字は区別しない", () => {
+    const renamed: [string, string][] = [["Population", "人口"]];
+    expect(renamedName("Population", renamed)).toBe("人口");
+    expect(renamedName("population", renamed)).toBe("人口");
+    expect(renamedName("Births", renamed)).toBe("Births");
+    expect(renamedName("Population", [])).toBe("Population");
   });
 });
 

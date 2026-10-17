@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ElementPatch, ModelElement } from "../../src/viewer/api.js";
 import { formOf, patchOf, type Form } from "./editing.js";
 
-// 選んだ要素の詳しい情報と、その編集（E1）。
+// 選んだ要素の詳しい情報と、その編集（E1）。「編集」の中で名前も変えられる（E3）。
 // 編集は MCP の upsert_elements と同じ形（変えた項目だけ）でサーバーに送る。
 
 const TYPE_LABEL: Record<string, string> = {
@@ -52,7 +52,7 @@ export function Details({ el, value, onSave }: DetailsProps) {
       // 編集しているあいだに、この要素がほかで変わった。黙って上書きせず、一度知らせる
       setBase(latest);
       setError(
-        `編集しているあいだに、ほかのところ（AI など）でこの要素が変わりました（いまの${el.type === "STOCK" ? "初期値" : "式"}: ${
+        `編集しているあいだに、ほかのところ（AI など）でこの要素が変わりました（${latest.name !== base.name ? `いまの名前: ${latest.name}、` : ""}いまの${el.type === "STOCK" ? "初期値" : "式"}: ${
           el.type === "CONVERTER" ? latest.table.replace(/\n/g, " / ") : latest.equation || "なし"
         }）。もう一度「保存」を押すと、この欄の内容で上書きします。`,
       );
@@ -107,6 +107,11 @@ export function Details({ el, value, onSave }: DetailsProps) {
       <div className="details" onKeyDown={onKeyDown}>
         {head}
         <div className="form">
+          <label>
+            <span>名前</span>
+            <input value={form.name} onChange={(e) => set("name", e.target.value)} />
+            <small className="muted">変えると、ほかの要素の式や施策の中の名前も書き換えます。</small>
+          </label>
           {el.type === "CONVERTER" ? (
             <label>
               <span>表（1 行に「入力, 出力」）</span>
