@@ -10,6 +10,13 @@ describe("編集フォームの値", () => {
     expect(parseEquation(".5")).toBe(0.5);
     expect(parseEquation("[Population]*[Birth Rate]")).toBe("[Population]*[Birth Rate]");
     expect(parseEquation("2 * 3")).toBe("2 * 3");
+    // 全角の数字と記号は半角にする。[名前] の中は変えない
+    expect(parseEquation("　０.０２　")).toBe(0.02);
+    expect(parseEquation("［人口（千人）］＊２")).toBe("[人口（千人）]*2");
+    // 全角の ASCII と空白のほかは変えない。引用符で囲んだ文字列の中も変えない
+    expect(parseEquation("[面積]＊①＋２㎡")).toBe("[面積]*①+2㎡");
+    expect(parseEquation("ｶﾅ＋１")).toBe("ｶﾅ+1");
+    expect(parseEquation(`IfThenElse([Ａ]＞１, "全角　ＯＫ", '１２')`)).toBe(`IfThenElse([Ａ]>1, "全角　ＯＫ", '１２')`);
   });
 
   test("コンバーターの表は 1 行に「入力, 出力」", () => {

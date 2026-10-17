@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { ModelJSON, RunResult, ScenarioRunResult } from "../src/viewer/api.js";
 import {
   BASELINE_NAME,
+  canEditValue,
+  cellPatchOf,
   changeLabel,
   compareRuns,
   currentValueOf,
@@ -12,6 +14,7 @@ import {
   scenarioBadges,
   scenarioFormOf,
   scenarioPatchOf,
+  scenarioValueOf,
   valueRows,
   valueTargets,
   type ScenarioForm,
@@ -269,5 +272,77 @@ describe("図の札（施策で変えた要素）", () => {
     upsertElements(m, [{ type: "VARIABLE", name: "Rate", rename_to: "Growth" }]);
     const badges = scenarioBadges(m, findScenario(m, "高い")!.values);
     expect([...badges.values()].map((b) => [b.element, b.text])).toEqual([["Growth", "0.1 → 0.2"]]);
+  });
+});
+
+describe("施策の中身の表で値を直す", () => {
+  const model: ModelJSON = {
+    elements: [
+      { type: "STOCK", name: "Pop", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } },
+      { type: "FLOW", name: "Births", to: "Pop", behavior: { value: "[Pop]*[Rate]" } },
+      { type: "LINK", from: "Rate", to: "Births" },
+    ],
+    scenarios: [{ name: "高い", values: { rate: 0.2 } }, { values: { Pop: 50 } }],
+  };
+
+  test("施策に保存してある値は、要素名の大文字と小文字を区別せずに引く", () => {
+    expect(scenarioValueOf(model, "高い", "Rate")).toBe("0.2");
+    expect(scenarioValueOf(model, "scenario 2", "pop")).toBe("50");
+    expect(scenarioValueOf(model, "高い", "Pop")).toBeUndefined();
+    expect(scenarioValueOf(model, "ない施策", "Rate")).toBeUndefined();
+  });
+
+  test("値を書き換えると、その値 1 つだけを送る。数字だけなら数値、式はそのまま", () => {
+    expect(cellPatchOf(model, "高い", "Rate", " 0.3 ")).toEqual({ name: "高い", values: { Rate: 0.3 } });
+    expect(cellPatchOf(model, "高い", "Births", "[Pop]*0.2")).toEqual({ name: "高い", values: { Births: "[Pop]*0.2" } });
+  });
+
+  test("「—」のマス（変えていない値）からも値を変え始められる。名前のない施策は「scenario 2」で送る", () => {
+    expect(cellPatchOf(model, "高い", "Pop", "80")).toEqual({ name: "高い", values: { Pop: 80 } });
+    expect(cellPatchOf(model, "scenario 2", "Rate", "0.05")).toEqual({ name: "scenario 2", values: { Rate: 0.05 } });
+  });
+
+  test("空にすると、その施策ではその値を変えない（null）。もともと変えていなければ送らない", () => {
+    expect(cellPatchOf(model, "高い", "Rate", "  ")).toEqual({ name: "高い", values: { Rate: null } });
+    expect(cellPatchOf(model, "高い", "Pop", "")).toBeUndefined();
+  });
+
+  test("保存してある値と同じなら送らない", () => {
+    expect(cellPatchOf(model, "高い", "Rate", "0.2")).toBeUndefined();
+  });
+
+  test("書けない値（かっこの数が合わない、ない要素の参照）は送らない", () => {
+    expect(() => cellPatchOf(model, "高い", "Rate", "([Pop]*2")).toThrow(/「\(」と「\)」/);
+    expect(() => cellPatchOf(model, "高い", "Rate", "[Pop*2")).toThrow(/「\[」と「\]」/);
+    expect(() => cellPatchOf(model, "高い", "Rate", ")(")).toThrow(/数が合いません/);
+    expect(() => cellPatchOf(model, "高い", "Rate", "{5 Meters")).toThrow(/「{」と「}」/);
+    expect(() => cellPatchOf(model, "高い", "Rate", "[Popp]*2")).toThrow(/「Popp」という要素はありません/);
+    expect(cellPatchOf(model, "高い", "Rate", "[pop]*0.001")).toEqual({ name: "高い", values: { Rate: "[pop]*0.001" } });
+  });
+});
+
+describe("施策の中身の表で値を直す（全角と、直せる行）", () => {
+  const model: ModelJSON = {
+    elements: [
+      { type: "STOCK", name: "人口（千人）", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } },
+      { type: "CONVERTER", name: "Table", behavior: { input: "TIME", data: [[0, 1]] } },
+    ],
+    scenarios: [{ name: "高い", values: { Rate: 0.3 } }],
+  };
+
+  test("全角の数字と記号は半角にして送る。[名前] の中の要素名は変えない", () => {
+    expect(cellPatchOf(model, "高い", "Rate", "０.５")).toEqual({ name: "高い", values: { Rate: 0.5 } });
+    expect(cellPatchOf(model, "高い", "Rate", "［人口（千人）］＊（１＋２）")).toEqual({ name: "高い", values: { Rate: "[人口（千人）]*(1+2)" } });
+    // 全角で打っても、保存してある値と同じなら送らない
+    expect(cellPatchOf(model, "高い", "Rate", "０.３")).toBeUndefined();
+  });
+
+  test("直せるのは、モデルにあり施策で値を変えられる要素の行だけ", () => {
+    expect(canEditValue(model, "rate")).toBe(true);
+    expect(canEditValue(model, "人口（千人）")).toBe(true);
+    expect(canEditValue(model, "Table")).toBe(false);
+    expect(canEditValue(model, "Nope")).toBe(false);
   });
 });

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ModelStore, emptyModel, toGraph, upsertElements } from "../src/core/index.js";
 import type { ChangeEvent, EditErrorResponse, EditResponse, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
+import { cellPatchOf } from "../web/src/scenarios.js";
 import { tempDir } from "./helpers.js";
 
 let dir: string;
@@ -455,6 +456,26 @@ describe("ビューアからの施策の編集", () => {
     expect(u.status).toBe(200);
     expect(u.body.model.version).toBe(v0);
     expect(u.body.model.model.scenarios).toBeUndefined();
+  });
+
+  test("表のマスで値を 1 つ直す・空にして変えないことにする。どちらも 1 回の「元に戻す」で直す前に戻る", async () => {
+    const store = new ModelStore(dir);
+    const m = population();
+    m.scenarios = [{ name: "高い", values: { Rate: 0.2 } }];
+    await store.write("pop", m);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+    const fix = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: [cellPatchOf(v0.model, "高い", "Population", "200")] });
+    expect(fix.status).toBe(200);
+    expect(fix.body.model.model.scenarios).toEqual([{ name: "高い", values: { Rate: 0.2, Population: 200 } }]);
+    expect(fix.body.model.scenarios![0]!.series!.Population![0]).toBe(200);
+    const u1 = await post<EditResponse>("/api/models/pop/undo", { version: fix.body.model.version });
+    expect(u1.body.model.version).toBe(v0.version);
+    expect(u1.body.model.model.scenarios).toEqual([{ name: "高い", values: { Rate: 0.2 } }]);
+
+    const clear = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: [cellPatchOf(v0.model, "高い", "Rate", "")] });
+    expect(clear.body.model.model.scenarios).toEqual([{ name: "高い", values: {} }]);
+    const u2 = await post<EditResponse>("/api/models/pop/undo", { version: clear.body.model.version });
+    expect(u2.body.model.model.scenarios).toEqual([{ name: "高い", values: { Rate: 0.2 } }]);
   });
 
   test("施策の名前を変えると筋書きの中も直し、元に戻すと筋書きも戻す", async () => {

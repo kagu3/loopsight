@@ -1,6 +1,6 @@
 // 施策（シナリオ）を重ねて比べるときと、画面で施策を直すときの、React に依存しない計算。
 import type { Equation, ModelElement, ModelJSON, RunResult, Scenario, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
-import { parseEquation } from "./editing.js";
+import { halfWidthEquation, parseEquation } from "./editing.js";
 
 /** 何も変えない実行の名前（サーバーの BASELINE_SCENARIO と同じ） */
 export const BASELINE_NAME = "何もしない場合";
@@ -312,4 +312,49 @@ export function scenarioBadges(model: ModelJSON, values: Record<string, Equation
     out.set(nameKey(el.name), { element: el.name, initial, current, value, text, title });
   }
   return out;
+}
+
+// ここから、施策の中身の表のマスで、施策の値をその場で直すときの計算。送る変更は施策の編集欄と同じ形（値 1 つだけ）
+
+/** 施策に保存してある要素の値（書き方のまま）。施策がないか、その値を変えていなければ undefined */
+export function scenarioValueOf(model: ModelJSON, scenario: string, element: string): string | undefined {
+  const v = Object.entries(findScenario(model, scenario)?.values ?? {}).find(([k]) => nameKey(k) === nameKey(element))?.[1];
+  return v === undefined ? undefined : String(v);
+}
+
+/** 表のマスで直せる値か。モデルにあり、施策で値を変えられる要素（ストック・変数・フロー）だけ。ほかは保存できない */
+export function canEditValue(model: ModelJSON, element: string): boolean {
+  return valueTargets(model).some((e) => nameKey(e.name!) === nameKey(element));
+}
+
+/** 式として書けない値なら、その理由。かっこ（( ) [ ] { }）の数が合わない、ない要素を [名前] で参照している */
+function valueProblem(model: ModelJSON, text: string): string | undefined {
+  for (const [open, close] of [["(", ")"], ["[", "]"], ["{", "}"]] as const) {
+    let depth = 0;
+    for (const ch of text) {
+      if (ch === open) depth++;
+      else if (ch === close && --depth < 0) break;
+    }
+    if (depth !== 0) return `「${open}」と「${close}」の数が合いません。`;
+  }
+  for (const m of text.matchAll(/\[([^[\]\n]+)\]/g)) {
+    const ref = m[1]!.trim();
+    if (!model.elements.some((e) => e.type !== "LINK" && e.name && nameKey(e.name) === nameKey(ref))) return `「${ref}」という要素はありません。`;
+  }
+  return undefined;
+}
+
+/**
+ * 表のマスに入れた文字から、送る変更を組み立てる（MCP の set_scenarios と同じ形）。
+ * 空なら、その施策ではその値を変えない（null。「何もしない場合」と同じ値に戻る）。全角の数字と記号は半角にする。
+ * 保存してある値と同じなら（何も変えていなければ）undefined。書けない値なら例外を投げる
+ */
+export function cellPatchOf(model: ModelJSON, scenario: string, element: string, text: string): ScenarioPatch | undefined {
+  const value = halfWidthEquation(text).trim();
+  const saved = scenarioValueOf(model, scenario, element);
+  if (!value) return saved === undefined ? undefined : { name: scenario, values: { [element]: null } };
+  if (saved !== undefined && saved.trim() === value) return undefined;
+  const problem = valueProblem(model, value);
+  if (problem) throw new Error(problem);
+  return { name: scenario, values: { [element]: parseEquation(value) } };
 }

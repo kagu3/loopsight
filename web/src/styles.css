@@ -1360,6 +1360,10 @@ button.legend-remove:hover {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+/* 値を消して行ごとなくなったときに、フォーカスを受ける（枠は出さない） */
+.scenario-matrix:focus {
+  outline: none;
+}
 .scenario-matrix th,
 .scenario-matrix td {
   padding: 2px 10px;
@@ -1413,6 +1417,85 @@ button.legend-remove:hover {
   margin-left: 6px;
   font-weight: 400;
   color: var(--text-secondary);
+}
+/* 施策の値のマスは、その場で直せる。普段の見た目は変えず、カーソルを乗せたときだけ枠と × を出す */
+.scenario-matrix td.matrix-editable {
+  position: relative;
+  cursor: text;
+}
+.scenario-matrix td.matrix-editable:hover,
+.scenario-matrix td.matrix-editable:focus-visible {
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+.scenario-matrix td.matrix-editable:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.scenario-matrix td.matrix-editable:hover.matrix-same,
+.scenario-matrix td.matrix-editable:focus-visible.matrix-same {
+  opacity: 1;
+}
+button.matrix-clear {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.scenario-matrix td.matrix-editable:hover button.matrix-clear,
+.scenario-matrix td.matrix-editable:focus-within button.matrix-clear {
+  display: block;
+}
+button.matrix-clear:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+/* 入力しているマスと、エラーを出しているマスは、折り返して全部見せる */
+.scenario-matrix td.matrix-editing {
+  max-width: none;
+  overflow: visible;
+  white-space: normal;
+  opacity: 1;
+}
+input.matrix-input {
+  box-sizing: border-box;
+  max-width: 260px;
+  margin: -1px 0;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  text-align: right;
+}
+input.matrix-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.scenario-matrix .matrix-error {
+  display: block;
+  min-width: 16em;
+  max-width: 260px;
+  margin-top: 2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--error-bg);
+  color: var(--error);
+  font-weight: 400;
+  text-align: left;
 }
 .scenario-matrix .matrix-empty,
 .scenario-matrix .matrix-fold {

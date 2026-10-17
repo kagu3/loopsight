@@ -363,6 +363,8 @@ export function App() {
     },
     [editScenarios],
   );
+  /** 施策の中身の表で、施策の値をその場で直す。編集欄は開かない */
+  const saveScenarioValue = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
   const removeScenario = useCallback(
     async (name: string) => {
       const [model, target] = [currentRef.current, scenarioRef.current];
@@ -780,6 +782,7 @@ export function App() {
               renamed={renamed}
               editingScenario={scenario?.name}
               onEditScenario={(name) => setScenario({ name })}
+              onSaveScenario={saveScenarioValue}
               onFocusScenario={setHoveredScenario}
             />
           ) : data ? (

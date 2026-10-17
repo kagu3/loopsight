@@ -4,9 +4,26 @@ import { positionPatches, shiftIntoView, type Graph, type GraphNode } from "../.
 import { boxLayout } from "../../src/core/geometry.js";
 import { canReference, equationsOf, findElement, findLink, nameKey, referencesIn, sameName } from "../../src/core/modeljson.js";
 
-/** 数字だけなら数値、それ以外は式の文字列 */
+/** 式の中で、半角にしないところ。[名前] の参照（全角の［］も）と、引用符で囲んだ文字列 */
+const KEEP_IN_EQUATION = /([[［][^[\]［］\n]*[\]］]|"[^"]*"|'[^']*')/;
+
+/** 全角の ASCII（！〜～）と全角の空白を半角にする。①や㎡、カナなど、ほかの文字は変えない */
+const halfWidth = (text: string) => text.replace(/[！-～　]/g, (c) => (c === "　" ? " " : String.fromCharCode(c.charCodeAt(0) - 0xfee0)));
+
+/**
+ * 全角で打った数字と記号を半角にする（「０.３」→「0.3」、「［人口］＊２」→「[人口]*2」）。
+ * [名前] の中は要素名なので変えない（「人口（千人）」のような名前の参照を壊さないため）。引用符で囲んだ文字列の中も変えない
+ */
+export function halfWidthEquation(text: string): string {
+  return text
+    .split(KEEP_IN_EQUATION)
+    .map((part, i) => (i % 2 === 0 ? halfWidth(part) : /^[[［]/.test(part) ? `[${part.slice(1, -1)}]` : part))
+    .join("");
+}
+
+/** 数字だけなら数値、それ以外は式の文字列。全角の数字と記号は半角にする */
 export function parseEquation(text: string): string | number {
-  const t = text.trim();
+  const t = halfWidthEquation(text).trim();
   return /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t) ? Number(t) : t;
 }
 

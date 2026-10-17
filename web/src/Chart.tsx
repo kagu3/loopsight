@@ -1,10 +1,10 @@
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
-import type { ActualDataResult, ModelJSON, RunResult, ScenarioRunResult } from "../../src/viewer/api.js";
+import type { ActualDataResult, ModelJSON, RunResult, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
 import { sameTime, withActualPoints } from "./actualPoints.js";
 import { renamedName } from "./editing.js";
 import { normalize, normalizeLike, normalizeTogether } from "./normalize.js";
-import { BASELINE_NAME, compareRuns, describeRun, resultRows, valueRows, type CompareRun, type CompareRuns } from "./scenarios.js";
+import { BASELINE_NAME, canEditValue, cellPatchOf, compareRuns, describeRun, resultRows, valueRows, type CompareRun, type CompareRuns, type MatrixCell } from "./scenarios.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
 // 実行結果の時系列グラフと表。
@@ -132,6 +132,8 @@ export interface ChartProps {
   editingScenario?: string;
   /** 施策の編集欄を開く。name がなければ施策を足す */
   onEditScenario?(name?: string): void;
+  /** 施策を直す（MCP の set_scenarios と同じ形）。失敗したらエラーの文を返す。あれば、施策の中身の表で値をその場で直せる */
+  onSaveScenario?(patch: ScenarioPatch): Promise<string | undefined>;
   /** 施策の凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「何もしない場合」では呼ばない */
   onFocusScenario?(name: string | undefined): void;
 }
@@ -151,7 +153,7 @@ export function scenarioColor(run: RunResult, scenarios: ScenarioRunResult[], na
 /** 施策を重ねているときの、実際のデータの点の色 */
 const ACTUAL_COMPARE_COLOR = "var(--text-primary)";
 
-export function Chart({ modelName, model, run, scenarios, actual, renamed, editingScenario, onEditScenario, onFocusScenario }: ChartProps) {
+export function Chart({ modelName, model, run, scenarios, actual, renamed, editingScenario, onEditScenario, onSaveScenario, onFocusScenario }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
   // グラフに出す要素と線の色。名前を変えた版を受け取った描画では、下の effect が直すまで、前の名前のままになっている
@@ -334,6 +336,7 @@ export function Chart({ modelName, model, run, scenarios, actual, renamed, editi
           unit={unit}
           editing={editingScenario}
           onEdit={onEditScenario}
+          onSave={onSaveScenario}
           onFocus={onFocusScenario}
         />
       )}
@@ -474,7 +477,8 @@ const MATRIX_ROWS = 6;
 /**
  * 施策の凡例。「何もしない場合」は灰色の点線。実行できなかった施策と、色が足りずに出さない施策も知らせる。
  * onEdit があれば、施策の名前を押すと左の欄で直せる。最後に「＋ 施策を足す」を置く。
- * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、施策ごとに変えた値と結果（グラフで選んでいる要素の値）を並べる
+ * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、施策ごとに変えた値と結果（グラフで選んでいる要素の値）を並べる。
+ * onSave があれば、表の施策の値をその場で直せる
  */
 function ScenarioLegend({
   compare,
@@ -485,6 +489,7 @@ function ScenarioLegend({
   unit,
   editing,
   onEdit,
+  onSave,
   onFocus,
 }: {
   compare: CompareRuns;
@@ -497,6 +502,7 @@ function ScenarioLegend({
   unit: string;
   editing?: string;
   onEdit?(name?: string): void;
+  onSave?(patch: ScenarioPatch): Promise<string | undefined>;
   onFocus?(name: string | undefined): void;
 }) {
   const [open, setOpenState] = useState(loadMatrixOpen);
@@ -563,7 +569,7 @@ function ScenarioLegend({
     <div className={`scenario-bar ${isOpen ? "open" : ""}`}>
       <div className="scenario-head">
         {isOpen ? (
-          <ScenarioMatrix compare={compare} model={model} times={times} visible={visible} at={at} unit={unit} chip={chip} showAll={showAll} onShowAll={setShowAll} />
+          <ScenarioMatrix compare={compare} model={model} times={times} visible={visible} at={at} unit={unit} chip={chip} showAll={showAll} onShowAll={setShowAll} onSave={onSave} />
         ) : (
           <ul className="scenario-legend" aria-label="重ねている施策">
             {compare.runs.map((r, k) => (
@@ -599,7 +605,8 @@ function ScenarioLegend({
 
 /**
  * 施策の中身の表。列は凡例と同じ並び（「何もしない場合」と、重ねている施策）。
- * 行は、どれかの施策で変えた値と、結果（グラフで選んでいる要素の、ある時点の値）
+ * 行は、どれかの施策で変えた値と、結果（グラフで選んでいる要素の、ある時点の値）。
+ * onSave があれば、変えた値の行の施策の列（「—」も）をその場で直せる。「何もしない場合」の列と結果の行は直せない
  */
 function ScenarioMatrix({
   compare,
@@ -611,6 +618,7 @@ function ScenarioMatrix({
   chip,
   showAll,
   onShowAll,
+  onSave,
 }: {
   compare: CompareRuns;
   model: ModelJSON;
@@ -621,6 +629,7 @@ function ScenarioMatrix({
   chip(r: CompareRun, k: number): React.ReactNode;
   showAll: boolean;
   onShowAll(all: boolean): void;
+  onSave?(patch: ScenarioPatch): Promise<string | undefined>;
 }) {
   const runs = compare.runs;
   const rows = useMemo(() => valueRows(model, runs), [model, runs]);
@@ -628,9 +637,19 @@ function ScenarioMatrix({
   const folding = rows.length > MATRIX_ROWS;
   const shown = folding && !showAll ? rows.slice(0, MATRIX_ROWS) : rows;
   const colSpan = runs.length + 1;
+  // マスに入れた文字を、その施策の変更にして送る。書けない値ならエラーの文を返す（送らない）
+  const saveValue = (r: CompareRun, element: string) => async (text: string) => {
+    let patch: ScenarioPatch | undefined;
+    try {
+      patch = cellPatchOf(model, r.name, element, text);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    return patch && onSave ? onSave(patch) : undefined;
+  };
   return (
     <div className="scenario-matrix-scroll">
-      <table className="scenario-matrix" aria-label="施策の中身">
+      <table className="scenario-matrix" aria-label="施策の中身" tabIndex={-1}>
         <thead>
           <tr>
             <th scope="col" className="matrix-corner">
@@ -657,18 +676,21 @@ function ScenarioMatrix({
                 <span className="matrix-element">{row.element}</span>
                 {row.initial && <small className="matrix-sub">初期値</small>}
               </th>
+              {/* マスの key は施策の名前（施策の列が減っても、入力している途中の状態が隣の列に移らないように） */}
               {row.cells.map((c, k) =>
                 k === 0 ? (
-                  <td key={k} className="matrix-base" title={c.value}>
+                  <td key={runs[k]!.name} className="matrix-base" title={c.value}>
                     {c.value ?? "—"}
                   </td>
+                ) : onSave && canEditValue(model, row.element) ? (
+                  <ScenarioValueCell key={runs[k]!.name} cell={c} color={runColor(runs[k]!, k)} label={`${runs[k]!.name}の「${row.element}」の値`} onSave={saveValue(runs[k]!, row.element)} />
                 ) : c.changed ? (
-                  <td key={k} className="matrix-changed" style={{ "--run-color": runColor(runs[k]!, k) } as React.CSSProperties} title={c.value}>
+                  <td key={runs[k]!.name} className="matrix-changed" style={{ "--run-color": runColor(runs[k]!, k) } as React.CSSProperties} title={c.value}>
                     {c.value}
                     {c.change && <small className="matrix-change">{c.change}</small>}
                   </td>
                 ) : (
-                  <td key={k} className="matrix-same" title="この施策では変えていません">
+                  <td key={runs[k]!.name} className="matrix-same" title="この施策では変えていません">
                     —
                   </td>
                 ),
@@ -703,6 +725,180 @@ function ScenarioMatrix({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * 施策の中身の表の、施策の値のマス。押す（Enter）と入力欄になり、Enter か欄から外れると保存し、Esc で取りやめる。
+ * 空にして確定するか × を押すと、その施策ではその値を変えない（「—」に戻る）。
+ * × はカーソルを乗せたとき（フォーカスしたとき）だけ出す。普段の見た目は、直せないマスと同じ
+ */
+function ScenarioValueCell({ cell, color, label, onSave }: { cell: MatrixCell; color: string; label: string; onSave(text: string): Promise<string | undefined> }) {
+  // 入れている途中の文字。undefined なら入力欄を出していない
+  const [draft, setDraft] = useState<string>();
+  // 書き始めたときの値。確定するときに、そのあいだに AI などがこの値を変えていないか比べる
+  const [base, setBase] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  const cellRef = useRef<HTMLTableCellElement>(null);
+  // 保存しているあいだと閉じたあとは、欄から外れたこと（blur）で、もう一度送らない
+  const busy = useRef(false);
+  const closed = useRef(true);
+  // 一度知らせたあと（ほかで変わっていた・保存に失敗した）は、次の確定では比べずに送る
+  const checked = useRef(false);
+  // 入力欄を閉じたあと（× を押したあとも）、キーボードで続けられるようマスにフォーカスを戻す。マスが描き直されてから戻す。
+  // 戻すのは、フォーカスがまだこのマスの中にある（入力欄が消えて body に落ちた）ときだけ。ほかへ移していたら動かさない
+  const refocus = useRef(false);
+  const table = useRef<HTMLTableElement | null>(null);
+  const focusLost = () => {
+    const a = document.activeElement;
+    return !a || a === document.body || !!cellRef.current?.contains(a);
+  };
+  useEffect(() => {
+    if (draft !== undefined || !refocus.current || busy.current) return;
+    refocus.current = false;
+    if (focusLost()) cellRef.current?.focus();
+  });
+  // 値を消して行ごとなくなったときは、表にフォーカスを移す
+  useEffect(
+    () => () => {
+      const t = table.current;
+      if (refocus.current && t?.isConnected && focusLost()) t.focus();
+    },
+    [], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const start = () => {
+    closed.current = false;
+    checked.current = false;
+    setDraft(cell.value ?? "");
+    setBase(cell.value);
+    setError(undefined);
+  };
+  const close = (focusCell: boolean) => {
+    closed.current = true;
+    refocus.current = focusCell;
+    setDraft(undefined);
+    setError(undefined);
+  };
+  const save = async (text: string): Promise<string | undefined> => {
+    busy.current = true;
+    table.current = cellRef.current?.closest("table") ?? null;
+    setSaving(true);
+    const err = await onSave(text);
+    busy.current = false;
+    setSaving(false);
+    return err;
+  };
+  const commit = async (focusCell: boolean) => {
+    if (closed.current || busy.current || draft === undefined) return;
+    // 何も変えていなければ、比べずにそのまま閉じる
+    if (draft.trim() === (base ?? "").trim()) {
+      close(focusCell);
+      return;
+    }
+    if (!checked.current && cell.value !== base) {
+      // 書いているあいだに、この値がほかで変わった。黙って上書きせず、一度知らせる
+      checked.current = true;
+      setError("書いているあいだに、ほかのところ（AI など）でこの値が変わりました。もう一度確定すると、この欄の値で上書きします。");
+      return;
+    }
+    // 行ごとなくなったとき（空にした）にも表へフォーカスを移せるよう、送る前から覚えておく
+    refocus.current = focusCell;
+    const err = await save(draft);
+    if (err) {
+      refocus.current = false;
+      checked.current = true;
+      setError(err);
+    } else close(focusCell);
+  };
+  // × で、この施策ではこの値を変えないことにする
+  const clear = async () => {
+    if (busy.current) return;
+    refocus.current = true;
+    const err = await save("");
+    setError(err);
+  };
+
+  const style = cell.changed ? ({ "--run-color": color } as React.CSSProperties) : undefined;
+  const errorNote = error && (
+    <span className="matrix-error" role="alert">
+      {error}
+    </span>
+  );
+  if (draft !== undefined) {
+    return (
+      <td className={`matrix-editing ${cell.changed ? "matrix-changed" : ""}`} style={style} ref={cellRef}>
+        <input
+          className="matrix-input code"
+          value={draft}
+          size={Math.min(Math.max(draft.length + 2, 8), 28)}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void commit(true);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              close(true);
+            }
+          }}
+          onBlur={() => void commit(false)}
+          onFocus={(e) => e.currentTarget.select()}
+          readOnly={saving}
+          autoFocus
+          aria-label={label}
+          aria-invalid={!!error}
+          title="Enter で保存、Esc でやめる。空にすると、この施策ではこの値を変えません"
+        />
+        {errorNote}
+      </td>
+    );
+  }
+  return (
+    <td
+      ref={cellRef}
+      className={`matrix-editable ${cell.changed ? "matrix-changed" : "matrix-same"} ${error ? "matrix-editing" : ""}`}
+      style={style}
+      tabIndex={0}
+      title={cell.changed ? `${cell.value}\n押すと直せます` : "この施策では変えていません。押すと値を変えられます"}
+      aria-label={`${label}：${cell.changed ? cell.value : "変えていません"}`}
+      onClick={start}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && e.key === "Enter") {
+          e.preventDefault();
+          start();
+        } else if (e.key === "Delete" || e.key === "Backspace") {
+          // 変えた値なら、その値を消す（× と同じ）。図で選んでいる要素を消さないよう、ここで止める
+          e.preventDefault();
+          e.stopPropagation();
+          if (cell.changed && !e.repeat) void clear();
+        }
+      }}
+    >
+      {cell.changed ? (
+        <>
+          <button
+            className="matrix-clear"
+            onClick={(e) => {
+              e.stopPropagation();
+              void clear();
+            }}
+            disabled={saving}
+            aria-label={`${label}を変えないことにする`}
+            title="この施策ではこの値を変えない（「—」に戻す）"
+          >
+            ×
+          </button>
+          {cell.value}
+          {cell.change && <small className="matrix-change">{cell.change}</small>}
+        </>
+      ) : (
+        "—"
+      )}
+      {errorNote}
+    </td>
   );
 }
 
