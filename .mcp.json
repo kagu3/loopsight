@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "sd-modeler": {
+    "loopsight": {
       "command": "node",
       "args": ["dist/mcp/index.js", "--models-dir", "models"]
     }

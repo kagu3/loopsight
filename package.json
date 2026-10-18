@@ -1,13 +1,13 @@
 {
-  "name": "sd-modeler",
+  "name": "loopsight",
   "version": "0.1.0",
   "description": "Insight Maker のモデルを AI アシスタントから作成・実行・分析するための MCP サーバー",
   "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",
   "bin": {
-    "sd-modeler": "dist/mcp/index.js",
-    "sd-modeler-viewer": "dist/viewer/index.js"
+    "loopsight": "dist/mcp/index.js",
+    "loopsight-viewer": "dist/viewer/index.js"
   },
   "engines": {
     "node": ">=20"
@@ -26,12 +26,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/suda0033/sd-modeler.git"
+    "url": "git+https://github.com/kagu3/loopsight.git"
   },
   "bugs": {
-    "url": "https://github.com/suda0033/sd-modeler/issues"
+    "url": "https://github.com/kagu3/loopsight/issues"
   },
-  "homepage": "https://github.com/suda0033/sd-modeler#readme",
+  "homepage": "https://github.com/kagu3/loopsight#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "simulation": "^9.0.0",

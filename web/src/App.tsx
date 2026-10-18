@@ -781,7 +781,7 @@ export function App() {
       {/* たたんだ左の欄は消さずに隠す（書きかけの編集を残す） */}
       <aside className="sidebar" id="sidebar">
         <header className="brand">
-          <h1>SD Modeler ビューア</h1>
+          <h1>Loopsight ビューア</h1>
           <span className={`live ${connected ? "on" : ""}`} title={connected ? "ファイルの変更を見ています" : "サーバーにつながっていません"}>
             <span className="dot" />
             {connected ? "ライブ" : "未接続"}

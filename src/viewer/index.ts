@@ -7,7 +7,7 @@ import { startViewer } from "./server.js";
 
 const { values } = parseArgs({ options: { "models-dir": { type: "string" }, port: { type: "string" } }, strict: false });
 const modelsDir = resolveModelsDir(typeof values["models-dir"] === "string" ? values["models-dir"] : undefined);
-const port = typeof values.port === "string" ? Number(values.port) : Number(process.env.SD_MODELER_VIEWER_PORT ?? process.env.INSIGHT_MAKER_VIEWER_PORT ?? 5180);
+const port = typeof values.port === "string" ? Number(values.port) : Number(process.env.LOOPSIGHT_VIEWER_PORT ?? 5180);
 
 // ビルドした画面は dist/web にある（このファイルは dist/viewer/index.js）
 const staticDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../web");
@@ -22,7 +22,7 @@ try {
   }
   throw e;
 }
-console.log(`SD Modeler ビューア: ${viewer.url}`);
+console.log(`Loopsight ビューア: ${viewer.url}`);
 console.log(`作業フォルダ: ${modelsDir}`);
 
 const stop = () => {

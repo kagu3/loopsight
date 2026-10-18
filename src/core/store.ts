@@ -10,11 +10,10 @@ export class StoreError extends Error {
 }
 
 /**
- * 作業フォルダの決め方：引数 > 環境変数 SD_MODELER_MODELS_DIR > ./models
- * 前の名前（insight-maker-mcp）のころの INSIGHT_MAKER_MODELS_DIR も、設定を書き換えなくて済むように読む。
+ * 作業フォルダの決め方：引数 > 環境変数 LOOPSIGHT_MODELS_DIR > ./models
  */
 export function resolveModelsDir(explicit?: string): string {
-  const dir = explicit || process.env.SD_MODELER_MODELS_DIR || process.env.INSIGHT_MAKER_MODELS_DIR || "models";
+  const dir = explicit || process.env.LOOPSIGHT_MODELS_DIR || "models";
   return path.resolve(dir);
 }
 
