@@ -1,7 +1,7 @@
 {
   "name": "loopsight",
   "version": "0.1.0",
-  "description": "Insight Maker のモデルを AI アシスタントから作成・実行・分析するための MCP サーバー",
+  "description": "AI アシスタントと一緒にシステムダイナミクス（SD）のモデルを作り、動かし、確かめるための MCP サーバーとビューア",
   "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",

@@ -28,7 +28,7 @@ SD を知っている人が、SD を知らない人に問題を定義し、解�
 - **発表モード（説明資料）**：SD を知らない身近な人（チームメンバーや部下）に、資料づくりに時間をかけずにモデルの結果を説明するためのもの。筋書きは AI と一緒に作る。AI が読める形でも書き出し（今は PDF だけ。形を広げるのは別の Issue）、決定権がある人向けの正式な提案資料の素案・素材にする。価値は画面そのものではなく、SD を知らない人向けの言葉と絵に置き換えるところ（筋書き、言いたいことの 1 文、ループの強調、実際のデータの重ね描き）にある
 - **正式な提案資料**：決定権がある人向けの資料は、モデルの結果を元に別に（PowerPoint などで）作る。このプロジェクトでは正式な提案資料は作らず、その手前の素案・素材までを受け持つ
 
-作るものは #15〜#19。その先の案は [IDEAS.md](IDEAS.md)（まだ決まっていない）
+その先の案は [IDEAS.md](IDEAS.md)（まだ決まっていない）
 
 ### 役割の分け方
 
@@ -55,16 +55,14 @@ AI に画面をクリックさせるのではなく、次のように役割を�
   - In-Page Action API：開いているモデルの中（ボタンなど）で動く JavaScript。外部からは呼べない
   - npm パッケージ [`simulation`](https://github.com/scottfr/simulation)
   - R パッケージ sdbuildR
-- **利用規約（[/termsofuse](https://insightmaker.com/termsofuse)）が自動アクセスとスクレイピングを禁止している。** サイトの内部エンドポイント（`/api/save_model` や `X-IM-Import` ヘッダー付きの取得など）は存在するが、使わない。**このプロジェクトから insightmaker.com には一切アクセスしない。**
+- **利用規約（[/termsofuse](https://insightmaker.com/termsofuse)）が自動アクセスとスクレイピングを禁止している。** **このプロジェクトから insightmaker.com には一切アクセスしない。**
 - **現行の Web アプリはオープンソースではない。** 公開されているのはエンジンだけ。旧版（2016〜2018 年ごろ、ExtJS と mxGraph を使用）のソースは scottfr/insightmaker のフォークに残っている。ただし独自ライセンス（AGPL に加えて、画面に InsightMaker.com のクレジットを大きく表示する義務がある）で、ExtJS と mxGraph は別ライセンスが必要になる。そのため使わない。
 
 ### エンジン `simulation` について（v9.0.0 で確認）
 
 - Insight Maker 公式のシミュレーションエンジン。Node でもブラウザでも動く。ライセンスは **AGPL**。
 - `loadInsightMaker`（XML の読み込み）、`loadModelJSON`、`toModelJSON` がある。**Insight Maker 形式の XML を書き出す機能はない。** このプロジェクトは ModelJSON だけを読み書きする（はじめは `loadInsightMaker` で `.InsightMaker` を取り込んでいたが、#1 で外した）。
-- `loadInsightMaker` は、ルートタグが `InsightMakerModel` でないと受け付けない。`mxGraphModel` のままの XML は、名前を置き換えてから渡す（Web 版も書き出し時に同じ置き換えをしている）。
-- 往復テスト（XML → ModelJSON → 再読み込み → 実行）では、システムダイナミクスのモデル（55 要素、585 要素）でストックの計算結果が完全に一致した。
-- **エージェントベースのモデル（Population）は ModelJSON に対応していない。** そのため往復できない。
+- **エージェントベースのモデル（Population）は ModelJSON に対応していない。**
 - コードで作ったモデルは、要素の座標がすべて `[0,0]` になる。図として見せるには配置が必要になる。
 
 ### ファイル形式について
