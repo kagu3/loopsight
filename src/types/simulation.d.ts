@@ -26,5 +26,4 @@ declare module "simulation" {
 
   export function loadModelJSON(data: object): Model;
   export function toModelJSON(model: Model): Record<string, unknown>;
-  export function loadInsightMaker(xml: string): Model;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addBoxSizes, addDefaultVisualization, boxLayout, emptyModel, layoutModel, linkControlPoint, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
+import { boxLayout, emptyModel, layoutModel, linkControlPoint, upsertElements, validateModel, type ModelJSON, type Point } from "../src/core/index.js";
 import { loadSample } from "./helpers.js";
 
 type Box = { name: string; x: number; y: number; w: number; h: number };
@@ -125,29 +125,6 @@ function chain(): ModelJSON {
   return m;
 }
 
-describe("書き出し用の既定のグラフ", () => {
-  test("グラフがなければストックの時系列グラフを足す", () => {
-    const m = population();
-    expect(addDefaultVisualization(m)).toEqual({ type: "TIME_SERIES", name: "ストックの推移", elements: ["Population"] });
-    expect(m.visualizations).toHaveLength(1);
-    expect(validateModel(m).ok).toBe(true);
-  });
-
-  test("すでにグラフがあれば足さない", () => {
-    const m = population();
-    m.visualizations = [{ type: "TABLE", name: "表", elements: ["Births"] }];
-    expect(addDefaultVisualization(m)).toBeUndefined();
-    expect(m.visualizations).toEqual([{ type: "TABLE", name: "表", elements: ["Births"] }]);
-  });
-
-  test("ストックがなければ変数などを入れ、要素がなければ足さない", () => {
-    const m = emptyModel("v");
-    expect(addDefaultVisualization(m)).toBeUndefined();
-    upsertElements(m, [{ type: "VARIABLE", name: "x", behavior: { value: "Years()" } }]);
-    expect(addDefaultVisualization(m)?.elements).toEqual(["x"]);
-  });
-});
-
 describe("簡易レイアウト", () => {
   test("座標のない要素すべてに、重ならないように座標を付ける", () => {
     const m = chain();
@@ -210,17 +187,6 @@ describe("簡易レイアウト", () => {
     const m = chain();
     layoutModel(m);
     expect(m.elements.some((e) => e.display?.size)).toBe(false);
-  });
-
-  test("書き出すときは、大きさのない箱に図と同じ大きさを入れる（決まった大きさはそのまま）", () => {
-    const m = emptyModel("sizes");
-    upsertElements(m, [
-      { type: "STOCK", name: "管理者が考える必要な人数", behavior: { initial_value: 1 } },
-      { type: "VARIABLE", name: "標準の生産性", behavior: { value: 1 }, display: { size: [80, 30] } },
-    ]);
-    expect(addBoxSizes(m)).toEqual(["管理者が考える必要な人数"]);
-    expect(m.elements[0]!.display!.size).toEqual(boxLayout("STOCK", "管理者が考える必要な人数").size);
-    expect(m.elements[1]!.display!.size).toEqual([80, 30]);
   });
 
   test("すでにある座標は動かさない", () => {

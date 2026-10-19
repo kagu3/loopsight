@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addBoxSizes, borderPoint, bounds, boxLayout, checkDiagram, connectedTo, emptyModel, fitTargets, labelLines, layoutModel, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, textWidth, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
+import { borderPoint, bounds, boxLayout, checkDiagram, connectedTo, emptyModel, fitTargets, labelLines, layoutModel, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, textWidth, toGraph, upsertElements, type GraphNode, type ModelJSON } from "../src/core/index.js";
 import { loadSample, sampleNames } from "./helpers.js";
 
 function population(): ModelJSON {
@@ -31,7 +31,7 @@ describe("図への変換", () => {
     expect(link.target).toBe("valve:births");
   });
 
-  test("座標がなければ、書き出しと同じ簡易レイアウトで仮に並べ、重ならないようにする", () => {
+  test("座標がなければ、layout_model と同じ簡易レイアウトで仮に並べ、重ならないようにする", () => {
     const m = population();
     const g = toGraph(m);
     expect(g.missingCoordinates).toBe(true);
@@ -42,11 +42,11 @@ describe("図への変換", () => {
         expect(overlap(g.nodes[i]!, g.nodes[j]!), `${g.nodes[i]!.id} と ${g.nodes[j]!.id}`).toBe(false);
       }
     }
-    // 書き出し（export_model）で付く座標と同じ
-    const exported = structuredClone(m);
-    layoutModel(exported);
+    // layout_model で付く座標と同じ
+    const laid = structuredClone(m);
+    layoutModel(laid);
     const stock = g.nodes.find((n) => n.id === "el:population")!;
-    expect([stock.x, stock.y]).toEqual(exported.elements.find((e) => e.name === "Population")!.display!.coordinates);
+    expect([stock.x, stock.y]).toEqual(laid.elements.find((e) => e.name === "Population")!.display!.coordinates);
   });
 
   test("座標がそろっていればモデルの座標を使い、弁は両端の真ん中に置く", () => {
@@ -294,7 +294,7 @@ describe("箱の幅と名前の行", () => {
     expect(nodes.find((n) => n.element === "新人")!.wrapLabel).toBeUndefined();
   });
 
-  test("図、簡易レイアウト、図の確認、書き出しで、箱の大きさが同じ", () => {
+  test("図、簡易レイアウト、図の確認で、箱の大きさが同じ", () => {
     const m = emptyModel("names");
     upsertElements(m, [
       { type: "STOCK", name: "プロジェクトの期間", behavior: { initial_value: 10 } },
@@ -311,8 +311,5 @@ describe("箱の幅と名前の行", () => {
     expect(sizes(toGraph(m).nodes)).toEqual(auto);
     const check = checkDiagram(m);
     for (const p of check.positions.filter((p) => p.size)) expect(p.size, p.name).toEqual(auto[p.name]);
-    // 書き出すファイルに入れる大きさも同じ
-    addBoxSizes(m);
-    for (const e of m.elements.filter((e) => e.display?.coordinates)) expect(e.display!.size, e.name).toEqual(auto[e.name!]);
   });
 });

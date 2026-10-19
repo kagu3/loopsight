@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { toModelJSON } from "simulation";
 import {
@@ -8,7 +6,6 @@ import {
   buildModel,
   checkBrackets,
   emptyModel,
-  importInsightMakerXML,
   importModelText,
   removeElements,
   setScenarios,
@@ -19,7 +16,7 @@ import {
   validateModel,
   type ModelJSON,
 } from "../src/core/index.js";
-import { FIXTURES_DIR, loadSample, sampleNames, sortedElements, tempDir } from "./helpers.js";
+import { loadSample, sampleNames, sortedElements, tempDir } from "./helpers.js";
 
 describe("ModelJSON の往復", () => {
   test.each(sampleNames())("%s: 保存 → 読み込み → エンジン → ModelJSON で一致する", async (name) => {
@@ -66,65 +63,18 @@ describe("作業フォルダ", () => {
   });
 });
 
-describe(".InsightMaker の取り込み", () => {
-  test("座標を保ったまま ModelJSON にできて、実行結果も同じ", async () => {
-    const xml = await readFile(path.join(FIXTURES_DIR, "population.InsightMaker"), "utf8");
-    const { model, warnings } = importModelText(xml, "population");
+describe("ModelJSON の取り込み", () => {
+  test("ModelJSON を読み、名前がなければファイル名を使う", () => {
+    const { model, warnings } = importModelText('﻿ {"elements":[{"type":"VARIABLE","name":"x","behavior":{"value":1}}]}', "inline");
     expect(warnings).toEqual([]);
-    expect(model.name).toBe("population");
-
-    const stock = model.elements.find((e) => e.name === "Population")!;
-    expect(stock.display?.coordinates).toEqual([300, 150]);
-    expect(stock.display?.size).toEqual([100, 40]);
-    const births = model.elements.find((e) => e.name === "Births")!;
-    expect(births.display?.from_coordinates).toEqual([350, 40]);
-    expect(model.elements.filter((e) => e.type === "LINK")).toHaveLength(2);
-
-    expect(validateModel(model).ok).toBe(true);
-    const m = buildModel(model);
-    const pop = m.find((p) => p.name === "Population")[0]!;
-    expect(m.simulate().value(pop)).toBeCloseTo(100 * 1.05 ** 50, 6);
-  });
-
-  test("フォルダの中の要素はフォルダの位置を足す", () => {
-    const xml = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
-      <Setting TimeLength="10" TimeStart="0" TimeStep="1" TimeUnits="Years" SolutionAlgorithm="RK1" id="2"><mxCell parent="1" vertex="1" visible="0"><mxGeometry x="20" y="20" width="80" height="40" as="geometry"/></mxCell></Setting>
-      <Folder name="Group &amp; Co" Type="None" id="3"><mxCell style="folder" parent="1" vertex="1"><mxGeometry x="100" y="200" width="300" height="200" as="geometry"/></mxCell></Folder>
-      <Variable name="A &amp; B" Equation="1" Units="Unitless" id="4"><mxCell style="variable" parent="3" vertex="1"><mxGeometry x="10" y="20" width="120" height="50" as="geometry"/></mxCell></Variable>
-      </root></mxGraphModel>`;
-    const { model, warnings } = importInsightMakerXML(xml);
-    const v = model.elements.find((e) => e.name === "A & B")!;
-    expect(v.display?.coordinates).toEqual([110, 220]);
-    expect(warnings.join()).toMatch(/Folder/);
-  });
-
-  test("グラフや表（Display）を visualizations として取り込む", () => {
-    const display = (id: number, name: string, type: string, prims: string) =>
-      `<Display name="${name}" Type="${type}" Primitives="${prims}" id="${id}"><mxCell style="display" parent="1" vertex="1" visible="0"><mxGeometry x="10" y="10" width="64" height="64" as="geometry"/></mxCell></Display>`;
-    const xml = `<InsightMakerModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
-      <Setting TimeLength="10" TimeStart="0" TimeStep="1" TimeUnits="Years" SolutionAlgorithm="RK1" id="2"><mxCell parent="1" vertex="1" visible="0"><mxGeometry x="20" y="20" width="80" height="40" as="geometry"/></mxCell></Setting>
-      <Stock name="S" InitialValue="1" Units="Unitless" id="3"><mxCell style="stock" parent="1" vertex="1"><mxGeometry x="100" y="100" width="100" height="40" as="geometry"/></mxCell></Stock>
-      <Variable name="V" Equation="2" Units="Unitless" id="4"><mxCell style="variable" parent="1" vertex="1"><mxGeometry x="100" y="10" width="120" height="50" as="geometry"/></mxCell></Variable>
-      ${display(10, "Chart", "Time Series", "3,4")}
-      ${display(11, "Numbers", "Tabular", "3")}
-      ${display(12, "XY", "Scatterplot", "3,4")}
-      ${display(13, "Map", "Map", "3")}
-      ${display(14, "Empty", "Time Series", "")}
-      </root></InsightMakerModel>`;
-    const { model, warnings } = importInsightMakerXML(xml);
-    expect(model.visualizations).toEqual([
-      { type: "TIME_SERIES", name: "Chart", elements: ["S", "V"] },
-      { type: "TABLE", name: "Numbers", elements: ["S"] },
-      { type: "TIME_SERIES", name: "XY", elements: ["S", "V"] },
-    ]);
-    expect(warnings.join("\n")).toMatch(/XY.*散布図/);
-    expect(warnings.join("\n")).toMatch(/Map.*取り込んでいません/);
+    expect(model.name).toBe("inline");
     expect(validateModel(model).ok).toBe(true);
   });
 
-  test("Insight Maker の XML でなければわかるエラーにする", () => {
+  test("ModelJSON でなければわかるエラーにする", () => {
     expect(() => importModelText("hello")).toThrow(/ModelJSON/);
-    expect(() => importModelText("<html></html>")).toThrow(/Insight Maker/);
+    expect(() => importModelText("<InsightMakerModel></InsightMakerModel>")).toThrow(/ModelJSON/);
+    expect(() => importModelText('{"name":"x"}')).toThrow(/elements/);
   });
 });
 

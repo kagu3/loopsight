@@ -2,14 +2,13 @@
 
 AI アシスタントと一緒にシステムダイナミクス（SD）のモデルを作り、動かし、確かめるための道具。AI が使う MCP サーバーと、人が図とグラフで見て手直しするビューア（Web 画面）からなる。
 
-モデルは [Insight Maker](https://insightmaker.com/) の ModelJSON 形式で保存するので、Insight Maker の Web 版ともファイルでやりとりできる。
+モデルは [Insight Maker](https://insightmaker.com/) の ModelJSON 形式で保存する。
 
 - Claude Code などから、言葉でモデルを作り、実行し、パラメータを振って比較できる
-- Insight Maker の Web 版で作ったモデル（`.InsightMaker` / ModelJSON）を取り込んで分析できる
-- 作ったモデルを、Web 版に読み込める ModelJSON として書き出せる
+- ModelJSON ファイルのモデルを取り込んで分析できる
 - ビューア（Web 画面）で図とグラフを見て、式の値や配置、比べるシナリオを手直しできる。AI がモデルを変えると、画面がその場で変わる
 
-シミュレーションには Insight Maker 公式のエンジン [`simulation`](https://github.com/scottfr/simulation) を使う。insightmaker.com には自動でアクセスしない（利用規約で禁止されているため）。Web 版とのやりとりは、人がファイルを読み込んだり書き出したりして行う。
+シミュレーションには Insight Maker 公式のエンジン [`simulation`](https://github.com/scottfr/simulation) を使う。insightmaker.com には自動でアクセスしない（利用規約で禁止されているため）。
 
 ## 必要なもの
 
@@ -62,7 +61,7 @@ claude mcp add --scope user loopsight -- node /absolute/path/to/loopsight/dist/m
 
 作業フォルダの中には、ほかに次のものが作られる。
 
-- `exports/`：`export_model` で書き出した Web 版向けのファイルと、`export_slides` で書き出した説明資料のフォルダ（`exports/<モデル名>/`）
+- `exports/`：`export_slides` で書き出した説明資料のフォルダ（`exports/<モデル名>/`）
 - `output/`：`run_simulation` で保存した CSV
 - `<モデル名>.data.csv`：`import_data` で取り込んだ実際のデータ（1 列目が時刻、ほかの列が要素名）。モデルの一覧には出さない。要素の名前を変えると、列名も直す
 - `<モデル名>.slides.json`：`set_slides` で保存した説明資料の筋書き。モデルの一覧には出さない。要素やシナリオの名前を変えると、筋書きの中の名前も直す
@@ -73,8 +72,7 @@ claude mcp add --scope user loopsight -- node /absolute/path/to/loopsight/dist/m
 |---|---|
 | `list_models` | 作業フォルダのモデル一覧 |
 | `create_model` | 空のモデルを作る（名前、シミュレーション設定） |
-| `import_model` | `.InsightMaker` または ModelJSON ファイルを取り込む |
-| `export_model` | Web 版に読み込める ModelJSON を書き出す。座標のない要素には座標を付け、大きさのない箱にはビューアと同じ大きさを入れる |
+| `import_model` | ModelJSON ファイルを取り込む |
 | `layout_model` | 座標のない要素に座標を付けて保存する。`reset: true` ですべて並べ直す |
 | `view_diagram` | 図を PNG の画像にし、箱の重なり、線が要素や名前の上を通るところ、線の交差、1 か所に集まる線、各要素の位置を返す。AI が図を見ながら配置を直すのに使う（画像には Edge か Chrome が必要）。`loop` を渡すと、そのループの要素と線だけを目立たせ、ループの名前と R / B を出す |
 | `find_loops` | フィードバックループ（リンクとフローの循環）を探し、リンクの極性から強めるループ（R）か釣り合わせるループ（B）かを返す。極性が決まっていないつながりがあれば、そのことを返す |
@@ -111,9 +109,7 @@ Claude Code に次のように頼む。
 
 > 書き出した説明資料のフォルダを元に、部長向けの提案資料を作って。（`slides.md` の骨子と `data/` の CSV から、編集できるグラフ入りの資料を作ってもらう）
 
-> ~/Downloads/model.InsightMaker を取り込んで、どんなモデルか説明して。
-
-> Web 版に読み込めるように書き出して。
+> ~/Downloads/model.json を取り込んで、どんなモデルか説明して。
 
 ### 説明資料のフォルダ
 
@@ -131,21 +127,9 @@ exports/<モデル名>/
 - 決定権がある人向けの正式な提案資料は、このフォルダを AI に渡して作ってもらう。数字は CSV から取り、グラフは CSV から PowerPoint などで作り直せる
 - 同じフォルダに書き出し直すと、`images/` と `data/` の中身は入れ替わる（消したスライドの画像や CSV は残らない）。フォルダのほかのファイルには触らない
 
-## Insight Maker の Web 版とのやりとり
+## 例のモデル
 
-### Web 版 → MCP
-
-1. Web 版でモデルを開き、Import/Export メニューで `Model.InsightMaker` か `Model.json`（ModelJSON）を書き出す
-2. AI に「このファイルを取り込んで」と頼む（`import_model`）
-
-### MCP → Web 版
-
-1. AI に「書き出して」と頼む（`export_model`）。作業フォルダの `exports/<モデル名>.json` にできる
-2. Web 版で Import/Export メニューの「Import ModelJSON」から、そのファイルを読み込む
-   - Import/Export は、エディタ右上の共有アイコン（3 つの点を線でつないだ形）を押すと、メニューの下のほうに出てくる。上向きの矢印が読み込み
-   - モデルにグラフや表の設定がなければ、書き出すときにストックの時系列グラフを 1 つ足す（`chart: false` で足さない）。ほかの要素を見たいときは、SIMULATE のあと「ADD DISPLAY」で足す
-
-[examples/population.json](examples/population.json) は、この MCP で作って書き出した例（シナリオを 2 つ保存してある）。[examples/population.data.csv](examples/population.data.csv) は、その実際のデータの例（`import_data` で取り込むと、ビューアのグラフに点で重なる）。[examples/population.slides.json](examples/population.slides.json) は、その説明資料の筋書きの例（3 つのファイルを作業フォルダに置くと、ビューアの発表モードで見られる）。
+[examples/population.json](examples/population.json) は、この MCP で作ったモデルの例（シナリオを 2 つ保存してある）。[examples/population.data.csv](examples/population.data.csv) は、その実際のデータの例（`import_data` で取り込むと、ビューアのグラフに点で重なる）。[examples/population.slides.json](examples/population.slides.json) は、その説明資料の筋書きの例（3 つのファイルを作業フォルダに置くと、ビューアの発表モードで見られる）。
 
 ## ビューア（Web 画面）
 
@@ -170,8 +154,6 @@ npm run viewer
 
 ## できないこと（段階 1）
 
-- **エージェントベースのモデル**（Agent、Population）は ModelJSON で表せないので、取り込まない
-- テキスト、画像、ボタン、アクションも ModelJSON にないので、取り込まない。フォルダはなくなるが、中の要素は残る（どちらも `import_model` が警告を出す）
 - 状態（STATE）と遷移（TRANSITION）は、読み込み、保存、実行、上書きはできる。追加や変更はできない
 - 自動で付ける座標は、重ならない程度の簡易なもの
 
