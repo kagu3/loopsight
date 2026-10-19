@@ -4,7 +4,7 @@
 // - ストック、変数、コンバーター、状態は箱のノード
 // - フローは真ん中に「弁」のノードを置き、出元 → 弁 → 行き先の 2 本の線にする（リンクが弁につながれるように）
 // - モデルの外の端は雲のノード
-// - 座標はモデルにあればそれを使う。ない要素があれば、書き出しと同じ簡易レイアウト（layoutModel）で並べる
+// - 座標はモデルにあればそれを使う。ない要素があれば、layout_model と同じ簡易レイアウト（layoutModel）で並べる
 import { layoutModel } from "./layout.js";
 import { boxLayout, BOX_TYPES } from "./geometry.js";
 export { LINK_BEND, linkControlPoint } from "./geometry.js";
@@ -285,7 +285,7 @@ export function positionPatches(
 
 /**
  * 左上が MARGIN より左や上にはみ出していたら、全体をずらしたコピーを返す（はみ出していなければ undefined）。
- * 負の座標で保存すると、Insight Maker の Web 版で画面の外に出てしまうため。
+ * 負の座標や、左上の余白より外の座標を残さないため。
  */
 export function shiftIntoView(nodes: GraphNode[], margin = 20): GraphNode[] | undefined {
   const b = bounds(nodes);

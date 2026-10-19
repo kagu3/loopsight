@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, SERVER_NAME } from "../src/mcp/server.js";
-import { boxLayout, validateModel, type ModelJSON } from "../src/core/index.js";
+import { type ModelJSON } from "../src/core/index.js";
 import { FIXTURES_DIR, SAMPLES_DIR, tempDir } from "./helpers.js";
 
 let client: Client;
@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、19 個のツールが見える", async () => {
+  test("クライアントから接続でき、18 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     expect(client.getInstructions()).toMatch(/「説明資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
@@ -58,7 +58,6 @@ describe("MCP server", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "create_model",
-        "export_model",
         "export_slides",
         "find_loops",
         "get_model",
@@ -127,28 +126,6 @@ describe("MCP server", () => {
       elements: ["Infected", "Recovered"],
     });
     expect(scen.rows).toHaveLength(2);
-
-    const exp = await call("export_model", { model: "sir" });
-    expect(path.relative(dir, exp.file)).toBe(path.join("exports", "sir.json"));
-    expect(exp.placed_elements).toHaveLength(6);
-    const exported = JSON.parse(await readFile(exp.file, "utf8")) as ModelJSON;
-    expect(validateModel(exported).ok).toBe(true);
-    for (const el of exported.elements.filter((e) => e.type === "STOCK" || e.type === "VARIABLE")) {
-      expect(el.display?.coordinates, el.name).toBeDefined();
-      // 箱の大きさは図と同じ（名前の長さから決めたもの）
-      expect(el.display?.size, el.name).toEqual(boxLayout(el.type, el.name!).size);
-    }
-    // グラフの設定がないので、ストックの時系列グラフが足される
-    expect(exp.added_chart).toMatchObject({ type: "TIME_SERIES", elements: ["Susceptible", "Infected", "Recovered"] });
-    expect(exported.visualizations).toEqual([exp.added_chart]);
-    // save_layout を付けなければモデル本体には座標を書かない。グラフも書かない
-    const after = await call<ModelJSON>("get_model", { model: "sir", format: "full" });
-    expect(after.elements.some((e) => e.display?.coordinates)).toBe(false);
-    expect(after.elements.some((e) => e.display?.size)).toBe(false);
-    expect(after.visualizations).toBeUndefined();
-    const noChart = await call("export_model", { model: "sir", path: "exports/no-chart.json", chart: false });
-    expect(noChart.added_chart).toBeUndefined();
-    expect((JSON.parse(await readFile(noChart.file, "utf8")) as ModelJSON).visualizations).toBeUndefined();
   });
 
   test("名前を変えて、消して、設定を変える", async () => {
@@ -215,22 +192,20 @@ describe("MCP server", () => {
     expect(removed.comparison).toBeUndefined();
   });
 
-  test("取り込み：.InsightMaker と ModelJSON", async () => {
-    const im = await call("import_model", { path: path.join(FIXTURES_DIR, "population.InsightMaker") });
-    expect(im.model).toBe("population");
-    expect(im.validation.ok).toBe(true);
-    expect(im.summary.stocks[0].name).toBe("Population");
-
-    const json = await call("import_model", { path: path.join(SAMPLES_DIR, "predator_prey.json"), model: "pp" });
-    expect(json.model).toBe("pp");
+  test("取り込み：ModelJSON", async () => {
+    const json = await call("import_model", { path: path.join(SAMPLES_DIR, "predator_prey.json") });
+    expect(json.model).toBe("predator_prey");
+    expect(json.validation.ok).toBe(true);
+    await call("import_model", { path: path.join(SAMPLES_DIR, "predator_prey.json"), model: "pp" });
     const run = await call("run_simulation", { model: "pp", samples: 0 });
     expect(Object.keys(run.results).length).toBeGreaterThan(0);
 
     const content = await call("import_model", { content: '{"elements":[{"type":"VARIABLE","name":"x","behavior":{"value":1}}]}', model: "inline" });
     expect(content.validation.ok).toBe(true);
 
-    expect(await callError("import_model", { path: "no/such/file.InsightMaker" })).toMatch(/読めません/);
-    expect(await callError("import_model", { path: path.join(FIXTURES_DIR, "population.InsightMaker") })).toMatch(/すでにあります/);
+    expect(await callError("import_model", { content: "<InsightMakerModel></InsightMakerModel>", model: "xml" })).toMatch(/ModelJSON/);
+    expect(await callError("import_model", { path: "no/such/file.json" })).toMatch(/読めません/);
+    expect(await callError("import_model", { path: path.join(SAMPLES_DIR, "predator_prey.json") })).toMatch(/すでにあります/);
   });
 
   test("実際のデータを取り込む。合わない列は「もしかして」を付けて知らせ、名前を変えると列名も直す", async () => {
@@ -345,7 +320,6 @@ describe("MCP server", () => {
     expect(bad.validation.ok).toBe(false);
     const err = JSON.parse(await callError("run_simulation", { model: "e" }));
     expect(err.issues[0].element).toBe("x");
-    expect(await callError("export_model", { model: "e", path: "../../outside.json" })).toMatch(/外を指して/);
     await call("set_slides", { model: "e", slides: [{ kind: "conclusion", title: "結論", message: "まとめ" }] });
     expect(await callError("export_slides", { model: "e", path: "../../outside" })).toMatch(/外を指して/);
     expect(await callError("export_slides", { model: "e", path: "out/e.pdf" })).toMatch(/フォルダを指定して/);

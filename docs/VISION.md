@@ -41,7 +41,7 @@ AI に画面をクリックさせるのではなく、次のように役割を�
 
 | 段階 | 内容 | 状態 |
 |---|---|---|
-| 1. 中核部分＋MCP | モデルを保持して ModelJSON で読み書きし、`simulation` で実行する中核部分と、それを操作する MCP ツール。Insight Maker とファイルでやりとりする場合にもそのまま使える | 実装済み。Web 版への読み込みも確認済み（[ROADMAP.md](ROADMAP.md)） |
+| 1. 中核部分＋MCP | モデルを保持して ModelJSON で読み書きし、`simulation` で実行する中核部分と、それを操作する MCP ツール | 実装済み（[ROADMAP.md](ROADMAP.md)） |
 | 2. 見るための Web 画面 | 中核部分と同じモデルを表示し、AI の変更をその場で図とグラフに反映する。図の自動配置もここで入れる | 実装済み（`npm run viewer`） |
 | 3. 編集できる Web 画面 | 必要になったら、人が手で直せるようにする | 一部実装済み（式などの編集、配置の保存、元に戻す）。要素の追加・削除はこれから |
 
@@ -61,7 +61,7 @@ AI に画面をクリックさせるのではなく、次のように役割を�
 ### エンジン `simulation` について（v9.0.0 で確認）
 
 - Insight Maker 公式のシミュレーションエンジン。Node でもブラウザでも動く。ライセンスは **AGPL**。
-- `loadInsightMaker`（XML の読み込み）、`loadModelJSON`、`toModelJSON` がある。**Insight Maker 形式の XML を書き出す機能はない。**
+- `loadInsightMaker`（XML の読み込み）、`loadModelJSON`、`toModelJSON` がある。**Insight Maker 形式の XML を書き出す機能はない。** このプロジェクトは ModelJSON だけを読み書きする（はじめは `loadInsightMaker` で `.InsightMaker` を取り込んでいたが、#1 で外した）。
 - `loadInsightMaker` は、ルートタグが `InsightMakerModel` でないと受け付けない。`mxGraphModel` のままの XML は、名前を置き換えてから渡す（Web 版も書き出し時に同じ置き換えをしている）。
 - 往復テスト（XML → ModelJSON → 再読み込み → 実行）では、システムダイナミクスのモデル（55 要素、585 要素）でストックの計算結果が完全に一致した。
 - **エージェントベースのモデル（Population）は ModelJSON に対応していない。** そのため往復できない。
@@ -70,7 +70,7 @@ AI に画面をクリックさせるのではなく、次のように役割を�
 ### ファイル形式について
 
 - [ModelJSON](https://github.com/scottfr/modeljson)（CC0）は、「LLM が生成しやすいこと」を設計目標の一つにした JSON 形式。ストック、フロー、変数、リンク、コンバーター、状態、遷移に対応している。
-- **Insight Maker の Web 版は ModelJSON を読み書きできる**（Import/Export メニュー）。そのため、Web 版との受け渡しは ModelJSON ファイルを人が手でインポート・エクスポートする形にする。
+- **Insight Maker の Web 版は ModelJSON を読み書きできる**（Import/Export メニュー）。はじめは、Web 版との受け渡しを ModelJSON ファイルの手でのインポート・エクスポートで行う想定だった。今はビューアで見て確かめられるので、Web 版とのやりとりは想定していない。
 
 ## 制約と方針
 

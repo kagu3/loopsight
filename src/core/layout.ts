@@ -1,8 +1,8 @@
-import type { ModelElement, ModelJSON, Point, Visualization } from "./modeljson.js";
+import type { ModelElement, ModelJSON, Point } from "./modeljson.js";
 import { nameKey, sameName } from "./modeljson.js";
 import { boxLayout, BOX_TYPES, flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
 
-// 簡易レイアウト：Web 版に読み込んだとき要素が重ならない程度に座標を付ける。
+// 簡易レイアウト：図にしたとき要素が重ならない程度に座標を付ける（layout_model と、ビューアの仮の並び）。
 // ストックを横一列に並べ（フローの流れ順）、変数はつながる要素の近くに、
 // リンクの線が雲やほかの要素を横切らないように置く。
 
@@ -281,40 +281,6 @@ function findSpot(
 
 type Segment = [Point, Point];
 
-
-/**
- * 大きさ（display.size）のない箱に、図と同じ大きさ（名前の長さから決めたもの）を入れる。
- * Web 版に読み込んだときも、ビューアと同じ幅の箱になるようにするため。書き出すコピーに使う
- * （モデル本体に入れると、あとで名前を変えたときに古い幅のまま残るので、保存はしない）。
- * @returns 大きさを入れた要素の名前
- */
-export function addBoxSizes(model: ModelJSON): string[] {
-  const added: string[] = [];
-  for (const el of model.elements) {
-    if (!BOX_TYPES.has(el.type) || !el.name || el.display?.size) continue;
-    el.display = { ...(el.display ?? {}), size: sizeOf(el) };
-    added.push(el.name);
-  }
-  return added;
-}
-
-/**
- * グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す。
- * Web 版に読み込んだあと、すぐ SIMULATE で結果が見られるようにするため。
- * ストックがなければ、フロー、変数、コンバーターを入れる。どちらも最初の 8 個まで。
- * @returns 足したグラフ（足さなかったときは undefined）
- */
-export function addDefaultVisualization(model: ModelJSON): Visualization | undefined {
-  if (model.visualizations?.length) return undefined;
-  const named = (types: string[]) => model.elements.filter((e) => types.includes(e.type) && e.name).map((e) => e.name!);
-  const stocks = named(["STOCK"]);
-  // 線は 8 本まで（ビューアのグラフも 8 本まで。それより多いと色で見分けられない）
-  const elements = (stocks.length ? stocks : named(["FLOW", "VARIABLE", "CONVERTER"])).slice(0, 8);
-  if (!elements.length) return undefined;
-  const viz: Visualization = { type: "TIME_SERIES", name: stocks.length ? "ストックの推移" : "時系列", elements };
-  model.visualizations = [viz];
-  return viz;
-}
 
 /** ストックをフローの流れ順に並べる（つながりごとにまとめる） */
 function orderStocks(model: ModelJSON, flows: ModelElement[]): ModelElement[] {

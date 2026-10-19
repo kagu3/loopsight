@@ -18,8 +18,6 @@ import {
   ModelStore,
   StoreError,
   TIME_UNITS,
-  addBoxSizes,
-  addDefaultVisualization,
   checkActualData,
   checkDiagram,
   checkSlides,
@@ -100,7 +98,7 @@ const elementPatch = z.object({
   display: z
     .record(z.string(), z.any())
     .optional()
-    .describe("表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標は書き出し時に自動で付く"),
+    .describe("表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる"),
 });
 
 const slideText = {
@@ -236,7 +234,6 @@ const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデル�
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
-7. export_model で Insight Maker の Web 版に読み込める Model.json を書き出す（Web 版の「Import ModelJSON」で人が読み込む）
 
 「説明資料を作って」と頼まれたら（SD を知らない身近な人に、問題と解決案を順に見せる資料。決定権がある人向けの正式な提案資料の素材にもなる）:
 a. get_model と run_simulation でモデルの振る舞いを確かめる。実際のデータ（実績）があれば import_data で取り込む。比べるシナリオがなければ set_scenarios で保存する（description に、どんなシナリオかを書く）
@@ -330,8 +327,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "モデルを取り込む",
       description:
-        ".InsightMaker ファイル（Insight Maker の XML）か ModelJSON ファイルを取り込んで作業フォルダに保存する。path か content のどちらかを指定する。" +
-        "ModelJSON にないもの（エージェント、テキスト、画像、ボタンなど）は取り込まれず、warnings に出る。",
+        "ModelJSON ファイルを取り込んで作業フォルダに保存する。path か content のどちらかを指定する。",
       inputSchema: {
         path: z.string().optional().describe("取り込むファイルのパス（絶対パス、またはカレントか作業フォルダからの相対パス）"),
         content: z.string().optional().describe("ファイルの中身を直接渡す場合"),
@@ -346,7 +342,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         if (!a.path) throw new ImportError("path か content を指定してください。");
         const p = expandHome(a.path);
         text = await readInputFile(store, p);
-        base ??= toModelName(path.basename(p).replace(/\.(InsightMaker|json|xml)$/i, ""));
+        base ??= toModelName(path.basename(p).replace(/\.json$/i, ""));
       }
       const { model, warnings } = importModelText(text, base);
       const name = toModelName(base ?? model.name ?? "imported");
@@ -358,54 +354,11 @@ export function registerTools(server: McpServer, store: ModelStore): void {
   );
 
   server.registerTool(
-    "export_model",
-    {
-      title: "Web 版向けに書き出す",
-      description:
-        "Insight Maker の Web 版で「Import ModelJSON」から読み込める JSON ファイルを書き出す。座標のない要素には、重ならないように座標を付ける。" +
-        "大きさのない箱には、図と同じ大きさ（名前の長さから決めたもの）を入れる（モデル本体には保存しない）。" +
-        "グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す。" +
-        "書き出し先は作業フォルダの中（既定は exports/<モデル名>.json）。",
-      inputSchema: {
-        model: modelName,
-        path: z.string().optional().describe("作業フォルダからの相対パス（既定は exports/<モデル名>.json）"),
-        layout: z.boolean().optional().describe("座標のない要素に座標を付ける（既定は true）"),
-        save_layout: z.boolean().optional().describe("付けた座標をモデル本体にも保存する（既定は false）"),
-        chart: z
-          .boolean()
-          .optional()
-          .describe("グラフや表の設定がなければ、ストックの時系列グラフを 1 つ足す（既定は true）。モデル本体には保存しない"),
-      },
-    },
-    handle(async (a: { model: string; path?: string; layout?: boolean; save_layout?: boolean; chart?: boolean }) => {
-      const m = await store.read(a.model);
-      const validation = validateModel(m);
-      let placed: string[] = [];
-      if (a.layout !== false) {
-        placed = layoutModel(m);
-        if (a.save_layout && placed.length) await store.write(a.model, m);
-      }
-      const chart = a.chart !== false ? addDefaultVisualization(m) : undefined;
-      // 箱の大きさは書き出すファイルにだけ入れる（Web 版でもビューアと同じ幅にする）
-      addBoxSizes(m);
-      const rel = a.path ?? path.join("exports", `${a.model}.json`);
-      const file = await store.writeJSONFile(store.resolveInside(rel.endsWith(".json") ? rel : `${rel}.json`), m);
-      return {
-        file,
-        placed_elements: placed,
-        ...(chart ? { added_chart: chart } : {}),
-        validation,
-        next_step: "Insight Maker の Web 版でモデルを開き、Import/Export メニューの「Import ModelJSON」からこのファイルを読み込んでください。",
-      };
-    }),
-  );
-
-  server.registerTool(
     "layout_model",
     {
       title: "図の配置を付ける",
       description:
-        "座標のない要素に、重ならないように座標を付けて保存する（書き出しと同じ簡易レイアウト）。reset: true ですべて並べ直す。" +
+        "座標のない要素に、重ならないように座標を付けて保存する（ビューアが座標のない要素を仮に並べるのと同じ簡易レイアウト）。reset: true ですべて並べ直す。" +
         "結果に図の確認（重なり、線が要素や名前の上を通るところ、線の交差、1 か所に集まる線）を付ける。直すときは view_diagram で図を見ながら upsert_elements の display で位置を変える。",
       inputSchema: {
         model: modelName,
