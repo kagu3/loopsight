@@ -23,3 +23,11 @@ export function draggedResultsRatio(start: { results: number; diagram: number; m
   const results = Math.min(max, Math.max(MIN_RESULTS_HEIGHT, start.results - dy));
   return results / start.main;
 }
+
+/** 右側いっぱいに広げている欄。図（diagram）か下の欄（results）。undefined は上下に分けた形 */
+export type ExpandedPane = "diagram" | "results" | undefined;
+
+/** 覚えておいた広げている欄を読む。読めない値なら、上下に分けた形 */
+export function parseExpandedPane(text: string | null): ExpandedPane {
+  return text === "diagram" || text === "results" ? text : undefined;
+}

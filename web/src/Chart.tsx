@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
 import type { ActualDataResult, ModelJSON, RunResult, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
 import { sameTime, withActualPoints } from "./actualPoints.js";
@@ -153,6 +153,8 @@ export interface ChartProps {
   onFocusScenario?(name: string | undefined): void;
   /** グラフにカーソルを乗せている時刻が変わった（外したら undefined）。図の要素に、その時刻の値を出す */
   onHoverTime?(t: number | undefined): void;
+  /** 上の帯の右端に並べるもの（ビューアの「広げる」）。渡したときだけ出す */
+  tools?: ReactNode;
 }
 
 /** 「元のモデル」の線の色と点線 */
@@ -184,6 +186,7 @@ export function Chart({
   onRemoveScenarioValue,
   onFocusScenario,
   onHoverTime,
+  tools,
 }: ChartProps) {
   const candidates = useMemo(() => candidatesOf(model, run), [model, run]);
   const names = useMemo(() => candidates.map((c) => c.name), [candidates]);
@@ -410,6 +413,7 @@ export function Chart({
             </li>
           ))}
         </ul>
+        {tools}
       </div>
 
       {(comparing || adding) && (

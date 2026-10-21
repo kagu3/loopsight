@@ -22,7 +22,7 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
@@ -301,6 +301,8 @@ export interface DiagramProps {
   liveValues?: NodeValues;
   /** 図の右上の「値を表示」の切り替えと、値を出すシナリオの選択。渡したときだけ出す（図だけの表示では渡さない） */
   valueTools?: ValueTools;
+  /** 図の右上の「値を表示」の右に並べるもの（ビューアの「広げる」）。渡したときだけ出す */
+  paneTools?: ReactNode;
   /** 「値を表示」がオンで要素を選んでいるときの、値を入れた式。選んだ要素の横に出す */
   formula?: SelectedFormula;
 }
@@ -716,7 +718,12 @@ export function Diagram(props: DiagramProps) {
           onRemove={props.onRemove}
         />
       )}
-      {props.valueTools && <ValueToolsPanel {...props.valueTools} />}
+      {(props.valueTools || props.paneTools) && (
+        <Panel position="top-right" className="top-right-tools">
+          {props.valueTools && <ValueToolsPanel {...props.valueTools} />}
+          {props.paneTools}
+        </Panel>
+      )}
       {props.formula && <FormulaCard formula={props.formula} nodes={placed} />}
       {!props.embed && <Controls showInteractive={false} fitViewOptions={props.valueTools?.on ? VIEWER_TOOLS_FIT : VIEWER_FIT} />}
       {/* 全体のどこを見ているか。ドラッグとホイールで図を動かせる（図を隠しすぎないよう小さめにする） */}
@@ -816,7 +823,7 @@ function EditTools({
  */
 function ValueToolsPanel({ on, onChange, scenarios, scenario, onScenario, caption }: ValueTools) {
   return (
-    <Panel position="top-right" className={`value-tools ${on ? "on" : ""}`}>
+    <div className={`value-tools ${on ? "on" : ""}`}>
       {on && <span className="value-caption">{caption}</span>}
       {on && scenarios.length > 0 && (
         <select
@@ -846,7 +853,7 @@ function ValueToolsPanel({ on, onChange, scenarios, scenario, onScenario, captio
       >
         値を表示
       </button>
-    </Panel>
+    </div>
   );
 }
 
@@ -1046,7 +1053,8 @@ const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stoc
 /**
  * 表示範囲を合わせ直す。別のモデルを開いたとき、配置を切り替えたとき、要素が増減したとき、図の欄の大きさが変わったとき。
  * 式や値が変わっただけのとき（AI が値を調整したなど）は動かさない。画面で要素を足した・消した・名前を変えたとき（keepView）も、増減では動かさない。
- * 境界線のドラッグで図の欄の大きさが変わったとき（holdView）も動かさない（ズームや位置を保つ）。
+ * 境界線のドラッグや、図かグラフ・表を広げた・戻したことで図の欄の大きさが変わったとき（holdView）も動かさない（ズームや位置を保つ）。
+ * 図の欄を隠している間（グラフ・表を広げている）に合わせ直すことになったら（別のモデルを開いた、要素が増減したなど）、次に見えたときに合わせる。
  * 全体が名前の読める大きさで入らないときは、ストックが入るように合わせる（ほかはドラッグやミニマップで見る）。
  * 「値を表示」をオンにした・オフにしたとき（toolsSpace）も合わせ直す。オンの間は、右上の道具の分だけ上を空ける。
  */
@@ -1078,6 +1086,8 @@ function FitOnChange({
   const last = useRef({ view, layoutKey, modelName });
   // 境界線のドラッグで変わった大きさが、まだ届いていないか（届くのはドラッグを終えたあとのこともある）
   const held = useRef(false);
+  // 図の欄を隠している間に、合わせ直すことになったか
+  const fitLater = useRef(false);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   useEffect(() => {
@@ -1087,8 +1097,14 @@ function FitOnChange({
     const hold = held.current;
     // ドラッグを終え、図の欄のいまの大きさが届いたら、ふだんどおりに戻す
     if (!holdView && domNode && domNode.offsetWidth === width && domNode.offsetHeight === height) held.current = false;
-    if (hold && prev.modelName === modelName && prev.layoutKey === layoutKey) return;
-    if (prev.view === view && (prev.layoutKey === layoutKey || keepView)) return;
+    const visible = !domNode || (domNode.checkVisibility?.() ?? true);
+    if (!(fitLater.current && visible)) {
+      if (hold && prev.modelName === modelName && prev.layoutKey === layoutKey) return;
+      if (prev.view === view && (prev.layoutKey === layoutKey || keepView)) return;
+    }
+    // 隠れている間は、要素の大きさも図の欄の大きさも測れないので、見えてから合わせる
+    fitLater.current = !visible;
+    if (!visible) return;
     if (embed) {
       const padding = badge ? { top: BADGE_SPACE, bottom: FIT_PADDING, x: FIT_PADDING } : FIT_PADDING;
       requestAnimationFrame(() => flow.fitView({ padding, maxZoom: 1.5, duration: 200 }));
