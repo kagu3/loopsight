@@ -365,6 +365,8 @@ try {
   mkdirSync(path.join(modelsDir, "exports", "population"), { recursive: true });
   writeFileSync(path.join(modelsDir, "exports", "population", "slides.pdf"), "");
   await b.evaluate("localStorage.removeItem('viewer.openFolders')");
+  // 「値を表示」の場面でたたんだ左の欄は、ブラウザが覚えている。開いた状態に戻してから開く
+  await b.evaluate("localStorage.removeItem('viewer.sidebarOpen')");
   await b.open(url(`${encodeURIComponent("ブルックスの法則")}/brooks_law`));
   await b.waitFor("document.querySelector('.folder-toggle')");
   await b.clickText(".folder-name", "事例");
