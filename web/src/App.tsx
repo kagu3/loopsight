@@ -7,6 +7,7 @@ import { Details } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
 import { nodeValues, peakIndex, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
 import { formulaView } from "./formulaValues.js";
+import { InfoTip } from "./InfoTip.js";
 import { addElementPatches, linkProblem, linkRemoveProblem, reconnectPatches, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
@@ -897,7 +898,7 @@ export function App() {
       <main className="main" ref={mainRef}>
         <div className="toolbar">
           <div className="title">
-            <h2>{title || "モデルを選んでください"}</h2>
+            <h2 title={title}>{title || "モデルを選んでください"}</h2>
             {data?.model.description && (
               <p className="muted" title={data.model.description}>
                 {data.model.description}
@@ -906,7 +907,7 @@ export function App() {
           </div>
           {graph && data && (
             <div className="toolbar-right">
-              {graph.missingCoordinates && <span className="note">座標のない要素を仮に並べています。「図を編集」で動かすと、この配置を保存します</span>}
+              {graph.missingCoordinates && <InfoTip text="座標のない要素を仮に並べています。「図を編集」で動かすと、この配置を保存します" />}
               <a
                 className="toolbar-button"
                 href={`?view=present#${encodeURIComponent(data.name)}`}
