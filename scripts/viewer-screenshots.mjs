@@ -350,6 +350,30 @@ try {
   await shot("formula-list", ".diagram");
   // 覚えた「値を表示」は、次に撮るときのために消しておく
   await b.evaluate("localStorage.removeItem('viewer.diagramValues')");
+
+  // フォルダごとに出したモデルの一覧（フォルダの中のモデルを開いて、ほかのフォルダも 1 つ開く）
+  await setColorScheme("light");
+  const population = await store.read("population");
+  // 前の場面で足したモデルは消して、一覧が画面に収まるようにする
+  for (const name of ["bullwhip", "sales", "population_error"]) await store.removeModel(name);
+  await store.write("ブルックスの法則/brooks_law", { ...population, name: "ブルックスの法則" });
+  await store.write("ブルックスの法則/brooks_law_detailed", { ...population, name: "ブルックスの法則（詳しい版）" });
+  await store.write("事例/在庫/bullwhip", { ...population, name: "ブルウィップ効果" });
+  await store.write("事例/在庫/bullwhip_対策", { ...population, name: "ブルウィップ効果の対策" });
+  await store.createFolder("新しいモデル置き場");
+  // 書き出した資料のフォルダは一覧に出ない
+  mkdirSync(path.join(modelsDir, "exports", "population"), { recursive: true });
+  writeFileSync(path.join(modelsDir, "exports", "population", "slides.pdf"), "");
+  await b.evaluate("localStorage.removeItem('viewer.openFolders')");
+  // 「値を表示」の場面でたたんだ左の欄は、ブラウザが覚えている。開いた状態に戻してから開く
+  await b.evaluate("localStorage.removeItem('viewer.sidebarOpen')");
+  await b.open(url(`${encodeURIComponent("ブルックスの法則")}/brooks_law`));
+  await b.waitFor("document.querySelector('.folder-toggle')");
+  await b.clickText(".folder-name", "事例");
+  await b.clickText(".folder-name", "在庫");
+  await sleep(300);
+  await shot("model-folders", ".models-panel");
+  await b.evaluate("localStorage.removeItem('viewer.openFolders')");
 } finally {
   await b.close();
   await viewer.close();

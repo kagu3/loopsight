@@ -44,7 +44,12 @@ export function Present() {
     try {
       const next = await fetchModel(model);
       if (seq !== loadSeq.current || !sameName(nameRef.current, model)) return;
-      setData(next);
+      // 中身が同じなら出し直さない（フォルダの変更の知らせで読み直したときなど）
+      setData((prev) =>
+        prev?.name === next.name && prev.version === next.version && prev.actual?.version === next.actual?.version && prev.slides?.version === next.slides?.version
+          ? prev
+          : next,
+      );
       setError(undefined);
     } catch (e) {
       if (seq === loadSeq.current) setError(`モデル "${model}" を読めません: ${(e as Error).message}`);
@@ -64,9 +69,11 @@ export function Present() {
     };
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data as string) as ChangeEvent;
+      // フォルダを作った・消した・動かした。開いているモデルのファイルもなくなったかもしれないので、読み直して確かめる
+      if (ev.type === "folders") return void load(nameRef.current);
       if (!sameName(ev.name, nameRef.current)) return;
       if (ev.type === "changed") void load(nameRef.current);
-      else setError(`モデル "${ev.name}" のファイルが消えました。`);
+      else setError(`モデル "${ev.name}" のファイルが見つかりません。動かされたか、消された可能性があります。`);
     };
     const onHash = () => setName(nameFromHash());
     // view_slides は、開き直さずにアドレスの slide= を変えてスライドを切り替える

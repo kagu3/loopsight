@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ModelStore, emptyModel, toGraph, upsertElements } from "../src/core/index.js";
 import type { ChangeEvent, EditErrorResponse, EditResponse, ElementPatch, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
+import { watchTree } from "../src/viewer/watch.js";
 import { reconnectPatches } from "../web/src/editing.js";
 import { cellPatchOf, clearValuePatches, newScenarioPatchOf } from "../web/src/scenarios.js";
 import { tempDir } from "./helpers.js";
@@ -754,3 +755,106 @@ describe("作業フォルダがまだないとき", () => {
   });
 });
 
+
+/** 変更の知らせを受け取り、合うものが届くまで待つ */
+async function waitForEvent(url: string, match: (e: ChangeEvent) => boolean, action: () => Promise<unknown>): Promise<ChangeEvent> {
+  const controller = new AbortController();
+  const res = await fetch(new URL("/api/events", url), { signal: controller.signal });
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const received = (async () => {
+    let text = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("イベントが届く前に切れた");
+      text += decoder.decode(value);
+      for (const m of text.matchAll(/data: (.*)\n\n/g)) {
+        const ev = JSON.parse(m[1]!) as ChangeEvent;
+        if (match(ev)) return ev;
+      }
+    }
+  })();
+  // 接続ができてから変える
+  await new Promise((r) => setTimeout(r, 100));
+  await action();
+  try {
+    return await received;
+  } finally {
+    controller.abort();
+  }
+}
+
+describe("フォルダに分けたモデル", () => {
+  test("一覧にフォルダを出し、フォルダの中のモデルを名前（/ 区切り）で読み書きできる", async () => {
+    const store = new ModelStore(dir);
+    await store.write("ブルックスの法則/brooks_law", population());
+    await mkdir(path.join(dir, "空のフォルダ"));
+    const list = (await get<ModelListResponse>("/api/models")).body;
+    expect(list.models.map((m) => [m.name, m.folder])).toEqual([
+      ["pop", ""],
+      ["ブルックスの法則/brooks_law", "ブルックスの法則"],
+    ]);
+    // 画面のファイルだけがある web/ は出さない
+    expect(list.folders).toEqual([
+      { name: "ブルックスの法則", models: 1 },
+      { name: "空のフォルダ", models: 0 },
+    ]);
+    const encoded = `/api/models/${encodeURIComponent("ブルックスの法則/brooks_law")}`;
+    const v0 = (await get<ModelResponse>(encoded)).body;
+    expect(v0).toMatchObject({ name: "ブルックスの法則/brooks_law", validation: { ok: true } });
+    // / のままでも読める
+    expect((await get<ModelResponse>("/api/models/ブルックスの法則/brooks_law")).body.version).toBe(v0.version);
+    const e1 = await post<EditResponse>(`${encoded}/edit`, { version: v0.version, elements: [{ name: "Rate", behavior: { value: 0.2 } }] });
+    expect(e1.status).toBe(200);
+    expect((await store.read("ブルックスの法則/brooks_law")).elements.find((e) => e.name === "Rate")!.behavior!.value).toBe(0.2);
+    const u = await post<EditResponse>(`${encoded}/undo`, { version: e1.body.model.version });
+    expect(u.status).toBe(200);
+    // 作業フォルダの外は 404
+    expect((await get(`/api/models/${encodeURIComponent("ブルックスの法則/../../secret")}`)).status).toBe(404);
+    expect((await get("/api/models/.hidden%2Fx")).status).toBe(404);
+  });
+
+  test("サブフォルダの中のファイルの変更と、フォルダを作ったり消したりしたことを知らせる", async () => {
+    const store = new ModelStore(dir);
+    await store.write("a/b/m", population());
+    await new Promise((r) => setTimeout(r, 300));
+    const m = population();
+    m.elements.find((e) => e.name === "Rate")!.behavior!.value = 0.3;
+    expect(await waitForEvent(viewer.url, (e) => e.type === "changed", () => store.write("a/b/m", m))).toEqual({ type: "changed", name: "a/b/m" });
+    expect(await waitForEvent(viewer.url, (e) => e.type === "folders", () => store.createFolder("新しい"))).toEqual({ type: "folders" });
+    expect(await waitForEvent(viewer.url, (e) => e.type === "folders", () => store.removeFolder("新しい"))).toEqual({ type: "folders" });
+  });
+
+  test("開いているモデルが動かされたら、元の名前への書き込みは断り、新しいファイルを作らない", async () => {
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    await new ModelStore(dir).moveModel("pop", "移した/pop");
+    const { status, body } = await post<EditErrorResponse>("/api/models/pop/edit", { version: before.version, elements: [{ name: "Rate", behavior: { value: 0.2 } }] });
+    expect(status).toBe(404);
+    expect(body.error).toMatch(/見つかりません/);
+    expect((await post("/api/models/pop/undo", { version: before.version })).status).toBe(404);
+    expect((await get<ModelListResponse>("/api/models")).body.models.map((m) => m.name)).toEqual(["移した/pop"]);
+  });
+});
+
+describe("recursive が使えない環境の見張り方", () => {
+  test("フォルダごとに見張り、あとから作ったフォルダの中の変更にも気づく", async () => {
+    const root = await tempDir();
+    await mkdir(path.join(root, "a"));
+    const seen: string[] = [];
+    const w = watchTree(root, (f) => seen.push(f), { recursive: false });
+    try {
+      expect(w.recursive).toBe(false);
+      await new Promise((r) => setTimeout(r, 200));
+      await writeFile(path.join(root, "a", "x.json"), "{}");
+      await expect.poll(() => seen, { timeout: 3000 }).toContain("a/x.json");
+      await mkdir(path.join(root, "b"));
+      await expect.poll(() => seen, { timeout: 3000 }).toContain("b");
+      // 新しいフォルダを見張り始めるのを待ってから書く
+      await new Promise((r) => setTimeout(r, 300));
+      await writeFile(path.join(root, "b", "y.json"), "{}");
+      await expect.poll(() => seen, { timeout: 3000 }).toContain("b/y.json");
+    } finally {
+      w.close();
+    }
+  });
+});

@@ -1,12 +1,16 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue } from "../core/index.js";
+import type { EditReport, ElementPatch, Equation, FolderInfo, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue } from "../core/index.js";
 
-export type { EditReport, ElementPatch, Equation, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue };
+export type { EditReport, ElementPatch, Equation, FolderInfo, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, Slide, SlideDeck, SlideIssue };
 
-/** GET /api/models */
+/**
+ * GET /api/models。モデルと、一覧に出すフォルダ（モデルがあるフォルダと空のフォルダ）。
+ * モデル名はフォルダを含む作業フォルダからの相対パス（ブルックスの法則/brooks_law）。/api/models/:name などでは encodeURIComponent して送る
+ */
 export interface ModelListResponse {
   dir: string;
   models: ModelInfo[];
+  folders: FolderInfo[];
 }
 
 /** 実行結果。series は要素名 → 各時刻の値（数値にできない値は null） */
@@ -72,11 +76,11 @@ export interface ModelResponse {
   slides?: SlidesResult;
 }
 
-/** GET /api/events で送るイベント。どのモデルのファイルが変わったか */
-export interface ChangeEvent {
-  type: "changed" | "removed";
-  name: string;
-}
+/**
+ * GET /api/events で送るイベント。どのモデルのファイルが変わったか。
+ * folders は、フォルダを作った・消した・動かしたときや、モデルでないファイルが変わったとき（中のどのモデルが変わったかは分からないので、一覧と開いているモデルを読み直す）
+ */
+export type ChangeEvent = { type: "changed" | "removed"; name: string } | { type: "folders" };
 
 /** POST /api/models/:name/edit の本文。elements は MCP の upsert_elements と同じ形 */
 export interface EditRequest {

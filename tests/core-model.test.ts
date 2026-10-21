@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { toModelJSON } from "simulation";
 import {
@@ -43,10 +44,13 @@ describe("ModelJSON の往復", () => {
 describe("作業フォルダ", () => {
   test("フォルダの外を指す名前を拒否する", async () => {
     const store = new ModelStore(await tempDir());
-    for (const bad of ["../x", "a/b", "a\\b", "..", ".hidden", "", "c:x"]) {
+    for (const bad of ["../x", "a\\b", "..", ".hidden", "", "c:x", "/abs", "C:/x", "a//b", "a/", "a/../b", "a/./b", "a/.hidden/b", "a /b"]) {
       expect(() => store.pathOf(bad), bad).toThrow(StoreError);
     }
     expect(() => store.resolveInside("../outside.json")).toThrow(StoreError);
+    expect(() => store.resolveInside("exports/../../outside")).toThrow(StoreError);
+    // 「..」で始まる名前のフォルダは外ではない
+    expect(store.resolveInside("..foo/x.csv")).toBe(path.join(store.dir, "..foo", "x.csv"));
     expect(store.pathOf("人口モデル")).toMatch(/人口モデル\.json$/);
   });
 
