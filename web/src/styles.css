@@ -1263,6 +1263,55 @@ button.edit-tool.danger {
   background: var(--surface-1);
   border-top: 1px solid var(--border);
 }
+/* 図かグラフ・表の片方を右側いっぱいに広げたとき。もう片方は消さずに隠し（ズームや位置、選んでいるものを保つ）、
+   代わりに見出しだけの細い帯（.pane-band）を出す */
+.diagram.is-collapsed,
+.results.is-collapsed {
+  display: none;
+}
+.results.is-expanded {
+  flex: 1 1 auto;
+}
+.pane-band {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 16px;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.pane-band:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+/* 図とグラフ・表の「広げる」（記号だけのボタン）。グラフ・表では上の帯の右端に置き、隣のボタンと高さをそろえる */
+button.expand-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.chart-toolbar .expand-button {
+  margin-left: auto;
+  height: 30px;
+}
+/* 図の右上の道具（「値を表示」と「広げる」）を横に並べる */
+.top-right-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .chart-panel {
   display: flex;
   flex-direction: column;

@@ -16,7 +16,7 @@ import { countProblems, describeProblemCount, listProblems, stripCount } from ".
 import { Problems } from "./Problems.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
 import { clearValuePatches, findScenario, scenarioBadges } from "./scenarios.js";
-import { draggedResultsRatio, parseResultsRatio, RESULTS_RATIO } from "./split.js";
+import { draggedResultsRatio, parseExpandedPane, parseResultsRatio, RESULTS_RATIO, type ExpandedPane } from "./split.js";
 
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
@@ -134,6 +134,45 @@ function saveResultsRatio(ratio: number) {
   }
 }
 
+/** 右側いっぱいに広げている欄（図かグラフ・表）。ブラウザに覚えておく（使えなければ毎回上下に分けた形） */
+const EXPANDED_PANE_KEY = "viewer.expandedPane";
+function loadExpandedPane(): ExpandedPane {
+  try {
+    return parseExpandedPane(localStorage.getItem(EXPANDED_PANE_KEY));
+  } catch {
+    return undefined;
+  }
+}
+function saveExpandedPane(pane: ExpandedPane) {
+  try {
+    localStorage.setItem(EXPANDED_PANE_KEY, pane ?? "none");
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
+/**
+ * 図やグラフ・表の「広げる」。押すと右側いっぱいに広げ（もう片方は見出しだけの帯になる）、広げているときに押すと上下に分けた形に戻す。
+ * グラフ・表の上の帯の凡例を狭めないよう、記号だけにする（外向きの矢印が広げる、内向きが戻す）。言葉は title と aria-label に出す
+ */
+function ExpandButton({ pane, expanded, onChange, className }: { pane: "diagram" | "results"; expanded: ExpandedPane; onChange(pane: ExpandedPane): void; className: string }) {
+  const on = expanded === pane;
+  const name = pane === "diagram" ? "図" : "グラフ・表";
+  const other = pane === "diagram" ? "グラフ・表" : "図";
+  return (
+    <button
+      className={`${className} expand-button`}
+      onClick={() => onChange(on ? undefined : pane)}
+      aria-label={on ? "上下に分けた形に戻す" : `${name}を広げる`}
+      title={on ? "図とグラフ・表を上下に分けた形に戻します" : `${name}を右側いっぱいに広げます。${other}は見出しだけの細い帯になります（帯を押すと戻ります）`}
+    >
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={on ? "M6 2v4H2M2 2l4 4M10 14v-4h4M14 14l-4-4" : "M10 2h4v4M14 2 9 7M6 14H2v-4M2 14l5-5"} />
+      </svg>
+    </button>
+  );
+}
+
 export function App() {
   const [list, setList] = useState<ModelListResponse>();
   const [current, setCurrent] = useState(nameFromHash());
@@ -211,6 +250,24 @@ export function App() {
   // 境界線をドラッグしている間（図の欄の大きさが変わっても、図の見る場所を合わせ直さない）
   const [resizing, setResizing] = useState(false);
   const resultsRatioRef = useRef(resultsRatio);
+  const [expanded, setExpanded] = useState(loadExpandedPane);
+  // 図かグラフ・表を広げた・戻した直後（図の欄の大きさが変わっても、図の見る場所を合わせ直さない）
+  const [switchingPane, setSwitchingPane] = useState(false);
+  // 図を一度でも出したか。グラフ・表を広げた形で開いたときは、図を出すまで描かない（隠れた欄では、図の表示範囲を合わせられないため）
+  const [diagramShown, setDiagramShown] = useState(expanded !== "results");
+  const expandPane = (pane: ExpandedPane) => {
+    saveExpandedPane(pane);
+    setExpanded(pane);
+    // はじめて図を出すときは、ページを開いたときと同じように表示範囲を合わせる
+    if (pane !== "results" && !diagramShown) setDiagramShown(true);
+    else setSwitchingPane(true);
+  };
+  // 図の欄の大きさが変わった描画のあとで、ふだんどおりに戻す（大きさがあとから届いても、図は合わせ直さない）
+  useEffect(() => {
+    if (!switchingPane) return;
+    const id = requestAnimationFrame(() => setSwitchingPane(false));
+    return () => cancelAnimationFrame(id);
+  }, [switchingPane]);
   const resizeStart = useRef<{ y: number; results: number; diagram: number; main: number }>(undefined);
   const mainRef = useRef<HTMLElement>(null);
   const diagramRef = useRef<HTMLDivElement>(null);
@@ -766,8 +823,9 @@ export function App() {
 
   // 編集モードで要素かリンクを選んでいるときは、Delete キーで消す。
   // 文字を消すつもりで押されやすい Backspace は使わない。押しっぱなしの繰り返しは無視する。
-  // 入力欄で打っているときと、左の欄（詳細欄の編集のボタンなど）にいるときは消さない（打ちかけの内容を失わないように）
-  const canRemove = !!removable;
+  // 入力欄で打っているときと、左の欄（詳細欄の編集のボタンなど）にいるときは消さない（打ちかけの内容を失わないように）。
+  // 図を帯にしている間（グラフ・表を広げている）も消さない（見えない要素を消さないように）
+  const canRemove = !!removable && expanded !== "results";
   useEffect(() => {
     if (!canRemove) return;
     const onKey = (e: KeyboardEvent) => {
@@ -943,69 +1001,94 @@ export function App() {
           </div>
         )}
 
-        {/* 編集モードの間は、図の窓の色と縁を変える（図の形を変えられると一目でわかるように） */}
-        <div className={`diagram ${editMode && graph && data ? "is-editing" : ""}`} ref={diagramRef}>
+        {/* グラフ・表を広げている間の、図の見出しだけの帯。押すと上下に分けた形に戻す */}
+        {expanded === "results" && (
+          <button className="pane-band" onClick={() => expandPane(undefined)} title="図とグラフ・表を上下に分けた形に戻します">
+            図 ▼
+          </button>
+        )}
+
+        {/* 編集モードの間は、図の窓の色と縁を変える（図の形を変えられると一目でわかるように）。
+            帯にしている間も図は消さずに隠すだけにする（ズームや位置、ライブの更新をそのまま保つ） */}
+        <div className={`diagram ${editMode && graph && data ? "is-editing" : ""} ${expanded === "results" ? "is-collapsed" : ""}`} ref={diagramRef}>
           {graph && data ? (
-            <ReactFlowProvider>
-              <Diagram
-                graph={graph}
-                modelName={data.name}
-                selected={selected}
-                changed={changed}
-                values={finalValues}
-                onSelect={selectElement}
-                onMove={move}
-                scenario={scenarioMarks}
-                editable={editMode}
-                onEditableChange={changeEditMode}
-                keepView={data.version === keepView}
-                holdView={resizing}
-                onAdd={addElement}
-                selectedLink={selectedLink}
-                onSelectLink={selectLink}
-                onLink={addLink}
-                onReconnect={reconnectFlow}
-                removable={removable}
-                onRemove={removeSelected}
-                liveValues={liveValues}
-                valueTools={valueTools}
-                formula={selectedFormula}
-              />
-            </ReactFlowProvider>
+            diagramShown && (
+              <ReactFlowProvider>
+                <Diagram
+                  graph={graph}
+                  modelName={data.name}
+                  selected={selected}
+                  changed={changed}
+                  values={finalValues}
+                  onSelect={selectElement}
+                  onMove={move}
+                  scenario={scenarioMarks}
+                  editable={editMode}
+                  onEditableChange={changeEditMode}
+                  keepView={data.version === keepView}
+                  holdView={resizing || switchingPane}
+                  onAdd={addElement}
+                  selectedLink={selectedLink}
+                  onSelectLink={selectLink}
+                  onLink={addLink}
+                  onReconnect={reconnectFlow}
+                  removable={removable}
+                  onRemove={removeSelected}
+                  liveValues={liveValues}
+                  valueTools={valueTools}
+                  formula={selectedFormula}
+                  paneTools={<ExpandButton pane="diagram" expanded={expanded} onChange={expandPane} className="edit-toggle" />}
+                />
+              </ReactFlowProvider>
+            )
           ) : (
             !error && <p className="muted pad">読み込んでいます…</p>
           )}
         </div>
 
-        {/* 境界線。上下にドラッグして下の欄の高さを変える（狭い画面では出さない） */}
-        <div
-          className={`splitter ${resizing ? "dragging" : ""}`}
-          role="separator"
-          aria-orientation="horizontal"
-          title="上下にドラッグして、図とグラフの高さを変えます"
-          onPointerDown={(e) => {
-            const main = mainRef.current?.getBoundingClientRect();
-            const diagram = diagramRef.current?.getBoundingClientRect();
-            const results = resultsRef.current?.getBoundingClientRect();
-            if (e.button !== 0 || !main || !diagram || !results) return;
-            e.preventDefault();
-            e.currentTarget.setPointerCapture(e.pointerId);
-            resizeStart.current = { y: e.clientY, results: results.height, diagram: diagram.height, main: main.height };
-            setResizing(true);
-          }}
-          onPointerMove={(e) => {
-            const start = resizeStart.current;
-            if (!start) return;
-            resultsRatioRef.current = draggedResultsRatio(start, e.clientY - start.y);
-            setResultsRatio(resultsRatioRef.current);
-          }}
-          onPointerUp={endResize}
-          onPointerCancel={endResize}
-          // ほかの理由でキャプチャが外れたとき（狭い画面になって境界線が消えたなど）も終える
-          onLostPointerCapture={endResize}
-        />
+        {/* 境界線。上下にドラッグして下の欄の高さを変える（狭い画面と、どちらかを広げている間は出さない） */}
+        {!expanded && (
+          <div
+            className={`splitter ${resizing ? "dragging" : ""}`}
+            role="separator"
+            aria-orientation="horizontal"
+            title="上下にドラッグして、図とグラフの高さを変えます"
+            onPointerDown={(e) => {
+              const main = mainRef.current?.getBoundingClientRect();
+              const diagram = diagramRef.current?.getBoundingClientRect();
+              const results = resultsRef.current?.getBoundingClientRect();
+              if (e.button !== 0 || !main || !diagram || !results) return;
+              e.preventDefault();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              resizeStart.current = { y: e.clientY, results: results.height, diagram: diagram.height, main: main.height };
+              setResizing(true);
+            }}
+            onPointerMove={(e) => {
+              const start = resizeStart.current;
+              if (!start) return;
+              resultsRatioRef.current = draggedResultsRatio(start, e.clientY - start.y);
+              setResultsRatio(resultsRatioRef.current);
+            }}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            // ほかの理由でキャプチャが外れたとき（狭い画面になって境界線が消えたなど）も終える
+            onLostPointerCapture={endResize}
+          />
+        )}
 
-        <div className="results" ref={resultsRef} style={{ "--results-ratio": resultsRatio } as CSSProperties}>
+        {/* 図を広げている間の、グラフ・表の見出しだけの帯。押すと上下に分けた形に戻す */}
+        {expanded === "diagram" && (
+          <button className="pane-band" onClick={() => expandPane(undefined)} title="図とグラフ・表を上下に分けた形に戻します">
+            グラフ・表 ▲
+          </button>
+        )}
+
+        {/* 帯にしている間もグラフ・表は消さずに隠すだけにする（選んでいる要素や表の切り替えを保つ） */}
+        <div
+          className={`results ${expanded === "diagram" ? "is-collapsed" : expanded === "results" ? "is-expanded" : ""}`}
+          ref={resultsRef}
+          style={{ "--results-ratio": resultsRatio } as CSSProperties}
+        >
           {data?.run ? (
             <Chart
               modelName={data.name}
@@ -1021,6 +1104,7 @@ export function App() {
               onRemoveScenarioValue={removeScenarioValue}
               onFocusScenario={setHoveredScenario}
               onHoverTime={showValues ? setHoverTime : undefined}
+              tools={<ExpandButton pane="results" expanded={expanded} onChange={expandPane} className="toolbar-button" />}
             />
           ) : data ? (
             <p className="muted pad">エラーがあるため実行できません。左の欄の「問題」を見てください。</p>
