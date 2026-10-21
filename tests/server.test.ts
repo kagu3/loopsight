@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、18 個のツールが見える", async () => {
+  test("クライアントから接続でき、23 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     expect(client.getInstructions()).toMatch(/「説明資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
@@ -57,6 +57,7 @@ describe("MCP server", () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
+        "create_folder",
         "create_model",
         "export_slides",
         "find_loops",
@@ -65,7 +66,11 @@ describe("MCP server", () => {
         "import_model",
         "layout_model",
         "list_models",
+        "move_folder",
+        "move_model",
         "remove_elements",
+        "remove_folder",
+        "remove_model",
         "run_simulation",
         "set_scenarios",
         "set_simulation",
@@ -527,5 +532,76 @@ describe("MCP server", () => {
     expect((await readdir(path.join(folder, "images"))).sort()).toEqual(["01-cause.png"]);
     expect(await readdir(path.join(folder, "data")).catch(() => [])).toEqual([]);
     expect(await readFile(path.join(folder, "メモ.txt"), "utf8")).toBe("残す");
+  }, 90_000);
+});
+
+describe("フォルダに分けたモデル", () => {
+  test("「フォルダ/名前」でモデルを作り、今までどおり読み書き・実行でき、list_models でフォルダが分かる", async () => {
+    const made = await call("create_model", { model: "ブルックスの法則/brooks_law" });
+    expect(made.file).toBe(path.join(dir, "ブルックスの法則", "brooks_law.json"));
+    await call("upsert_elements", { model: "ブルックスの法則/brooks_law", elements: SIR });
+    expect(await call("get_model", { model: "ブルックスの法則/brooks_law" })).toMatchObject({ model: "ブルックスの法則/brooks_law", title: "brooks_law" });
+    const run = await call("run_simulation", { model: "ブルックスの法則/brooks_law", elements: ["Infected"], samples: 0 });
+    expect(run.model).toBe("ブルックスの法則/brooks_law");
+    const data = await call("import_data", { model: "ブルックスの法則/brooks_law", content: "Day,Infected\n0,10\n" });
+    expect(data.file).toBe(path.join(dir, "ブルックスの法則", "brooks_law.data.csv"));
+    // 中身に名前のない ModelJSON をフォルダに取り込むと、表示名はフォルダを除いた名前（create_model と同じ）
+    await call("import_model", { model: "取り込み/inline", content: JSON.stringify({ elements: [] }) });
+    expect(await call("get_model", { model: "取り込み/inline" })).toMatchObject({ title: "inline" });
+    await call("remove_model", { model: "取り込み/inline" });
+    await call("remove_folder", { folder: "取り込み" });
+    await call("create_model", { model: "coffee" });
+    await call("create_folder", { folder: "あとで" });
+    const list = await call("list_models");
+    expect(list.models.map((m: any) => [m.name, m.folder])).toEqual([
+      ["coffee", ""],
+      ["ブルックスの法則/brooks_law", "ブルックスの法則"],
+    ]);
+    expect(list.folders).toEqual([
+      { name: "あとで", models: 0 },
+      { name: "ブルックスの法則", models: 1 },
+    ]);
+    // 作業フォルダの外を指す名前は断る
+    expect(await callError("create_model", { model: "../outside" })).toMatch(/使えない文字/);
+    expect(await callError("create_folder", { folder: "a/../../x" })).toMatch(/使えない文字/);
+  });
+
+  test("move_model・move_folder・remove_folder・remove_model で、付属のファイルごと動かしたり消したりする", async () => {
+    await call("create_model", { model: "bullwhip" });
+    await call("upsert_elements", { model: "bullwhip", elements: SIR });
+    await call("import_data", { model: "bullwhip", content: "Day,Infected\n0,10\n" });
+    const moved = await call("move_model", { model: "bullwhip", to: "在庫/bullwhip" });
+    expect(moved).toMatchObject({ model: "在庫/bullwhip", from: "bullwhip" });
+    expect((await readdir(path.join(dir, "在庫"))).sort()).toEqual(["bullwhip.data.csv", "bullwhip.json"]);
+    await call("create_model", { model: "bullwhip" });
+    expect(await callError("move_model", { model: "bullwhip", to: "在庫/bullwhip" })).toMatch(/同じ名前/);
+
+    const folder = await call("move_folder", { folder: "在庫", to: "事例/在庫" });
+    expect(folder.models).toEqual(["事例/在庫/bullwhip"]);
+    expect((await call("validate_model", { model: "事例/在庫/bullwhip" })).ok).toBe(true);
+    expect(await callError("remove_folder", { folder: "事例" })).toMatch(/ファイルがある/);
+
+    const removed = await call("remove_model", { model: "事例/在庫/bullwhip" });
+    expect(removed.files.map((f: string) => path.basename(f)).sort()).toEqual(["bullwhip.data.csv", "bullwhip.json"]);
+    await call("remove_folder", { folder: "事例" });
+    expect((await readdir(dir)).sort()).toEqual(["bullwhip.json"]);
+    const { tools } = await client.listTools();
+    expect(tools.find((t) => t.name === "remove_model")!.description).toMatch(/使う前に.*人に.*確かめる/);
+  });
+
+  test("export_slides の既定の書き出し先は exports/<フォルダ>/<名前>/（ブラウザと画面のビルドがあるとき）", async () => {
+    await call("create_model", { model: "事例/p" });
+    await call("upsert_elements", { model: "事例/p", elements: SIR });
+    await call("set_slides", { model: "事例/p", slides: [{ kind: "conclusion", title: "結論", message: "対策が要る" }] });
+    const res = await client.callTool({ name: "export_slides", arguments: { model: "事例/p" } });
+    const text = (res.content as { text: string }[])[0]!.text;
+    if (res.isError) {
+      expect(JSON.parse(text).error).toMatch(/Edge か Chrome|ビルド/);
+      return;
+    }
+    expect(JSON.parse(text).dir).toBe(path.join(dir, "exports", "事例", "p"));
+    expect(await readdir(path.join(dir, "exports", "事例", "p"))).toContain("slides.pdf");
+    // 書き出した資料のフォルダは、一覧に出さない
+    expect((await call("list_models")).folders).toEqual([{ name: "事例", models: 1 }]);
   }, 90_000);
 });

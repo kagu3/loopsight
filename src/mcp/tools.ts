@@ -18,6 +18,7 @@ import {
   ModelStore,
   StoreError,
   TIME_UNITS,
+  checkModelName,
   checkActualData,
   checkDiagram,
   checkSlides,
@@ -66,7 +67,11 @@ import { hasFigure, slideCSV, slideFileBase, slidesMarkdown, type SlideFiles } f
 
 // ---- 入力の形 ----
 
-const modelName = z.string().min(1).describe("モデル名（作業フォルダの <モデル名>.json）");
+const modelName = z
+  .string()
+  .min(1)
+  .describe("モデル名（作業フォルダの <モデル名>.json）。サブフォルダのモデルは、作業フォルダからの相対パスを / 区切りで（例: ブルックスの法則/brooks_law）");
+const folderName = z.string().min(1).describe("フォルダ名。作業フォルダからの相対パスを / 区切りで（例: ブルックスの法則、事例/在庫）");
 const equation = z.union([z.string(), z.number(), z.boolean()]);
 const overrides = z
   .record(z.string(), equation)
@@ -226,6 +231,8 @@ function timestamp(): string {
 
 const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデルを作り、実行し、分析するためのツールです（Loopsight）。モデルの形式は Insight Maker の ModelJSON です。
 モデルは作業フォルダに ModelJSON ファイル（<モデル名>.json）として保存されます。
+関係のあるモデルはサブフォルダにまとめられます（何段でも）。モデル名は作業フォルダからの相対パス（/ 区切り、.json なし。例: ブルックスの法則/brooks_law）で、直下のモデルはファイル名だけです。実際のデータ（<モデル名>.data.csv）と筋書き（<モデル名>.slides.json）はモデルと同じフォルダに置きます。
+list_models でモデルとフォルダの一覧を見られます（ビューアの一覧と同じ。作業フォルダの中の実際のフォルダのとおりに並ぶ）。フォルダは create_folder で作り、move_folder で動かし・名前を変え、remove_folder で空のものを消します。モデルは move_model で動かし・名前を変え、remove_model で消します（消すと戻せないので、使う前に人に確かめる）。
 
 進め方:
 1. create_model か import_model でモデルを用意する
@@ -244,7 +251,7 @@ b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 
    - 比較（compare）：比べるシナリオと要素、注目する時点。「元のモデル」はいつも重なる
    - 結論（conclusion）：文章だけ
 c. view_slides でスライドを画像にして 1 枚ずつ確かめ、言いたいことがグラフから読み取れなければ直す。人はビューアの発表モード（http://localhost:5180/?view=present#<モデル名>）で ← → を押して見せる
-d. 資料を送るときは export_slides でフォルダ（既定は exports/<モデル名>/）に書き出す。slides.pdf（1 スライド 1 ページ。そのまま送れる）、slides.md（骨子）、images/（グラフや図だけの画像）、data/（グラフの値の CSV）ができる。正式な提案資料を作るときは、slides.md と images/・data/ を素材に使う
+d. 資料を送るときは export_slides でフォルダ（既定は exports/<モデル名>/。フォルダにあるモデルは exports/<フォルダ>/<名前>/）に書き出す。slides.pdf（1 スライド 1 ページ。そのまま送れる）、slides.md（骨子）、images/（グラフや図だけの画像）、data/（グラフの値の CSV）ができる。正式な提案資料を作るときは、slides.md と images/・data/ を素材に使う
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -290,18 +297,24 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     "list_models",
     {
       title: "モデル一覧",
-      description: "作業フォルダにあるモデルの一覧を返す。",
+      description:
+        "作業フォルダにあるモデルと、フォルダの一覧を返す（ビューアの左の欄の一覧と同じもの）。サブフォルダの中も（何段でも）たどる。" +
+        "models の name はモデル名（作業フォルダからの相対パス、/ 区切り）、folder はモデルのあるフォルダ（直下なら空の文字列）。" +
+        "folders は、中に（サブフォルダの中も含めて）モデルがあるフォルダと、空のフォルダ（models が 0）。親のすぐあとに子が並ぶ。" +
+        "モデルでないファイルだけがあるフォルダ（exports/ や output/ のような書き出し先）と、先頭が . のフォルダは出さない。",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
-    handle(async () => ({ models_dir: store.dir, models: await store.list() })),
+    handle(async () => ({ models_dir: store.dir, ...(await store.tree()) })),
   );
 
   server.registerTool(
     "create_model",
     {
       title: "モデルを作る",
-      description: "空のモデルを作って保存する。既定のシミュレーション設定は 0 から 100 年、刻み 1、RK1。",
+      description:
+        "空のモデルを作って保存する。既定のシミュレーション設定は 0 から 100 年、刻み 1、RK1。" +
+        "model に「フォルダ/名前」を渡すと、そのフォルダに作る（フォルダがなければ作る）。",
       inputSchema: {
         model: modelName,
         title: z.string().optional().describe("モデルの表示名（省略するとモデル名）"),
@@ -314,7 +327,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       if (!a.overwrite && (await store.exists(a.model))) {
         throw new StoreError(`モデル "${a.model}" はすでにあります。上書きするなら overwrite: true を付けてください。`);
       }
-      const m = emptyModel(a.title ?? a.model);
+      // 表示名を省略したら、フォルダを除いた名前にする
+      const m = emptyModel(a.title ?? checkModelName(a.model).split("/").at(-1)!);
       if (a.description) m.description = a.description;
       if (a.simulation) setSimulation(m, a.simulation);
       const file = await store.write(a.model, m);
@@ -331,7 +345,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       inputSchema: {
         path: z.string().optional().describe("取り込むファイルのパス（絶対パス、またはカレントか作業フォルダからの相対パス）"),
         content: z.string().optional().describe("ファイルの中身を直接渡す場合"),
-        model: z.string().optional().describe("保存するモデル名（省略するとファイル名）"),
+        model: z.string().optional().describe("保存するモデル名（省略するとファイル名）。「フォルダ/名前」でそのフォルダに保存する（フォルダがなければ作る）"),
         overwrite: z.boolean().optional(),
       },
     },
@@ -344,12 +358,96 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         text = await readInputFile(store, p);
         base ??= toModelName(path.basename(p).replace(/\.json$/i, ""));
       }
-      const { model, warnings } = importModelText(text, base);
-      const name = toModelName(base ?? model.name ?? "imported");
+      // 中身に名前がないときの表示名は、フォルダを除いた名前にする（create_model と同じ）
+      const { model, warnings } = importModelText(text, base?.split("/").at(-1));
+      // 名前を指定したら、フォルダを含めてそのまま使う（使えない文字があれば断る）。ファイル名などから決めるときは、使えない文字を _ にする
+      const name = a.model !== undefined ? checkModelName(a.model) : toModelName(base ?? model.name ?? "imported");
       if (!a.overwrite && (await store.exists(name))) {
         throw new StoreError(`モデル "${name}" はすでにあります。別の名前（model）を付けるか overwrite: true を付けてください。`);
       }
       return saveAndCheck(name, model, { warnings, summary: summarizeModel(model) });
+    }),
+  );
+
+  server.registerTool(
+    "move_model",
+    {
+      title: "モデルを動かす・名前を変える",
+      description:
+        "モデルを別のフォルダへ動かすか、名前を変える。to は新しいモデル名（「フォルダ/名前」。直下へ戻すときは名前だけ）。" +
+        "付属のファイル（<名前>.data.csv の実際のデータ、<名前>.slides.json の筋書き）もいっしょに動かす。exports/ に書き出した資料は動かさない。" +
+        "行き先のフォルダがなければ作る。行き先に同じ名前のモデル（か付属のファイル）があれば断る。",
+      inputSchema: {
+        model: modelName,
+        to: z.string().min(1).describe("新しいモデル名（例: ブルックスの法則/brooks_law_detailed）"),
+      },
+    },
+    handle(async (a: { model: string; to: string }) => {
+      const r = await store.moveModel(a.model, a.to);
+      return { model: r.to, from: r.from, files: r.files };
+    }),
+  );
+
+  server.registerTool(
+    "remove_model",
+    {
+      title: "モデルを消す",
+      description:
+        "モデルを消す。<名前>.json と、付属のファイル（<名前>.data.csv の実際のデータ、<名前>.slides.json の筋書き）をいっしょに消す。" +
+        "exports/ に書き出した資料は消さない（もう人に送ったかもしれないため）。" +
+        "消したファイルは戻せないので、使う前に、どのモデルを消すかを人に伝えて、消してよいか確かめること。",
+      inputSchema: { model: modelName },
+      annotations: { destructiveHint: true },
+    },
+    handle(async (a: { model: string }) => {
+      const r = await store.removeModel(a.model);
+      return { removed: r.model, files: r.files };
+    }),
+  );
+
+  server.registerTool(
+    "create_folder",
+    {
+      title: "フォルダを作る",
+      description:
+        "作業フォルダの中に、空のフォルダを作る（「親/子」でサブフォルダも。途中のフォルダがなければ作る）。すでにあれば何もせず created: false を返す。" +
+        "空のフォルダもビューアの一覧に出る。モデルをフォルダに作るだけなら、create_model に「フォルダ/名前」を渡せばよい。",
+      inputSchema: { folder: folderName },
+    },
+    handle(async (a: { folder: string }) => store.createFolder(a.folder)),
+  );
+
+  server.registerTool(
+    "move_folder",
+    {
+      title: "フォルダを動かす・名前を変える",
+      description:
+        "フォルダを別の場所へ動かすか、名前を変える（中のモデルと付属のファイル、サブフォルダごと）。to は新しいフォルダ名（作業フォルダからの相対パス）。" +
+        "行き先の親のフォルダがなければ作る。行き先に同じ名前のフォルダかファイルがあれば断る。exports/ に書き出した資料は動かさない。" +
+        "結果の models は、動かしたあとのモデル名。",
+      inputSchema: {
+        folder: folderName,
+        to: z.string().min(1).describe("新しいフォルダ名（例: 事例/ブルックスの法則）"),
+      },
+    },
+    handle(async (a: { folder: string; to: string }) => {
+      const r = await store.moveFolder(a.folder, a.to);
+      return { folder: r.to, from: r.from, models: r.models };
+    }),
+  );
+
+  server.registerTool(
+    "remove_folder",
+    {
+      title: "空のフォルダを消す",
+      description:
+        "空のフォルダを消す（空のサブフォルダだけがあるときは、それもいっしょに消す）。中にファイルが 1 つでもあれば消さない。" +
+        "中のモデルは、先に remove_model で消すか、move_model でほかへ動かす。",
+      inputSchema: { folder: folderName },
+    },
+    handle(async (a: { folder: string }) => {
+      const r = await store.removeFolder(a.folder);
+      return { removed: r.folder, dir: r.dir };
     }),
   );
 
@@ -876,7 +974,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "説明資料をフォルダに書き出す",
       description:
-        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、フォルダに書き出す。書き出し先は作業フォルダの中（既定は exports/<モデル名>/）。" +
+        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、フォルダに書き出す。書き出し先は作業フォルダの中（既定は exports/<モデル名>/。フォルダにあるモデルは exports/<フォルダ>/<名前>/）。" +
         "フォルダの中身：slides.pdf（1 スライド 1 ページの PDF。ページは 16:9 で、フォントを埋め込むので、そのまま送れる）、" +
         "slides.md（骨子。資料の題、モデル、書き出した日時と、スライドごとの種類・見出し・言いたいこと・注目する要素や時点・ループ・シナリオの変える値・比較の値の表、画像と CSV へのリンク）、" +
         "images/<番号>-<種類>.png（グラフや図だけの画像。見出しと言いたいことは入れない。問題と比較はグラフ、原因はループを目立たせた図。解決案と結論にはない）、" +
@@ -886,7 +984,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "名前がモデルに合わないところ（errors）があれば書き出さない。Edge か Chrome が必要。",
       inputSchema: {
         model: modelName,
-        path: z.string().optional().describe("書き出すフォルダ。作業フォルダからの相対パス（既定は exports/<モデル名>）"),
+        path: z.string().optional().describe("書き出すフォルダ。作業フォルダからの相対パス（既定は exports/<モデル名>。フォルダにあるモデルは exports/<フォルダ>/<名前>）"),
         width: z.number().int().min(640).max(3840).optional().describe("images/ の画像の幅（既定 1280。高さはグラフや図に合わせる）"),
       },
     },
@@ -898,7 +996,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
       if (errors.length) throw new ModelError(`筋書きに直すところが ${errors.length} つあるため、書き出しませんでした。`, errors);
       if (!deck.slides.length) throw new StoreError(`モデル "${a.model}" の筋書きにスライドがありません。`);
-      const rel = a.path ?? path.join("exports", a.model);
+      const rel = a.path ?? path.join("exports", ...checkModelName(a.model).split("/"));
       if (rel.toLowerCase().endsWith(".pdf")) throw new StoreError(`path には書き出すフォルダを指定してください（"${rel}" は PDF のファイル名に見えます）。`);
       const dir = store.resolveInside(rel);
       if (path.relative(store.dir, dir) === "") throw new StoreError("作業フォルダそのものには書き出せません。exports/<モデル名> のようなフォルダを指定してください。");

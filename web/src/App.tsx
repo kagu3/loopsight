@@ -1,7 +1,7 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
-import { fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
+import { FetchError, fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
@@ -14,6 +14,8 @@ import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { findLink, sameName } from "../../src/core/modeljson.js";
 import { countProblems, describeProblemCount, listProblems, stripCount } from "./problemList.js";
 import { Problems } from "./Problems.js";
+import { ModelTree } from "./ModelTree.js";
+import { folderKey, foldersOf, modelHash, modelTree } from "./modelList.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
 import { clearValuePatches, findScenario, scenarioBadges } from "./scenarios.js";
 import { draggedResultsRatio, parseExpandedPane, parseResultsRatio, RESULTS_RATIO, type ExpandedPane } from "./split.js";
@@ -99,6 +101,27 @@ function saveSidebarOpen(open: boolean) {
     // 覚えられなくても動く
   }
 }
+
+/** モデルの一覧で開いているフォルダ（folderKey の並び）。ブラウザに覚えておく（使えなければ毎回閉じた状態） */
+const OPEN_FOLDERS_KEY = "viewer.openFolders";
+function loadOpenFolders(): Set<string> {
+  try {
+    const v = JSON.parse(localStorage.getItem(OPEN_FOLDERS_KEY) ?? "[]") as unknown;
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveOpenFolders(open: Set<string>) {
+  try {
+    localStorage.setItem(OPEN_FOLDERS_KEY, JSON.stringify([...open]));
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
+/** 開いているモデルのファイルが、ほかから動かされたり消されたりしたときの知らせ */
+const goneMessage = (name: string) => `モデル "${name}" のファイルが見つかりません。動かされたか、消された可能性があります。左の欄の「モデル」の一覧から選び直してください。`;
 
 /** 図の要素に値を出すか（図の欄の「値を表示」）。ブラウザに覚えておく（使えなければ毎回オフ） */
 const SHOW_VALUES_KEY = "viewer.diagramValues";
@@ -246,6 +269,44 @@ export function App() {
       saveModelsOpen(!open);
       return !open;
     });
+  // モデルの一覧で開いているフォルダ
+  const [openFolders, setOpenFolders] = useState(loadOpenFolders);
+  const toggleFolder = useCallback((path: string) => {
+    setOpenFolders((prev) => {
+      const next = new Set(prev);
+      const key = folderKey(path);
+      if (!next.delete(key)) next.add(key);
+      saveOpenFolders(next);
+      return next;
+    });
+  }, []);
+  const tree = useMemo(() => (list ? modelTree(list) : []), [list]);
+  // 選んでいるモデルが入っているフォルダは開いておく（閉じたければ、そのあとで閉じられる）
+  useEffect(() => {
+    const keys = foldersOf(current).map(folderKey);
+    if (!keys.length) return;
+    setOpenFolders((prev) => {
+      if (keys.every((k) => prev.has(k))) return prev;
+      const next = new Set([...prev, ...keys]);
+      saveOpenFolders(next);
+      return next;
+    });
+  }, [current]);
+  // ファイルがなくなったと知らせたモデルの名前。また読めたら外す
+  const goneRef = useRef<string>(undefined);
+  /**
+   * 開いているモデルのファイルがなくなった（ほかから動かされた・消された）。いまの内容は出したままにし、そのことを知らせる。
+   * 選び直せるよう、左の欄とモデルの一覧を開く。書き込もうとしても、サーバーが断る（新しいファイルは作らない）。
+   * 同じモデルについて知らせ済みなら、開き直さない（exports/ への書き出しなどで読み直すたびに、人が閉じた欄を開かないように）
+   */
+  const modelGone = useCallback((name: string) => {
+    setError(goneMessage(name));
+    if (sameModel(goneRef.current, name)) return;
+    goneRef.current = name;
+    setSidebarOpen(true);
+    setModelsOpen(true);
+    saveModelsOpen(true);
+  }, []);
   const [resultsRatio, setResultsRatio] = useState(loadResultsRatio);
   // 境界線をドラッグしている間（図の欄の大きさが変わっても、図の見る場所を合わせ直さない）
   const [resizing, setResizing] = useState(false);
@@ -310,6 +371,7 @@ export function App() {
     if (highlight) externalSeq.current++;
     const diff = highlight ? changedElements(dataRef.current, next) : new Set<string>();
     dataRef.current = next;
+    goneRef.current = undefined;
     setData(next);
     setRenamed(renames);
     if (renames.length) {
@@ -353,14 +415,21 @@ export function App() {
         ) {
           // 中身は同じ（画面から書き込んだ結果の知らせなど）。元に戻せる回数だけ変わることがある（サーバーを起動し直したときなど）
           if (prev.undo_available !== next.undo_available) show(next, false);
+          // 動かされたモデルが元の場所に戻ったときは、「見つかりません」の知らせを消す
+          else if (goneRef.current !== undefined) {
+            goneRef.current = undefined;
+            setError(undefined);
+          }
           return;
         }
         show(next, true);
       } catch (e) {
-        setError(`モデル "${name}" を読めません: ${(e as Error).message}`);
+        // 読めていたモデルのファイルがなくなったときは、なくなったと知らせる（はじめから見つからないときは、サーバーの文をそのまま出す）
+        if (e instanceof FetchError && e.status === 404 && sameModel(dataRef.current?.name, name)) modelGone(name);
+        else setError(`モデル "${name}" を読めません: ${(e as Error).message}`);
       }
     },
-    [show],
+    [show, modelGone],
   );
 
   // 一覧と変更の知らせ
@@ -384,9 +453,11 @@ export function App() {
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data as string) as ChangeEvent;
       void loadList();
-      if (ev.name.toLowerCase() === currentRef.current.toLowerCase()) {
+      // フォルダを作った・消した・動かした。開いているモデルのファイルもなくなったかもしれないので、読み直して確かめる
+      if (ev.type === "folders") void loadModel(currentRef.current);
+      else if (ev.name.toLowerCase() === currentRef.current.toLowerCase()) {
         if (ev.type === "changed") void loadModel(currentRef.current);
-        else setError(`モデル "${ev.name}" のファイルが消えました。`);
+        else modelGone(ev.name);
       }
     };
     const onHash = () => setCurrent(nameFromHash());
@@ -395,13 +466,13 @@ export function App() {
       es.close();
       window.removeEventListener("hashchange", onHash);
     };
-  }, [loadList, loadModel]);
+  }, [loadList, loadModel, modelGone]);
 
   // 何も開いていなければ、いちばん最近変わったモデルを開く
   useEffect(() => {
     if (current || !list?.models.length) return;
     const latest = [...list.models].sort((a, b) => b.modified.localeCompare(a.modified))[0]!;
-    location.hash = encodeURIComponent(latest.name);
+    location.hash = modelHash(latest.name);
   }, [list, current]);
 
   useEffect(() => {
@@ -919,16 +990,7 @@ export function App() {
           {modelsOpen && (
             <>
               {list && list.models.length === 0 && <p className="muted">作業フォルダ（{list.dir}）にモデルがありません。</p>}
-              <ul className="model-list">
-                {list?.models.map((m) => (
-                  <li key={m.name}>
-                    <a href={`#${encodeURIComponent(m.name)}`} className={m.name === current ? "on" : ""}>
-                      <span className="model-name">{m.name}</span>
-                      {m.title && m.title !== m.name && <span className="model-title">{m.title}</span>}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+              <ModelTree nodes={tree} current={current} open={openFolders} onToggle={toggleFolder} />
             </>
           )}
         </section>
@@ -968,7 +1030,7 @@ export function App() {
               {graph.missingCoordinates && <InfoTip text="座標のない要素を仮に並べています。「図を編集」で動かすと、この配置を保存します" />}
               <a
                 className="toolbar-button"
-                href={`?view=present#${encodeURIComponent(data.name)}`}
+                href={`?view=present${modelHash(data.name)}`}
                 target="_blank"
                 rel="noopener"
                 title={

@@ -301,6 +301,56 @@ h2 {
   font-size: 12px;
   color: var(--text-secondary);
 }
+/* フォルダの中のモデルとフォルダは、段ごとに字下げする（--depth は何段目か） */
+.model-list a,
+.folder-toggle,
+.folder-empty {
+  padding-left: calc(8px + var(--depth, 0) * 14px);
+}
+.folder-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-right: 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.folder-toggle:hover {
+  background: var(--surface-2);
+}
+.folder-toggle .chevron {
+  width: 10px;
+  flex: none;
+  color: var(--text-secondary);
+}
+.folder-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-toggle .count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.models-panel .model-list .model-list {
+  margin-top: 0;
+}
+.panel p.folder-empty {
+  margin: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 12px;
+}
 
 .issues {
   list-style: none;

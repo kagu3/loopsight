@@ -1,4 +1,3 @@
-import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -45,6 +44,7 @@ import {
   type SlidesResult,
   type UndoRequest,
 } from "./api.js";
+import { watchTree } from "./watch.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
 // 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios と同じ処理を通す）。
@@ -283,36 +283,52 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
   const store = new ModelStore(options.modelsDir);
   const clients = new Set<ServerResponse>();
 
-  // 作業フォルダの監視。同じファイルの変更が続けて届くので、少し待ってからまとめて送る
+  // 作業フォルダの監視（サブフォルダの中も）。同じファイルの変更が続けて届くので、少し待ってからまとめて送る
   const pending = new Map<string, NodeJS.Timeout>();
-  let watcher: FSWatcher | undefined;
-  const notify = (file: string) => {
-    // 実際のデータ（<モデル名>.data.csv）や筋書き（<モデル名>.slides.json）が変わったら、そのモデルが変わったと知らせる
-    const lower = file.toLowerCase();
-    const suffix = [".data.csv", ".slides.json"].find((x) => lower.endsWith(x));
-    if (!suffix && !lower.endsWith(".json")) return;
-    const name = suffix ? file.slice(0, -suffix.length) : file.replace(/\.json$/i, "");
-    clearTimeout(pending.get(name));
+  const send = (event: ChangeEvent) => {
+    for (const c of clients) c.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+  /** key ごとに、最後の変更から少し待ってから task を動かす */
+  const later = (key: string, task: () => Promise<void> | void) => {
+    clearTimeout(pending.get(key));
     pending.set(
-      name,
-      setTimeout(async () => {
-        pending.delete(name);
-        const exists = await stat(path.join(store.dir, suffix ? `${name}.json` : file)).then(
-          () => true,
-          () => false,
-        );
-        // CSV や筋書きだけがあってモデルがなければ、知らせない（モデルが消えたわけではない）
-        if (suffix && !exists) return;
-        const event: ChangeEvent = { type: exists ? "changed" : "removed", name };
-        for (const c of clients) c.write(`data: ${JSON.stringify(event)}\n\n`);
+      key,
+      setTimeout(() => {
+        pending.delete(key);
+        void task();
       }, 150),
     );
   };
+  const notify = (file: string) => {
+    // 先頭が . のファイルやフォルダ（.DS_Store、.git など）と、書き込みの途中の一時ファイルは見ない
+    if (file.split("/").some((part) => part.startsWith(".")) || file.toLowerCase().endsWith(".tmp")) return;
+    // 実際のデータ（<モデル名>.data.csv）や筋書き（<モデル名>.slides.json）が変わったら、そのモデルが変わったと知らせる
+    const lower = file.toLowerCase();
+    const suffix = [".data.csv", ".slides.json"].find((x) => lower.endsWith(x));
+    if (!suffix && !lower.endsWith(".json")) {
+      // フォルダを作った・消した・動かした（中のどのモデルが変わったかは分からない）か、モデルでないファイルが変わった。
+      // 一覧に出すフォルダが変わったかもしれないので、一覧と開いているモデルを読み直してもらう
+      later("", () => send({ type: "folders" }));
+      return;
+    }
+    let name: string;
+    try {
+      name = checkModelName(suffix ? file.slice(0, -suffix.length) : file);
+    } catch {
+      return;
+    }
+    later(name, async () => {
+      const st = await stat(store.pathOf(name)).catch(() => undefined);
+      // 名前が .json で終わるフォルダは、モデルではない
+      if (st?.isDirectory()) return send({ type: "folders" });
+      // CSV や筋書きだけがあってモデルがなければ、知らせない（モデルが消えたわけではない）
+      if (suffix && !st) return;
+      send({ type: st ? "changed" : "removed", name });
+    });
+  };
   // 作業フォルダがまだなければ作っておく（あとから AI がモデルを作っても気づけるように）
   await mkdir(store.dir, { recursive: true });
-  watcher = watch(store.dir, (_event, file) => file && notify(file.toString()));
-  // Windows では監視中のフォルダが消されると error が出る。拾わないとプロセスごと止まる
-  watcher.on("error", (e) => console.error(`作業フォルダを監視できなくなりました: ${(e as Error).message}`));
+  const watcher = watchTree(store.dir, notify);
 
   // 画面からの書き込みの記録（モデル名 → 古い順）。メモリの中だけに持つ
   const history = new Map<string, HistoryEntry[]>();
@@ -452,13 +468,15 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     const p = decodeURIComponent(url.pathname);
 
     if (p === "/api/models") {
-      const body: ModelListResponse = { dir: store.dir, models: await store.list() };
+      const body: ModelListResponse = { dir: store.dir, ...(await store.tree()) };
       sendJSON(res, 200, body);
       return;
     }
-    const write = p.match(/^\/api\/models\/([^/]+)\/(edit|scenarios|remove|undo)$/);
+    // モデル名はフォルダを含む（ブルックスの法則/brooks_law）。画面は名前を encodeURIComponent で送る（/ は %2F）が、/ のままでも読む。
+    // 書き込みは、デコードする前のパスの終わりで見分ける（%2F で送られた名前の中の「/edit」などと取り違えないように）
+    const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|remove|undo)$/);
     if (write) {
-      await handleWrite(req, res, write[1]!, write[2] as "edit" | "scenarios" | "remove" | "undo");
+      await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as "edit" | "scenarios" | "remove" | "undo");
       return;
     }
     if (p.startsWith("/api/models/")) {
@@ -504,7 +522,7 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     url: `http://localhost:${port}/`,
     close: async () => {
       clearInterval(ping);
-      watcher?.close();
+      watcher.close();
       for (const t of pending.values()) clearTimeout(t);
       for (const c of clients) c.end();
       await new Promise<void>((resolve) => server.close(() => resolve()));
