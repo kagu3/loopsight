@@ -82,6 +82,23 @@ function saveModelsOpen(open: boolean) {
   }
 }
 
+/** 左の欄を開いているか。ブラウザに覚えておく（使えなければ毎回開いた状態） */
+const SIDEBAR_OPEN_KEY = "viewer.sidebarOpen";
+function loadSidebarOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function saveSidebarOpen(open: boolean) {
+  try {
+    localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    // 覚えられなくても動く
+  }
+}
+
 /** 図の要素に値を出すか（図の欄の「値を表示」）。ブラウザに覚えておく（使えなければ毎回オフ） */
 const SHOW_VALUES_KEY = "viewer.diagramValues";
 function loadShowValues(): boolean {
@@ -130,8 +147,10 @@ export function App() {
   // id は欄を開いた回ごとの番号。表で名前を変えても同じ欄のまま（書きかけの説明を残す）にするため、欄の key に使う
   const [scenario, setScenario] = useState<{ name: string; id: number }>();
   const scenarioSeq = useRef(0);
-  // 左の欄を開いているか（たたむと、右の図とグラフを広く使える）。覚えておかず、開くたびに開いた状態から始める
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // 左の欄を開いているか（たたむと、右の図とグラフを広く使える）。ブラウザに覚えておき、開き直したときも同じ状態から始める。
+  // 画面の幅では自動で開け閉めしない（狭い画面で縦に並べるときは、CSS でたたまずに出す）
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
+  useEffect(() => saveSidebarOpen(sidebarOpen), [sidebarOpen]);
   const collapseRef = useRef<HTMLButtonElement>(null);
   const stripRef = useRef<HTMLButtonElement>(null);
   // ボタンや帯で開け閉めしたら、押したものは隠れるので、もう一方にフォーカスを移す（自動で開いたときは移さない）
