@@ -359,6 +359,36 @@ describe("MCP server", () => {
     expect(await callError("find_loops", { model: "brooks", element: "新入" })).toMatch(/"新入.*見つかりません。もしかして.*新人/);
   });
 
+  test("upsert_elements の display.delay で遅れの印を付け、find_loops と view_diagram と get_model に出す", async () => {
+    await call("import_model", { path: path.join(FIXTURES_DIR, "bullwhip.json"), model: "bullwhip" });
+    // 式で遅れて効くのに印のないリンクを知らせる
+    const before = await call("view_diagram", { model: "bullwhip", image: false });
+    expect(before.unmarked_delays.links).toContain("小売の発注 → 卸から小売への出荷");
+    expect(before.unmarked_delays.hint).toMatch(/display:\{delay:true\}/);
+
+    const res = await call("upsert_elements", {
+      model: "bullwhip",
+      elements: [
+        { from: "小売の在庫", to: "小売の発注", behavior: { polarity: "NEGATIVE" } },
+        { from: "小売の発注", to: "卸から小売への出荷", behavior: { polarity: "POSITIVE" }, display: { delay: true } },
+      ],
+    });
+    // 印を付けても実行できる（エンジンには渡さない）
+    expect(res.validation.ok).toBe(true);
+    const after = await call("view_diagram", { model: "bullwhip", image: false });
+    expect(after.unmarked_delays.links).not.toContain("小売の発注 → 卸から小売への出荷");
+
+    const loops = await call("find_loops", { model: "bullwhip", element: "小売の発注", max_length: 3 });
+    const loop = loops.loops.find((l: { elements: string[] }) => l.elements.includes("卸から小売への出荷"));
+    expect(loop).toMatchObject({ kind: "B", delays: ["小売の発注 → 卸から小売への出荷 (+, 遅れ ‖)"] });
+
+    const summary = await call("get_model", { model: "bullwhip" });
+    expect(summary.links).toContain("小売の発注 → 卸から小売への出荷 (+) ‖遅れ");
+    const run = await call("run_simulation", { model: "bullwhip", targets: ["小売の在庫"], samples: 3 });
+    expect(run.error).toBeUndefined();
+
+    expect(await callError("upsert_elements", { model: "bullwhip", elements: [{ name: "小売の在庫", display: { delay: true } }] })).toMatch(/LINK と FLOW だけ/);
+  });
 });
 
 describe("フォルダに分けたモデル", () => {

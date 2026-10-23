@@ -6,6 +6,9 @@
 // - フロー → ストック：行き先のストックは増える（+）、出元のストックは減る（-）
 // - ストック → フロー：フローの式が自分の出元か行き先のストックをリンクなしで参照しているもの（極性は決まっていない）
 // - が偶数個なら R、奇数個なら B。決まっていないつながりが 1 つでもあれば、どちらか分からない
+// リンクとフローに遅れの印（display.delay）があれば、そのつながりに delay を付ける（遅れのある B ループは振れやすい、と説明するため）。
+// フローの印は、フローから行き先のストックへのつながりに付ける
+import { hasDelayMark } from "./delay.js";
 import { equationsOf, nameKey, referencesIn, sameName, type ModelJSON } from "./modeljson.js";
 
 export type Polarity = "+" | "-" | "?";
@@ -18,6 +21,8 @@ export interface LoopStep {
   polarity: Polarity;
   /** link：リンク、flow：フローがストックを増減させる、reference：フローの式が自分のストックを参照している（リンクなし） */
   via: "link" | "flow" | "reference";
+  /** 遅れの印（‖）のあるリンクか、フローか */
+  delay?: true;
 }
 
 export interface FeedbackLoop {
@@ -60,26 +65,28 @@ function causalGraph(model: ModelJSON): Map<string, Node> {
     if (el.type === "LINK" || !el.name) continue;
     nodes.set(nameKey(el.name), { name: el.name, isStock: el.type === "STOCK", out: [] });
   }
-  const add = (from: string, to: string, polarity: Polarity, via: LoopStep["via"]) => {
+  const add = (from: string, to: string, polarity: Polarity, via: LoopStep["via"], delay = false) => {
     const a = nodes.get(nameKey(from));
     const b = nodes.get(nameKey(to));
     if (!a || !b) return;
     const same = a.out.find((s) => sameName(s.to, b.name));
     if (same) {
       if (same.polarity === "?" && polarity !== "?") Object.assign(same, { polarity, via });
+      if (delay) same.delay = true;
       return;
     }
-    a.out.push({ from: a.name, to: b.name, polarity, via });
+    a.out.push({ from: a.name, to: b.name, polarity, via, ...(delay ? { delay: true as const } : {}) });
   };
   for (const el of model.elements) {
     if (el.type === "LINK" && el.from && el.to) {
       const p = el.behavior?.polarity;
-      add(el.from, el.to, p === "POSITIVE" ? "+" : p === "NEGATIVE" ? "-" : "?", "link");
+      add(el.from, el.to, p === "POSITIVE" ? "+" : p === "NEGATIVE" ? "-" : "?", "link", hasDelayMark(el));
     }
   }
   for (const el of model.elements) {
     if (el.type !== "FLOW" || !el.name) continue;
-    if (el.to) add(el.name, el.to, "+", "flow");
+    if (el.to) add(el.name, el.to, "+", "flow", hasDelayMark(el));
+    // フローの印は、図と同じく行き先の側（流れてから届くまでの遅れ）とする
     if (el.from) add(el.name, el.from, "-", "flow");
     // フローは自分のストックをリンクなしで参照できる
     for (const eq of equationsOf(el)) {

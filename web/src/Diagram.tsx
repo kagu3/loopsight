@@ -26,6 +26,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
+import { delayMarkPath } from "../../src/core/delay.js";
 import type { NodeValue } from "./diagramValues.js";
 import { NEW_ELEMENT_LABEL, type FlowEnd, type NewElementType } from "./editing.js";
 import { formulaText, type FormulaToken, type FormulaView } from "./formulaValues.js";
@@ -40,6 +41,7 @@ import { BASELINE_NAME, nameKey, type ScenarioBadge } from "./scenarios.js";
 // 編集モードでは、左上の道具で要素を足す（種類を選んでから図の置きたい場所を押す）・選んだ要素やリンクを消すこともできる。
 // リンクは、要素の縁からドラッグして別の要素の上で離すか、[＋線] を押してから元の要素 → 先の要素の順に押して引く。
 // フローの端は、端の近くの丸（つまみ）をドラッグして、ストックの上で離すとそのストックに、何もないところで離すとそこに置いた雲につなぎ替える。
+// 遅れの印（display.delay）のあるリンクとフローは、線の途中に ‖ を描く（フローは弁から行き先までの線の真ん中、リンクは曲線の真ん中。極性の文字は線の終わり近くなので重ならない）。
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
@@ -220,6 +222,7 @@ function FloatingEdge({ id, source, target, markerEnd, data }: EdgeProps<ModelEd
     return (
       <>
         <BaseEdge id={id} path={`M${p1[0]},${p1[1]} L${p2[0]},${p2[1]}`} markerEnd={markerEnd} className={cls} interactionWidth={EDGE_HIT} />
+        {data.g.delay && <DelayMark at={[(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2]} dir={[p2[0] - p1[0], p2[1] - p1[1]]} data={data} />}
         {grip && onGrip && (
           <circle
             className="flow-end-grip nodrag nopan"
@@ -246,12 +249,37 @@ function FloatingEdge({ id, source, target, markerEnd, data }: EdgeProps<ModelEd
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} className={cls} interactionWidth={EDGE_HIT} />
+      {/* 遅れの印は曲線の真ん中（t = 0.5）に、曲線の向きに直交させて描く */}
+      {data.g.delay && (
+        <DelayMark
+          at={[(p1[0] + 2 * ctrl[0] + p2[0]) / 4, (p1[1] + 2 * ctrl[1] + p2[1]) / 4]}
+          dir={[p2[0] - p1[0], p2[1] - p1[1]]}
+          data={data}
+        />
+      )}
       {data.g.polarity && (
         <text x={lx + 6} y={ly - 6} className={data.dimmed ? "edge-polarity is-dimmed" : "edge-polarity"}>
           {data.g.polarity}
         </text>
       )}
     </>
+  );
+}
+
+/** 遅れの印（‖）。線と同じく、選んだ・ループ・薄くするで見た目を変える。線の中に描くので、印を押しても線を選べる */
+function DelayMark({ at, dir, data }: { at: [number, number]; dir: [number, number]; data: EdgeData }) {
+  const cls = [
+    "edge-delay",
+    `edge-${data.g.kind}`,
+    data.selected ? "is-selected" : "",
+    data.changed ? "is-changed" : "",
+    data.dimmed ? "is-dimmed" : "",
+    data.inLoop ? "is-loop" : "",
+  ].join(" ");
+  return (
+    <path className={cls} d={delayMarkPath(at, dir)}>
+      <title>遅れ（時間がたってから効く）</title>
+    </path>
   );
 }
 

@@ -835,8 +835,34 @@ button.link.danger-link {
   opacity: 0.2;
 }
 .react-flow__edge-path,
-.edge-polarity {
+.edge-polarity,
+.edge-delay {
   transition: opacity 0.15s;
+}
+/* 遅れの印（‖）。線と同じ色で、線より少し太く描く */
+.edge-delay {
+  fill: none;
+  stroke: var(--link);
+  stroke-width: 2;
+}
+.edge-delay.edge-flow,
+.edge-delay.edge-transition {
+  stroke: var(--flow);
+  stroke-width: 2.5;
+}
+.edge-delay.is-selected {
+  stroke: var(--selected);
+}
+.edge-delay.is-changed {
+  stroke: var(--changed);
+}
+.edge-delay.is-dimmed {
+  opacity: 0.2;
+}
+/* ループを見せているときは、ループの線と同じ色で太くする */
+.edge-delay.is-loop {
+  stroke: var(--loop);
+  stroke-width: 3;
 }
 .node {
   transition: color 0.15s, background-color 0.15s, border-color 0.15s;
@@ -1277,6 +1303,20 @@ button.edit-tool.danger {
   flex-direction: column;
   gap: 6px;
   margin: 0;
+}
+/* 遅れの印（‖）の付け外し（フローの詳細と、選んだリンクの説明） */
+.delay-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.delay-toggle label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
 }
 .loop-badge {
   display: flex;

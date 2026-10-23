@@ -4,10 +4,12 @@
 // - ストック、変数、コンバーター、状態は箱のノード
 // - フローは真ん中に「弁」のノードを置き、出元 → 弁 → 行き先の 2 本の線にする（リンクが弁につながれるように）
 // - モデルの外の端は雲のノード
+// - 遅れの印（display.delay）のあるリンクは、その線に delay を付ける。フローは行き先の側の線（弁 → 行き先）に付ける
 // - 座標はモデルにあればそれを使う。ない要素があれば、layout_model と同じ簡易レイアウト（layoutModel）で並べる
 import { layoutModel } from "./layout.js";
 import { boxLayout, BOX_TYPES } from "./geometry.js";
 export { LINK_BEND, linkControlPoint } from "./geometry.js";
+import { hasDelayMark } from "./delay.js";
 import { isEmphasized, sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
 
 export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "STATE" | "VALVE" | "CLOUD";
@@ -48,6 +50,8 @@ export interface GraphEdge {
   arrow: boolean;
   /** リンクの極性（+ / -） */
   polarity?: "+" | "-";
+  /** 遅れの印（‖）を線の途中に描くか */
+  delay?: true;
   /** つながるモデルの要素名（フローやリンク） */
   element?: string;
 }
@@ -160,7 +164,7 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
     byName.set(f.name!.toLowerCase(), valve);
     valves.push({ node: valve, a, b });
     edges.push({ id: `${valve.id}:in`, kind, source: a.id, target: valve.id, arrow: false, element: f.name! });
-    edges.push({ id: `${valve.id}:out`, kind, source: valve.id, target: b.id, arrow: true, element: f.name! });
+    edges.push({ id: `${valve.id}:out`, kind, source: valve.id, target: b.id, arrow: true, element: f.name!, ...(hasDelayMark(f) ? { delay: true as const } : {}) });
   }
 
   // リンク
@@ -177,6 +181,7 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
       arrow: true,
       element: `${l.from} → ${l.to}`,
       ...(pol === "POSITIVE" ? { polarity: "+" as const } : pol === "NEGATIVE" ? { polarity: "-" as const } : {}),
+      ...(hasDelayMark(l) ? { delay: true as const } : {}),
     });
   }
 

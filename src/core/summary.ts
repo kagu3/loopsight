@@ -1,3 +1,4 @@
+import { hasDelayMark } from "./delay.js";
 import type { ModelElement, ModelJSON } from "./modeljson.js";
 
 /** AI が読みやすい、座標などを省いたモデルの要約 */
@@ -47,7 +48,7 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
     ),
     flows: of("FLOW").map((e) =>
       // from と to の null は「モデルの外」
-      ({ name: e.name, from: e.from ?? null, to: e.to ?? null, ...compact({ value: e.behavior?.value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, description: e.description }) }),
+      ({ name: e.name, from: e.from ?? null, to: e.to ?? null, ...compact({ value: e.behavior?.value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, delay_mark: hasDelayMark(e) || undefined, description: e.description }) }),
     ),
     variables: of("VARIABLE").map((e) => compact({ name: e.name, value: e.behavior?.value, units: e.behavior?.units, slider: interactive(e), emphasis: emphasis(e), description: e.description })),
     converters: of("CONVERTER").map((e) =>
@@ -63,7 +64,7 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
     ),
     links: of("LINK").map((e) => {
       const p = e.behavior?.polarity;
-      return `${e.from ?? "?"} → ${e.to ?? "?"}${p === "POSITIVE" ? " (+)" : p === "NEGATIVE" ? " (-)" : ""}`;
+      return `${e.from ?? "?"} → ${e.to ?? "?"}${p === "POSITIVE" ? " (+)" : p === "NEGATIVE" ? " (-)" : ""}${hasDelayMark(e) ? " ‖遅れ" : ""}`;
     }),
   };
   if (counts.STATE) summary.states = of("STATE").map((e) => compact({ name: e.name, initial_value: e.behavior?.initial_value, emphasis: emphasis(e), description: e.description }));

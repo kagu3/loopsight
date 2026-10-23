@@ -1,5 +1,6 @@
 import type { ElementBehavior, ElementDisplay, ElementType, Equation, ModelElement, ModelJSON, Scenario, SimulationSettings } from "./modeljson.js";
 import { boxLayout, BOX_TYPES } from "./geometry.js";
+import { DELAY_MARK_TYPES } from "./delay.js";
 import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 
 export class EditError extends Error {
@@ -82,7 +83,9 @@ function applyPatch(el: ModelElement, p: ElementPatch): void {
   if (behavior) el.behavior = behavior;
   else delete el.behavior;
   const before = boxSize(el);
-  const display = mergeObject<ElementDisplay>(el.display, emphasisPatch(el, p.display));
+  // 遅れの印は付けるときだけ持たせる（false は外す）
+  const delayPatch = p.display?.delay === false ? { ...p.display, delay: null } : p.display;
+  const display = mergeObject<ElementDisplay>(el.display, emphasisPatch(el, delayPatch));
   if (display) el.display = display;
   else delete el.display;
   // 強調を付け外ししたら、箱の真ん中の位置は変えずに大きさを変える（つながる線がずれないように）。座標も一緒に指定したときはそのまま
@@ -138,6 +141,19 @@ export function renameElement(model: ModelJSON, oldName: string, newName: string
   }
 }
 
+/**
+ * 遅れの印（display.delay）を確かめる。付けられるのはリンクとフローだけで、値は true（付ける）か false / null（外す）。
+ * ファイルには付けるときだけ true を持たせる（外すときは項目を消す。applyPatch で消す）
+ */
+function checkDelay(type: ElementType, p: ElementPatch): void {
+  if (!p.display || !("delay" in p.display)) return;
+  const v = p.display.delay;
+  if (v !== true && v !== false && v !== null) throw new EditError("遅れの印（display.delay）は true（付ける）か false（外す）にしてください。");
+  if (v === true && !(DELAY_MARK_TYPES as readonly string[]).includes(type)) {
+    throw new EditError(`遅れの印（display.delay）を付けられるのは LINK と FLOW だけです（${describe({ type, name: p.name, from: p.from, to: p.to })}）。`);
+  }
+}
+
 function checkNewElement(p: ElementPatch): ElementType {
   if (!p.type) throw new EditError(`新しい要素 ${p.name ? `"${p.name}" ` : ""}には type が必要です。`);
   if (!ELEMENT_TYPES.includes(p.type)) throw new EditError(`不明な要素の種類 "${p.type}"。`);
@@ -157,6 +173,7 @@ export function upsertElements(model: ModelJSON, patches: ElementPatch[], option
   for (const p of patches) {
     if (p.type === "LINK" || (!p.name && p.from !== undefined && p.to !== undefined && !p.type)) {
       if (!p.from || !p.to) throw new EditError("LINK には from と to の両方が必要です。");
+      checkDelay("LINK", p);
       const existing = findLink(model, p.from, p.to);
       if (existing) {
         applyPatch(existing, { ...p, from: undefined, to: undefined });
@@ -177,6 +194,7 @@ export function upsertElements(model: ModelJSON, patches: ElementPatch[], option
       if (p.type && p.type !== existing.type) {
         throw new EditError(`"${existing.name}" は ${existing.type} です。種類を ${p.type} に変えるには、いったん削除してから追加してください。`);
       }
+      checkDelay(existing.type, p);
       if (p.rename_to && !sameName(p.rename_to, existing.name)) {
         const before = existing.name!;
         renameElement(model, before, p.rename_to.trim());
@@ -192,6 +210,7 @@ export function upsertElements(model: ModelJSON, patches: ElementPatch[], option
       const guess = p.type ? "" : guessName(model, p.name);
       if (guess) throw new EditError(`要素 "${p.name}" が見つかりません。${guess}新しく追加するなら type を指定してください。`);
       const type = checkNewElement(p);
+      checkDelay(type, p);
       const el: ModelElement = { type, name: p.name.trim() };
       if (type === "FLOW") {
         el.from = p.from ?? null;

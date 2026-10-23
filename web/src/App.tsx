@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
 import { FetchError, fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
-import { Details } from "./Details.js";
+import { Details, DelayToggle } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
 import { nodeValues, peakIndex, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
 import { formulaView } from "./formulaValues.js";
@@ -12,6 +12,7 @@ import { addElementPatches, linkProblem, linkRemoveProblem, reconnectPatches, re
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { findLink, sameName } from "../../src/core/modeljson.js";
+import { hasDelayMark } from "../../src/core/delay.js";
 import { countProblems, describeProblemCount, listProblems, stripCount } from "./problemList.js";
 import { Problems } from "./Problems.js";
 import { ModelTree } from "./ModelTree.js";
@@ -960,11 +961,16 @@ export function App() {
           ) : selectedEl ? (
             <Details el={selectedEl} value={finalValues[selectedEl.name!]} onSave={(patch) => edit([patch])} />
           ) : selectedLinkEl ? (
-            // リンクは直せる項目がないので、何から何への線かだけを出す
+            // リンクは、何から何への線かと、遅れの印（‖）の付け外しを出す
             <p className="link-details">
               <span>
                 <strong>{selectedLinkEl.from}</strong> → <strong>{selectedLinkEl.to}</strong> のリンク
               </span>
+              <DelayToggle
+                key={`${selectedLinkEl.from}→${selectedLinkEl.to}`}
+                on={hasDelayMark(selectedLinkEl)}
+                onChange={(on) => edit([{ type: "LINK", from: selectedLinkEl.from!, to: selectedLinkEl.to!, display: { delay: on } }])}
+              />
               <span className="muted">{linkLocked ?? (editMode ? "「削除」か Delete キーで消せます。" : "消すときは、図の左上の「図を編集」をオンにします。")}</span>
             </p>
           ) : selectedLink && data ? (
