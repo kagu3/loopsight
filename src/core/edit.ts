@@ -1,5 +1,6 @@
 import type { ElementBehavior, ElementDisplay, ElementType, Equation, ModelElement, ModelJSON, Scenario, SimulationSettings } from "./modeljson.js";
-import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
+import { boxLayout, BOX_TYPES } from "./geometry.js";
+import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 
 export class EditError extends Error {
   override name = "EditError";
@@ -54,6 +55,20 @@ function mergeObject<T extends object>(base: T | undefined, patch: Record<string
   return Object.keys(out).length ? (out as T) : undefined;
 }
 
+/**
+ * display.emphasis（図で強調する）を確かめる。強調できるのは図の箱（ストック・変数・コンバーター・状態）だけ。
+ * false（ふつう）は項目を消す（ふつうの要素には何も書かない）
+ */
+function emphasisPatch(el: ModelElement, display: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const emphasis = display?.emphasis;
+  if (emphasis === undefined || emphasis === null) return display;
+  if (typeof emphasis !== "boolean") throw new EditError(`${describe(el)} の display.emphasis は true（強調）か false（ふつう）で指定してください。`);
+  if (emphasis && !BOX_TYPES.has(el.type)) {
+    throw new EditError(`${describe(el)} は強調できません。強調できるのは図の箱になる要素（ストック、変数、コンバーター、状態）だけです。`);
+  }
+  return emphasis ? display : { ...display, emphasis: null };
+}
+
 function applyPatch(el: ModelElement, p: ElementPatch): void {
   if (p.description !== undefined) {
     if (p.description === null || p.description === "") delete el.description;
@@ -66,9 +81,26 @@ function applyPatch(el: ModelElement, p: ElementPatch): void {
   const behavior = mergeObject<ElementBehavior>(el.behavior, p.behavior);
   if (behavior) el.behavior = behavior;
   else delete el.behavior;
-  const display = mergeObject<ElementDisplay>(el.display, p.display);
+  const before = boxSize(el);
+  const display = mergeObject<ElementDisplay>(el.display, emphasisPatch(el, p.display));
   if (display) el.display = display;
   else delete el.display;
+  // 強調を付け外ししたら、箱の真ん中の位置は変えずに大きさを変える（つながる線がずれないように）。座標も一緒に指定したときはそのまま
+  const after = boxSize(el);
+  const at = el.display?.coordinates;
+  const placed = Array.isArray(at) && at.length === 2 && !(at[0] === 0 && at[1] === 0);
+  const toggled = p.display !== undefined && "emphasis" in p.display && p.display.coordinates === undefined;
+  if (toggled && placed && before && after && (before[0] !== after[0] || before[1] !== after[1])) {
+    // 大きさの差が奇数のときの丸めは、大きくするときは切り捨て、小さくするときは切り上げる（付けて外すと元の座標に戻るように）
+    const move = (p: number, b: number, a: number) => (b < a ? Math.floor : Math.ceil)(p + (b - a) / 2);
+    el.display!.coordinates = [move(at![0], before[0], after[0]), move(at![1], before[1], after[1])];
+  }
+}
+
+/** 図の箱の大きさ（強調した要素は大きくしたもの）。箱にならない要素は undefined */
+function boxSize(el: ModelElement): [number, number] | undefined {
+  if (!BOX_TYPES.has(el.type) || !el.name) return undefined;
+  return boxLayout(el.type, el.name, el.display?.size, isEmphasized(el)).size;
 }
 
 /** 要素の名前を変え、モデル内の参照もすべて書き換える */

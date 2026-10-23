@@ -94,7 +94,12 @@ const elementPatch = z.object({
   display: z
     .record(z.string(), z.any())
     .optional()
-    .describe("表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる"),
+    .describe(
+      "表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる。" +
+        "emphasis: true で図の要素を強調する（箱・名前の文字・枠の太さをまとめて大きく描く。size を指定した要素はその大きさを基準に大きくする）。false でふつうに戻す。" +
+        "強調できるのはストック、変数、コンバーター、状態。付け外ししても箱の真ん中の位置は変わらない（coordinates も一緒に指定したときはそれに従う）。シミュレーションには影響しない。" +
+        "emphasis はループサイト独自の項目で、Insight Maker などほかのツールは読み込めないことがあるので、ほかのツールに渡すときは強調を外す",
+    ),
 });
 
 // ---- 共通の処理 ----
@@ -195,7 +200,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる
-6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
+6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -373,7 +378,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "図の配置を付ける",
       description:
-        "座標のない要素に、重ならないように座標を付けて保存する（ビューアが座標のない要素を仮に並べるのと同じ簡易レイアウト）。reset: true ですべて並べ直す。" +
+        "座標のない要素に、重ならないように座標を付けて保存する（ビューアが座標のない要素を仮に並べるのと同じ簡易レイアウト）。reset: true ですべて並べ直す。強調した要素（display.emphasis）は大きくした箱の大きさで並べる。" +
         "結果に図の確認（重なり、線が要素や名前の上を通るところ、線の交差、1 か所に集まる線）を付ける。直すときは view_diagram で図を見ながら upsert_elements の display で位置を変える。",
       inputSchema: {
         model: modelName,
@@ -405,6 +410,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       description:
         "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、各要素の位置を返す。" +
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
+        "強調した要素（display.emphasis）は大きく描き、重なりなどの確認もその大きさで行う（positions の size も大きくしたもの）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
         "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。",
       inputSchema: {

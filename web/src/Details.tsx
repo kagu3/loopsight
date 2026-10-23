@@ -4,6 +4,7 @@ import { formOf, patchOf, type Form } from "./editing.js";
 
 // 選んだ要素の詳しい情報と、その編集（E1）。「編集」の中で名前も変えられる（E3）。
 // 編集は MCP の upsert_elements と同じ形（変えた項目だけ）でサーバーに送る。
+// 図の箱になる要素は、「図で強調する」で強調の印（display.emphasis）を付け外しできる（押すとすぐ保存する）。
 
 const TYPE_LABEL: Record<string, string> = {
   STOCK: "ストック",
@@ -16,6 +17,8 @@ const TYPE_LABEL: Record<string, string> = {
 
 /** 編集できる種類。状態と遷移は段階 1 と同じく編集しない */
 const EDITABLE = new Set(["STOCK", "FLOW", "VARIABLE", "CONVERTER"]);
+/** 強調できる種類（図の箱になる要素。core の BOX_TYPES と同じ） */
+const EMPHASIZABLE = new Set(["STOCK", "VARIABLE", "CONVERTER", "STATE"]);
 
 export interface DetailsProps {
   el: ModelElement;
@@ -86,6 +89,14 @@ export function Details({ el, value, onSave }: DetailsProps) {
       setEditing(false);
       setError(undefined);
     }
+  };
+
+  // 強調の印を付け外しする。式などの編集とは別に、押すとすぐ保存する（false はサーバーが項目を消す）
+  const toggleEmphasis = async (on: boolean) => {
+    setSaving(true);
+    const err = await onSave({ name: el.name!, display: { emphasis: on } });
+    setSaving(false);
+    setError(err);
   };
 
   const b = el.behavior ?? {};
@@ -182,6 +193,13 @@ export function Details({ el, value, onSave }: DetailsProps) {
           </div>
         ))}
       </dl>
+      {EMPHASIZABLE.has(el.type) && (
+        <label className="emphasis-toggle" title="説明のときに見てほしい要素を、図で大きく描きます（箱・名前の文字・枠の太さ）。シミュレーションには影響しません">
+          <input type="checkbox" checked={el.display?.emphasis === true} disabled={saving} onChange={(e) => void toggleEmphasis(e.target.checked)} />
+          図で強調する（大きく描く）
+        </label>
+      )}
+      {error && <p className="form-error">{error}</p>}
     </div>
   );
 }

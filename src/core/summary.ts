@@ -21,6 +21,11 @@ function compact(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 }
 
+/** 図で強調している要素なら true（ふつうなら項目を出さない） */
+function emphasis(el: ModelElement): true | undefined {
+  return el.display?.emphasis === true ? true : undefined;
+}
+
 function interactive(el: ModelElement): string | undefined {
   const d = el.display;
   if (!d?.interactive) return undefined;
@@ -38,13 +43,13 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
     simulation: model.simulation,
     counts,
     stocks: of("STOCK").map((e) =>
-      compact({ name: e.name, initial_value: e.behavior?.initial_value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, slider: interactive(e), description: e.description }),
+      compact({ name: e.name, initial_value: e.behavior?.initial_value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, slider: interactive(e), emphasis: emphasis(e), description: e.description }),
     ),
     flows: of("FLOW").map((e) =>
       // from と to の null は「モデルの外」
       ({ name: e.name, from: e.from ?? null, to: e.to ?? null, ...compact({ value: e.behavior?.value, units: e.behavior?.units, non_negative: e.behavior?.non_negative, description: e.description }) }),
     ),
-    variables: of("VARIABLE").map((e) => compact({ name: e.name, value: e.behavior?.value, units: e.behavior?.units, slider: interactive(e), description: e.description })),
+    variables: of("VARIABLE").map((e) => compact({ name: e.name, value: e.behavior?.value, units: e.behavior?.units, slider: interactive(e), emphasis: emphasis(e), description: e.description })),
     converters: of("CONVERTER").map((e) =>
       compact({
         name: e.name,
@@ -52,6 +57,7 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
         interpolation: e.behavior?.interpolation,
         data: e.behavior?.data,
         units: e.behavior?.units,
+        emphasis: emphasis(e),
         description: e.description,
       }),
     ),
@@ -60,7 +66,7 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
       return `${e.from ?? "?"} → ${e.to ?? "?"}${p === "POSITIVE" ? " (+)" : p === "NEGATIVE" ? " (-)" : ""}`;
     }),
   };
-  if (counts.STATE) summary.states = of("STATE").map((e) => compact({ name: e.name, initial_value: e.behavior?.initial_value, description: e.description }));
+  if (counts.STATE) summary.states = of("STATE").map((e) => compact({ name: e.name, initial_value: e.behavior?.initial_value, emphasis: emphasis(e), description: e.description }));
   if (counts.TRANSITION) {
     summary.transitions = of("TRANSITION").map((e) => compact({ name: e.name, from: e.from, to: e.to, trigger: e.behavior?.trigger, value: e.behavior?.value }));
   }

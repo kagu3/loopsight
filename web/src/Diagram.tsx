@@ -98,6 +98,7 @@ function ModelNode({ data }: NodeProps<ModelNodeT>) {
   const cls = [
     "node",
     `node-${g.kind.toLowerCase()}`,
+    g.emphasis ? "is-emphasis" : "",
     data.selected ? "is-selected" : "",
     data.changed ? "is-changed" : "",
     data.dimmed ? "is-dimmed" : "",

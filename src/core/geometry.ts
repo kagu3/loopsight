@@ -152,13 +152,28 @@ const VALUE_LINE = 12 * 1.2;
 const BODY_PAD_Y = 4;
 
 /**
+ * 強調した要素（display.emphasis）を描く倍率。箱の大きさも名前の文字も、この倍率で大きくする（画面の .node.is-emphasis と同じ）。
+ * 文字と箱を同じ倍率で大きくするので、名前の行の分け方はふつうのときと変わらない
+ */
+export const EMPHASIS_SCALE = 1.4;
+
+/**
  * 箱の大きさと、名前の行。簡易レイアウト（layout.ts）、図への変換（diagram.ts）、図の確認で同じものを使う。
  * - size（モデルの display.size）があればその大きさにし、名前はその幅に収まるように行を分ける。
  *   それでも入らなければ fits を false にする（画面は前と同じく、箱の中で折り返して描く）
  * - なければ名前の長さから幅を決める。長い名前は 2 行までにする
+ * - emphasis（強調）なら、上で決めた大きさを EMPHASIS_SCALE 倍にする。size を指定した要素も、その大きさを基準に大きくする
  * 変数は楕円なので、文字の上下の端でも枠からはみ出さない幅にする。
  */
-export function boxLayout(type: string, name: string, size?: Point): { size: Point; lines: string[]; fits: boolean } {
+export function boxLayout(type: string, name: string, size?: Point, emphasis = false): { size: Point; lines: string[]; fits: boolean } {
+  const base = plainBoxLayout(type, name, size);
+  if (!emphasis) return base;
+  const [w, h] = base.size;
+  return { ...base, size: [Math.ceil(w * EMPHASIS_SCALE), Math.ceil(h * EMPHASIS_SCALE)] };
+}
+
+/** ふつう（強調なし）の箱の大きさと、名前の行 */
+function plainBoxLayout(type: string, name: string, size?: Point): { size: Point; lines: string[]; fits: boolean } {
   const ellipse = type === "VARIABLE";
   /** 幅 w、高さ h の箱で、n 行の名前の 1 行に使える幅 */
   const room = (w: number, h: number, n: number) => (ellipse ? w * ellipseRatio(n * LABEL_LINE, h) : w) - 2 * LABEL_PAD;
