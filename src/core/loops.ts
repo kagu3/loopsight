@@ -29,7 +29,7 @@ export interface FeedbackLoop {
   steps: LoopStep[];
 }
 
-/** 図で目立たせるループ。find_loops の結果か、筋書きの「原因」のスライドから渡す */
+/** 図で目立たせるループ。find_loops の結果から渡す */
 export interface LoopView {
   name: string;
   kind: LoopKind;

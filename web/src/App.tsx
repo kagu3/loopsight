@@ -410,8 +410,7 @@ export function App() {
         if (
           prev?.name === next.name &&
           prev.version === next.version &&
-          prev.actual?.version === next.actual?.version &&
-          prev.slides?.version === next.slides?.version
+          prev.actual?.version === next.actual?.version
         ) {
           // 中身は同じ（画面から書き込んだ結果の知らせなど）。元に戻せる回数だけ変わることがある（サーバーを起動し直したときなど）
           if (prev.undo_available !== next.undo_available) show(next, false);
@@ -1028,19 +1027,6 @@ export function App() {
           {graph && data && (
             <div className="toolbar-right">
               {graph.missingCoordinates && <InfoTip text="座標のない要素を仮に並べています。「図を編集」で動かすと、この配置を保存します" />}
-              <a
-                className="toolbar-button"
-                href={`?view=present${modelHash(data.name)}`}
-                target="_blank"
-                rel="noopener"
-                title={
-                  data.slides
-                    ? "説明資料の筋書きを、発表モードで別のタブに開きます（← → で進む）"
-                    : "説明資料の筋書きはまだありません。AI に「説明資料を作って」と頼むと、発表モードで見られます"
-                }
-              >
-                ▶ 発表
-              </a>
               <button
                 className="toolbar-button"
                 onClick={() => void undo()}

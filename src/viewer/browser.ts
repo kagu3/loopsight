@@ -1,5 +1,5 @@
 // ヘッドレスの Edge か Chrome を DevTools プロトコルで操作する小さな道具。
-// MCP の view_diagram（図を画像で返す）、view_slides と export_slides（発表モードを画像や PDF にする）と、マニュアルのスクリーンショットを撮るスクリプトで使う。
+// MCP の view_diagram（図を画像で返す）と、マニュアルのスクリーンショットを撮るスクリプトで使う。
 // Node 22 以降の組み込みの WebSocket を使うので、追加の依存はない。
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";

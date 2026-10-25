@@ -240,27 +240,6 @@ try {
   // 変えた高さは覚えられるので、あとの場面のために消しておく
   await b.evaluate("localStorage.removeItem('viewer.resultsRatio')");
 
-  // 発表モード（MCP の set_slides で保存した筋書きを ?view=present で見せる）。比較のスライドを 16:9 で撮る
-  await store.writeSlides(
-    "population",
-    core.toSlideDeck({
-      title: "人口の見通し",
-      slides: [
-        {
-          kind: "compare",
-          title: "50 年後の人口を比べる",
-          message: "どちらのシナリオでも人口は増えます。移民を増やすほうが、50 年後の人口は多くなります。",
-          scenarios: ["移民を増やす", "死亡率を下げる"],
-          elements: ["Population"],
-          at: 50,
-        },
-      ],
-    }),
-  );
-  await b.setViewport(W, (W * 9) / 16, { scale: SCALE, colorScheme: "light" });
-  await b.open(`${viewer.url}?view=present&slide=1&t=${Date.now()}#population`, "document.querySelector('.slide[data-ready=\"1\"]')");
-  await shot("present");
-
   // 暗い配色
   await setColorScheme("dark");
   await b.open(url("disease"));
@@ -361,9 +340,9 @@ try {
   await store.write("事例/在庫/bullwhip", { ...population, name: "ブルウィップ効果" });
   await store.write("事例/在庫/bullwhip_対策", { ...population, name: "ブルウィップ効果の対策" });
   await store.createFolder("新しいモデル置き場");
-  // 書き出した資料のフォルダは一覧に出ない
+  // 書き出したファイルのフォルダは一覧に出ない
   mkdirSync(path.join(modelsDir, "exports", "population"), { recursive: true });
-  writeFileSync(path.join(modelsDir, "exports", "population", "slides.pdf"), "");
+  writeFileSync(path.join(modelsDir, "exports", "population", "diagram.png"), "");
   await b.evaluate("localStorage.removeItem('viewer.openFolders')");
   // 「値を表示」の場面でたたんだ左の欄は、ブラウザが覚えている。開いた状態に戻してから開く
   await b.evaluate("localStorage.removeItem('viewer.sidebarOpen')");

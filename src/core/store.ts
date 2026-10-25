@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ModelJSON } from "./modeljson.js";
 import { renameDataHeader } from "./data.js";
-import { parseSlides, renameInSlides, type SlideDeck } from "./slides.js";
 
 export class StoreError extends Error {
   override name = "StoreError";
@@ -52,8 +51,8 @@ export function checkModelName(name: string): string {
   const n = name.trim();
   if (!n) throw new StoreError("モデル名が空です。");
   const parts = checkParts(n.replace(/\.json$/i, ""), name, "モデル名");
-  // <モデル名>.slides.json は筋書きのファイルなので、モデルの名前には使わせない
-  if (/\.slides$/i.test(parts.at(-1)!)) throw new StoreError(`モデル名 "${name}" は使えません（終わりの .slides は筋書きのファイルに使います）。`);
+  // <名前>.slides.json は、削除したスライドの機能の筋書きのファイル。作業フォルダに残っていても一覧には出さないので、モデルの名前には使わせない
+  if (/\.slides$/i.test(parts.at(-1)!)) throw new StoreError(`モデル名 "${name}" は使えません（終わりの .slides は使えません）。`);
   return parts.join("/");
 }
 
@@ -77,8 +76,13 @@ const fileKey = (name: string) => (caseInsensitive ? name.toLowerCase() : name);
 /** OS が勝手に作るファイル。フォルダが空かどうかを決めるときは数えない（空のフォルダを消すときは、いっしょに消す） */
 const OS_FILES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
 const isOSFile = (file: string) => OS_FILES.has(file.toLowerCase());
+/**
+ * フォルダが空かどうかを決めるときに数えないファイル（空のフォルダを消すときは、いっしょに消す）。
+ * OS が作るファイルと、削除したスライドの機能の筋書き（<名前>.slides.json）の残り。筋書きは MCP でもビューアでも片付けられないため
+ */
+const isIgnorableFile = (file: string) => isOSFile(file) || file.toLowerCase().endsWith(".slides.json");
 
-/** モデルのファイル（<モデル名>.json）か。筋書き（<モデル名>.slides.json）はモデルではない */
+/** モデルのファイル（<モデル名>.json）か。以前の筋書きのファイル（<モデル名>.slides.json）が残っていても、モデルとしては扱わない */
 const isModelFile = (file: string) => file.toLowerCase().endsWith(".json") && !file.toLowerCase().endsWith(".slides.json");
 
 /** エクスプローラーと同じように、大文字と小文字を区別せず、数字は数の大きさの順に並べる */
@@ -201,49 +205,6 @@ export class ModelStore {
     }
   }
 
-  /** 説明資料の筋書きのファイル（<モデル名>.slides.json）。モデルの一覧には出さない */
-  slidesPathOf(name: string): string {
-    return path.join(this.dir, `${checkModelName(name)}.slides.json`);
-  }
-
-  /** 筋書きのファイルの中身と版を読む。なければ undefined。版はモデルとは別に持つ */
-  async readSlidesText(name: string): Promise<{ text: string; version: string } | undefined> {
-    try {
-      const text = await readFile(this.slidesPathOf(name), "utf8");
-      return { text, version: versionOf(text) };
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** 筋書きを書いて、ファイルと版を返す */
-  async writeSlides(name: string, deck: SlideDeck): Promise<{ file: string; version: string }> {
-    const text = JSON.stringify(deck, null, 2) + "\n";
-    const file = await this.writeTextFile(this.slidesPathOf(name), text);
-    return { file, version: versionOf(text) };
-  }
-
-  /**
-   * 要素やシナリオの名前を変えたときに、筋書きの中の名前も直す。例外は投げず、知らせる文を返す（renameDataColumns と同じ）。
-   * 筋書きがないときや、合う名前がないときは何も返さない
-   */
-  async renameSlideNames(name: string, renames: { elements?: [string, string][]; scenarios?: [string, string][] }): Promise<{ note?: string; warning?: string }> {
-    if (!renames.elements?.length && !renames.scenarios?.length) return {};
-    const current = await this.readSlidesText(name);
-    if (current === undefined) return {};
-    const file = path.basename(this.slidesPathOf(name));
-    try {
-      const deck = parseSlides(current.text);
-      if (!renameInSlides(deck, renames)) return {};
-      await this.writeSlides(name, deck);
-      return { note: `筋書き（${file}）の中の名前も直しました。` };
-    } catch (e) {
-      return {
-        warning: `筋書き（${file}）の中の名前を直せませんでした（${(e as Error).message}）。set_slides で筋書きを保存し直してください。`,
-      };
-    }
-  }
-
   /** 作業フォルダ内の相対パスを絶対パスにする。フォルダの外を指していたら拒否する。 */
   resolveInside(relative: string): string {
     const p = path.resolve(this.dir, relative);
@@ -300,7 +261,7 @@ export class ModelStore {
           else subs.push(e.name);
           continue;
         }
-        if (!isOSFile(e.name)) files = true;
+        if (!isIgnorableFile(e.name)) files = true;
         if (!isModelFile(e.name)) continue;
         const name = (rel ? `${rel}/` : "") + e.name.replace(/\.json$/i, "");
         try {
@@ -332,9 +293,9 @@ export class ModelStore {
     return { models, folders };
   }
 
-  /** 付属のファイル（実際のデータ、筋書き）も含めた、モデルのファイル */
+  /** 付属のファイル（実際のデータ）も含めた、モデルのファイル */
   private filesOf(name: string): string[] {
-    return [this.pathOf(name), this.dataPathOf(name), this.slidesPathOf(name)];
+    return [this.pathOf(name), this.dataPathOf(name)];
   }
 
   /** ないモデルを指したときのエラー */
@@ -346,9 +307,9 @@ export class ModelStore {
   }
 
   /**
-   * モデルを別のフォルダへ動かす・名前を変える。付属のファイル（<名前>.data.csv、<名前>.slides.json）もいっしょに動かす。
+   * モデルを別のフォルダへ動かす・名前を変える。付属のファイル（<名前>.data.csv）もいっしょに動かす。
    * 行き先のフォルダがなければ作る。行き先に同じ名前のモデル（か付属のファイル）があれば断る。
-   * exports/ に書き出した資料は動かさない
+   * exports/ に書き出したファイルは動かさない
    */
   async moveModel(from: string, to: string): Promise<{ from: string; to: string; files: string[] }> {
     const src = checkModelName(from);
@@ -369,7 +330,7 @@ export class ModelStore {
     // 付属のファイルを先に、モデル（.json）を最後に動かす。途中で動かせなければ（Excel で開かれているなど）、動かしたものを元に戻す。
     // モデルだけが動いて、付属のファイルが元の場所に残らないように
     const moved: [string, string][] = [];
-    for (const i of [1, 2, 0]) {
+    for (const i of [1, 0]) {
       const [a, b] = [srcFiles[i]!, dstFiles[i]!];
       if (!(await exists(a))) continue;
       try {
@@ -386,15 +347,15 @@ export class ModelStore {
   }
 
   /**
-   * モデルを消す。<名前>.json と付属のファイル（<名前>.data.csv、<名前>.slides.json）をいっしょに消す
-   * （残すと、あとで同じ名前のモデルを作ったときに、古い実際のデータや筋書きがそのモデルのものとして読まれるため）。
-   * exports/ に書き出した資料は消さない
+   * モデルを消す。<名前>.json と付属のファイル（<名前>.data.csv）をいっしょに消す
+   * （残すと、あとで同じ名前のモデルを作ったときに、古い実際のデータがそのモデルのものとして読まれるため）。
+   * exports/ に書き出したファイルは消さない
    */
   async removeModel(name: string): Promise<{ model: string; files: string[] }> {
     const n = checkModelName(name);
     if (!(await this.exists(n))) throw await this.notFound(n);
     // 付属のファイルを先に、モデル（.json）を最後に消す。付属のファイルを消せなければ（Excel で開かれているなど）、モデルは残す。
-    // モデルだけが消えて、古い実際のデータや筋書きが残らないように
+    // モデルだけが消えて、古い実際のデータが残らないように
     const [json, ...extras] = this.filesOf(n);
     const removed: string[] = [];
     for (const f of [...extras, json!]) {
@@ -442,21 +403,21 @@ export class ModelStore {
 
   /**
    * 空のフォルダを消す。空のサブフォルダだけがあるときは、それもいっしょに消す。
-   * 中にファイルが 1 つでもあれば消さない（OS が作るファイル .DS_Store などは数えず、いっしょに消す）
+   * 中にファイルが 1 つでもあれば消さない（OS が作るファイル .DS_Store などと、以前の筋書きの <名前>.slides.json は数えず、いっしょに消す）
    */
   async removeFolder(name: string): Promise<{ folder: string; dir: string }> {
     const n = checkFolderName(name);
     const dir = this.folderPathOf(n);
     if (!(await this.folderExists(n))) throw await this.folderNotFound(n);
     const dirs: string[] = [];
-    const osFiles: string[] = [];
+    const ignorable: string[] = [];
     const others: string[] = [];
     const walk = async (d: string) => {
       dirs.push(d);
       for (const e of await readdir(d, { withFileTypes: true })) {
         const p = path.join(d, e.name);
         if (e.isDirectory()) await walk(p);
-        else if (isOSFile(e.name)) osFiles.push(p);
+        else if (isIgnorableFile(e.name)) ignorable.push(p);
         else others.push(path.relative(this.dir, p).split(path.sep).join("/"));
       }
     };
@@ -465,7 +426,7 @@ export class ModelStore {
       const shown = others.slice(0, 5).join(", ") + (others.length > 5 ? ` ほか ${others.length - 5} 個` : "");
       throw new StoreError(`フォルダ "${n}" の中にファイルがあるため、消しませんでした（${shown}）。モデルは remove_model で消すか、move_model でほかへ動かしてください。`);
     }
-    for (const f of osFiles) await unlink(f);
+    for (const f of ignorable) await unlink(f);
     // 深いフォルダから消す（中が空でなければ rmdir は失敗するので、途中でファイルができても消さない）
     for (const d of dirs.reverse()) await rmdir(d);
     return { folder: n, dir };

@@ -1,4 +1,4 @@
-import { readdir, readFile, rm, rmdir, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -10,7 +10,6 @@ import {
   BASELINE_SCENARIO,
   EDITABLE_TYPES,
   EditError,
-  LOOP_POLARITIES,
   ImportError,
   LOOP_KIND_LABEL,
   MAX_LOOPS,
@@ -21,7 +20,6 @@ import {
   checkModelName,
   checkActualData,
   checkDiagram,
-  checkSlides,
   compareScenarios,
   dataToCSV,
   describeLoop,
@@ -33,15 +31,12 @@ import {
   layoutModel,
   modelScenarios,
   namesByElement,
-  namesByScenario,
   parseDataCSV,
-  parseSlides,
   removeElements,
   renamesSince,
   resolveTargets,
   runModel,
   runToCSV,
-  scenarioRenamesSince,
   setScenarios,
   setSimulation,
   staticCheck,
@@ -49,12 +44,9 @@ import {
   summarizeRun,
   sweepParameter,
   sweepValues,
-  toSlideDeck,
   upsertElements,
   validateModel,
   withBaseline,
-  SLIDE_KIND_LABEL,
-  type ActualData,
   type ElementPatch,
   type LoopStep,
   type LoopView,
@@ -62,8 +54,7 @@ import {
   type ScenarioPatch,
 } from "../core/index.js";
 import { BrowserNotFoundError, launchBrowser } from "../viewer/browser.js";
-import { loadModelResponse, startViewer } from "../viewer/server.js";
-import { hasFigure, slideCSV, slideFileBase, slidesMarkdown, type SlideFiles } from "../viewer/slides-export.js";
+import { startViewer } from "../viewer/server.js";
 
 // ---- 入力の形 ----
 
@@ -105,42 +96,6 @@ const elementPatch = z.object({
     .optional()
     .describe("表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる"),
 });
-
-const slideText = {
-  title: z.string().describe("見出し"),
-  message: z.string().describe("言いたいこと（1 文）。SD を知らない人に伝わる言葉で、グラフから読み取れることを書く"),
-};
-const slideNames = (what: string) => z.array(z.string()).describe(`${what}（4 つまで）`);
-const slide = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("problem").describe("問題"),
-    ...slideText,
-    elements: slideNames("注目する要素の名前"),
-    data: z.array(z.string()).optional().describe("点で重ねる実際のデータ（<モデル名>.data.csv）の列名。省略すると、注目する要素のうちデータのあるものすべて"),
-    now: z.number().optional().describe("「今」の時点（モデルの時刻）。グラフに縦の線を引く"),
-  }),
-  z.object({
-    kind: z.literal("cause").describe("原因"),
-    ...slideText,
-    loop: z.object({
-      elements: z.array(z.string()).describe("ループを作る要素の名前。ループをひと回りする順に並べる"),
-      polarity: z.enum(LOOP_POLARITIES).describe("R は強めるループ、B は釣り合わせるループ"),
-    }),
-  }),
-  z.object({
-    kind: z.literal("solution").describe("解決案"),
-    ...slideText,
-    scenario: z.string().describe("set_scenarios で保存したシナリオの名前。説明と変える値はシナリオから出す"),
-  }),
-  z.object({
-    kind: z.literal("compare").describe("比較"),
-    ...slideText,
-    scenarios: z.array(z.string()).describe(`比べるシナリオの名前。「${BASELINE_SCENARIO}」はいつも重ねるので並べなくてよい`),
-    elements: slideNames("比べる要素の名前"),
-    at: z.number().optional().describe("注目する時点（モデルの時刻）。その時点の値を並べて出す"),
-  }),
-  z.object({ kind: z.literal("conclusion").describe("結論（文章だけ）"), ...slideText }),
-]);
 
 // ---- 共通の処理 ----
 
@@ -231,7 +186,7 @@ function timestamp(): string {
 
 const SERVER_INSTRUCTIONS = `システムダイナミクス（SD）のモデルを作り、実行し、分析するためのツールです（Loopsight）。モデルの形式は Insight Maker の ModelJSON です。
 モデルは作業フォルダに ModelJSON ファイル（<モデル名>.json）として保存されます。
-関係のあるモデルはサブフォルダにまとめられます（何段でも）。モデル名は作業フォルダからの相対パス（/ 区切り、.json なし。例: ブルックスの法則/brooks_law）で、直下のモデルはファイル名だけです。実際のデータ（<モデル名>.data.csv）と筋書き（<モデル名>.slides.json）はモデルと同じフォルダに置きます。
+関係のあるモデルはサブフォルダにまとめられます（何段でも）。モデル名は作業フォルダからの相対パス（/ 区切り、.json なし。例: ブルックスの法則/brooks_law）で、直下のモデルはファイル名だけです。実際のデータ（<モデル名>.data.csv）はモデルと同じフォルダに置きます。
 list_models でモデルとフォルダの一覧を見られます（ビューアの一覧と同じ。作業フォルダの中の実際のフォルダのとおりに並ぶ）。フォルダは create_folder で作り、move_folder で動かし・名前を変え、remove_folder で空のものを消します。モデルは move_model で動かし・名前を変え、remove_model で消します（消すと戻せないので、使う前に人に確かめる）。
 
 進め方:
@@ -241,17 +196,6 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。人はビューア（npm run viewer）で同じ図を見ている
-
-「説明資料を作って」と頼まれたら（SD を知らない身近な人に、問題と解決案を順に見せる資料。決定権がある人向けの正式な提案資料の素材にもなる）:
-a. get_model と run_simulation でモデルの振る舞いを確かめる。実際のデータ（実績）があれば import_data で取り込む。比べるシナリオがなければ set_scenarios で保存する（description に、どんなシナリオかを書く）
-b. set_slides で筋書きを保存する。問題 → 原因 → 解決案 → 比較 → 結論 の順に並べ、どのスライドにも見出しと「言いたいこと」の 1 文を書く。式や SD の用語は使わず、グラフから読み取れることを書く
-   - 問題（problem）：注目する要素、実際のデータ、「今」の時点。モデルの線に実際のデータの点が重なり、モデルが問題を再現していることを見せる
-   - 原因（cause）：問題を生むループを作る要素の名前と、強めるループ（R）か釣り合わせるループ（B）か。ループごとに 1 枚。find_loops で探したループの elements を loop.elements に、kind を loop.polarity に使う（set_slides は、ループになっているか、R / B がリンクの極性と合うかを確かめる。極性が決まっていなければ upsert_elements で入れる）
-   - 解決案（solution）：シナリオの名前。シナリオごとに 1 枚
-   - 比較（compare）：比べるシナリオと要素、注目する時点。「元のモデル」はいつも重なる
-   - 結論（conclusion）：文章だけ
-c. view_slides でスライドを画像にして 1 枚ずつ確かめ、言いたいことがグラフから読み取れなければ直す。人はビューアの発表モード（http://localhost:5180/?view=present#<モデル名>）で ← → を押して見せる
-d. 資料を送るときは export_slides でフォルダ（既定は exports/<モデル名>/。フォルダにあるモデルは exports/<フォルダ>/<名前>/）に書き出す。slides.pdf（1 スライド 1 ページ。そのまま送れる）、slides.md（骨子）、images/（グラフや図だけの画像）、data/（グラフの値の CSV）ができる。正式な提案資料を作るときは、slides.md と images/・data/ を素材に使う
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -264,33 +208,6 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     const file = await store.write(name, model);
     const validation = validateModel(model);
     return { model: name, file, ...extra, validation };
-  }
-
-  /** 実際のデータを読む。ないときや読めないときは undefined（筋書きの確認では「データがない」として扱う） */
-  async function readActualData(name: string): Promise<ActualData | undefined> {
-    const text = await store.readData(name);
-    if (text === undefined) return undefined;
-    try {
-      return parseDataCSV(text);
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * 要素やシナリオを消したり、期間や実際のデータを変えたりしたあと、筋書きがモデルに合わなくなっていれば slides_issues で知らせる。
-   * 直さないと見せられないもの（errors）と、確かめたほうがよいもの（warnings。時点が期間の外など）の両方を入れる
-   */
-  async function slidesAfterEdit(name: string, model: ModelJSON): Promise<{ slides_issues?: unknown[] }> {
-    const read = await store.readSlidesText(name);
-    if (!read) return {};
-    try {
-      const { errors, warnings } = checkSlides(model, parseSlides(read.text), await readActualData(name));
-      const issues = [...errors, ...warnings];
-      return issues.length ? { slides_issues: issues } : {};
-    } catch {
-      return {};
-    }
   }
 
   server.registerTool(
@@ -375,7 +292,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       title: "モデルを動かす・名前を変える",
       description:
         "モデルを別のフォルダへ動かすか、名前を変える。to は新しいモデル名（「フォルダ/名前」。直下へ戻すときは名前だけ）。" +
-        "付属のファイル（<名前>.data.csv の実際のデータ、<名前>.slides.json の筋書き）もいっしょに動かす。exports/ に書き出した資料は動かさない。" +
+        "付属のファイル（<名前>.data.csv の実際のデータ）もいっしょに動かす。exports/ に書き出したファイルは動かさない。" +
         "行き先のフォルダがなければ作る。行き先に同じ名前のモデル（か付属のファイル）があれば断る。",
       inputSchema: {
         model: modelName,
@@ -393,8 +310,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "モデルを消す",
       description:
-        "モデルを消す。<名前>.json と、付属のファイル（<名前>.data.csv の実際のデータ、<名前>.slides.json の筋書き）をいっしょに消す。" +
-        "exports/ に書き出した資料は消さない（もう人に送ったかもしれないため）。" +
+        "モデルを消す。<名前>.json と、付属のファイル（<名前>.data.csv の実際のデータ）をいっしょに消す。" +
+        "exports/ に書き出したファイルは消さない（もう人に送ったかもしれないため）。" +
         "消したファイルは戻せないので、使う前に、どのモデルを消すかを人に伝えて、消してよいか確かめること。",
       inputSchema: { model: modelName },
       annotations: { destructiveHint: true },
@@ -423,7 +340,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       title: "フォルダを動かす・名前を変える",
       description:
         "フォルダを別の場所へ動かすか、名前を変える（中のモデルと付属のファイル、サブフォルダごと）。to は新しいフォルダ名（作業フォルダからの相対パス）。" +
-        "行き先の親のフォルダがなければ作る。行き先に同じ名前のフォルダかファイルがあれば断る。exports/ に書き出した資料は動かさない。" +
+        "行き先の親のフォルダがなければ作る。行き先に同じ名前のフォルダかファイルがあれば断る。exports/ に書き出したファイルは動かさない。" +
         "結果の models は、動かしたあとのモデル名。",
       inputSchema: {
         folder: folderName,
@@ -489,7 +406,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、各要素の位置を返す。" +
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
-        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（説明資料の「原因」のスライド向けの表示）。",
+        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。",
       inputSchema: {
         model: modelName,
         image: z.boolean().optional().describe("画像を付ける（既定は true）。一覧だけでよければ false"),
@@ -637,9 +554,6 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       const data = await store.renameDataColumns(a.model, renamed);
       if (data.note) report.notes.push(data.note);
       if (data.warning) report.notes.push(data.warning);
-      const slides = await store.renameSlideNames(a.model, { elements: renamed });
-      if (slides.note) report.notes.push(slides.note);
-      if (slides.warning) report.notes.push(slides.warning);
       return result;
     }),
   );
@@ -663,7 +577,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     handle(async (a: { model: string; elements: { name?: string; from?: string; to?: string }[]; cascade_flows?: boolean }) => {
       const m = await store.read(a.model);
       const report = removeElements(m, a.elements, { cascadeFlows: a.cascade_flows });
-      return saveAndCheck(a.model, m, { changes: report, ...(await slidesAfterEdit(a.model, m)) });
+      return saveAndCheck(a.model, m, { changes: report });
     }),
   );
 
@@ -678,7 +592,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       const { model, ...patch } = a;
       const m = await store.read(model);
       const sim = setSimulation(m, patch);
-      return saveAndCheck(model, m, { simulation: sim, ...(await slidesAfterEdit(model, m)) });
+      return saveAndCheck(model, m, { simulation: sim });
     }),
   );
 
@@ -712,7 +626,6 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     handle(async (a: { model: string; scenarios?: ScenarioPatch[]; remove?: string[]; replace?: boolean; elements?: string[] }) => {
       if (!a.scenarios?.length && !a.remove?.length && !a.replace) throw new EditError("scenarios か remove を指定してください。");
       const m = await store.read(a.model);
-      const before = namesByScenario(m);
       const report = setScenarios(m, a.scenarios ?? [], { remove: a.remove, replace: a.replace });
       const extra: Record<string, unknown> = { changes: report, scenarios: m.scenarios ?? [] };
       // 実行できないシナリオは保存しない（エラーのあるモデルは、検証結果で知らせる）
@@ -720,12 +633,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         const { targets: names, time_units, rows } = compareScenarios(m, withBaseline(modelScenarios(m)), { targets: a.elements });
         extra.comparison = { targets: names, time_units, rows };
       }
-      const result = await saveAndCheck(a.model, m, extra);
-      // シナリオの名前を変えたら、筋書きの中の名前も直す（モデルはもう保存してあるので、直せなくても知らせだけ添える）
-      const slides = await store.renameSlideNames(a.model, { scenarios: scenarioRenamesSince(m, before) });
-      if (slides.note) report.notes.push(slides.note);
-      if (slides.warning) report.notes.push(slides.warning);
-      return { ...result, ...(await slidesAfterEdit(a.model, m)) };
+      return saveAndCheck(a.model, m, extra);
     }),
   );
 
@@ -877,198 +785,6 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         rows: data.times.length,
         ...(data.times.length ? { time_range: [data.times[0], data.times.at(-1)] } : {}),
         warnings,
-        // 差し替えたデータで、筋書きの問題のスライドが使う列がなくなっていないか
-        ...(await slidesAfterEdit(a.model, m)),
-      };
-    }),
-  );
-
-  server.registerTool(
-    "set_slides",
-    {
-      title: "説明資料の筋書きを保存する",
-      description:
-        "説明資料の筋書きを作業フォルダの <モデル名>.slides.json に保存する（今の筋書きはすべて置き換える）。ビューアの発表モードで、スライドを順に見せる。" +
-        "スライドの種類は problem（問題）、cause（原因）、solution（解決案）、compare（比較）、conclusion（結論）で、この順に並べる。どのスライドにも title（見出し）と message（言いたいこと 1 文）を書く。" +
-        "要素名、シナリオの名前、実際のデータの列名が実在するかを確かめ、合わなければ保存せずに issues（何枚目の何が合わないか、「もしかして」）を返す。" +
-        "原因のスライドは、loop.elements がつながる順のループになっているか、polarity がリンクの極性から決まる R / B と合うかも確かめる（極性が決まっていなければ warnings で知らせて保存する）。" +
-        "要素やシナリオの名前を upsert_elements や set_scenarios で変えると、筋書きの中の名前も直す。保存したら view_slides で画像を見て確かめる。",
-      inputSchema: {
-        model: modelName,
-        title: z.string().optional().describe("資料の題"),
-        slides: z.array(slide).min(1).describe("スライドの並び"),
-        version: z.string().optional().describe("前に view_slides で読んだ筋書きの版。渡すと、そのあとにほかで筋書きが変わっていたら保存しない"),
-      },
-    },
-    handle(async (a: { model: string; title?: string; slides: unknown[]; version?: string }) => {
-      const m = await store.read(a.model);
-      const current = await store.readSlidesText(a.model);
-      if (a.version !== undefined && current?.version !== a.version) {
-        throw new StoreError(
-          `筋書きは、読んだあとにほかのところで変わっています（いまの版: ${current?.version ?? "なし"}）。view_slides で読み直してから保存してください。`,
-        );
-      }
-      const deck = toSlideDeck({ title: a.title, slides: a.slides });
-      const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
-      if (errors.length) throw new ModelError(`筋書きに直すところが ${errors.length} つあるため、保存しませんでした。`, errors);
-      const { file, version } = await store.writeSlides(a.model, deck);
-      return {
-        model: a.model,
-        file,
-        version,
-        slides: deck.slides.map((s, i) => `${i + 1}. ${SLIDE_KIND_LABEL[s.kind]}：${s.title}`),
-        warnings,
-        next_step: `view_slides でスライドを画像にして確かめてください。人はビューアの発表モード（?view=present#${a.model}）で見られます。`,
-      };
-    }),
-  );
-
-  server.registerTool(
-    "view_slides",
-    {
-      title: "スライドを見る",
-      description:
-        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で 1 枚ずつ PNG の画像にして返す。" +
-        "あわせて、筋書きの中身と版、名前がモデルに合わないところ（errors）と確かめたほうがよいところ（warnings）を返す。" +
-        "画像には Edge か Chrome が必要（なければ image: false と同じで、中身だけ返す）。",
-      inputSchema: {
-        model: modelName,
-        slides: z.array(z.number().int().min(1)).optional().describe("画像にするスライドの番号（1 から）。省略するとすべて"),
-        image: z.boolean().optional().describe("画像を付ける（既定は true）。中身だけでよければ false"),
-        width: z.number().int().min(640).max(3840).optional().describe("画像の幅（既定 1280。高さは 16:9 にする）"),
-      },
-      annotations: { readOnlyHint: true },
-    },
-    handle(async (a: { model: string; slides?: number[]; image?: boolean; width?: number }) => {
-      const m = await store.read(a.model);
-      const read = await store.readSlidesText(a.model);
-      if (!read) throw new StoreError(`モデル "${a.model}" の筋書きがありません。set_slides で保存してください。`);
-      const deck = parseSlides(read.text);
-      const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
-      const numbers = a.slides?.length ? [...new Set(a.slides)] : deck.slides.map((_, i) => i + 1);
-      const missing = numbers.filter((n) => n > deck.slides.length);
-      if (missing.length) throw new StoreError(`スライド ${missing.join(", ")} はありません（筋書きは ${deck.slides.length} 枚）。`);
-      const info = { model: a.model, file: store.slidesPathOf(a.model), version: read.version, ...deck, errors, warnings };
-      if (a.image === false || numbers.length === 0) return info;
-      const width = a.width ?? 1280;
-      let images: Buffer[];
-      try {
-        images = await renderSlides(store, a.model, numbers, width, Math.round((width * 9) / 16));
-      } catch (e) {
-        return { ...info, image_error: e instanceof BrowserNotFoundError ? e.message : `スライドを画像にできませんでした: ${(e as Error).message}` };
-      }
-      return {
-        content: [
-          { type: "text", text: formatJSON(info) },
-          ...images.flatMap((png, i) => [
-            { type: "text" as const, text: `スライド ${numbers[i]}` },
-            { type: "image" as const, data: png.toString("base64"), mimeType: "image/png" },
-          ]),
-        ],
-      } satisfies CallToolResult;
-    }),
-  );
-
-  server.registerTool(
-    "export_slides",
-    {
-      title: "説明資料をフォルダに書き出す",
-      description:
-        "説明資料の筋書き（set_slides で保存したもの）を、ビューアの発表モードと同じ描き方で、フォルダに書き出す。書き出し先は作業フォルダの中（既定は exports/<モデル名>/。フォルダにあるモデルは exports/<フォルダ>/<名前>/）。" +
-        "フォルダの中身：slides.pdf（1 スライド 1 ページの PDF。ページは 16:9 で、フォントを埋め込むので、そのまま送れる）、" +
-        "slides.md（骨子。資料の題、モデル、書き出した日時と、スライドごとの種類・見出し・言いたいこと・注目する要素や時点・ループ・シナリオの変える値・比較の値の表、画像と CSV へのリンク）、" +
-        "images/<番号>-<種類>.png（グラフや図だけの画像。見出しと言いたいことは入れない。問題と比較はグラフ、原因はループを目立たせた図。解決案と結論にはない）、" +
-        "data/<番号>-<種類>.csv（問題と比較のグラフの線の値。丸めない。UTF-8（BOM 付き）で、Excel でそのまま開ける）。" +
-        "正式な提案資料を作るときは、slides.md と images/・data/ を素材に使う（数字は CSV から取り、グラフは CSV から作り直すか画像を貼る）。" +
-        "同じフォルダに書き出し直すと、images/ と data/ の中身は入れ替える（ほかのファイルには触らない）。" +
-        "名前がモデルに合わないところ（errors）があれば書き出さない。Edge か Chrome が必要。",
-      inputSchema: {
-        model: modelName,
-        path: z.string().optional().describe("書き出すフォルダ。作業フォルダからの相対パス（既定は exports/<モデル名>。フォルダにあるモデルは exports/<フォルダ>/<名前>）"),
-        width: z.number().int().min(640).max(3840).optional().describe("images/ の画像の幅（既定 1280。高さはグラフや図に合わせる）"),
-      },
-    },
-    handle(async (a: { model: string; path?: string; width?: number }) => {
-      const m = await store.read(a.model);
-      const read = await store.readSlidesText(a.model);
-      if (!read) throw new StoreError(`モデル "${a.model}" の筋書きがありません。set_slides で保存してください。`);
-      const deck = parseSlides(read.text);
-      const { errors, warnings } = checkSlides(m, deck, await readActualData(a.model));
-      if (errors.length) throw new ModelError(`筋書きに直すところが ${errors.length} つあるため、書き出しませんでした。`, errors);
-      if (!deck.slides.length) throw new StoreError(`モデル "${a.model}" の筋書きにスライドがありません。`);
-      const rel = a.path ?? path.join("exports", ...checkModelName(a.model).split("/"));
-      if (rel.toLowerCase().endsWith(".pdf")) throw new StoreError(`path には書き出すフォルダを指定してください（"${rel}" は PDF のファイル名に見えます）。`);
-      const dir = store.resolveInside(rel);
-      if (path.relative(store.dir, dir) === "") throw new StoreError("作業フォルダそのものには書き出せません。exports/<モデル名> のようなフォルダを指定してください。");
-      if ((await stat(dir).catch(() => undefined))?.isFile()) throw new StoreError(`"${rel}" はファイルです。書き出すフォルダを指定してください。`);
-
-      // 値は、ビューアの画面と同じもの（グラフと CSV、比較のスライドと slides.md の値がずれないように）
-      const data = await loadModelResponse(store, a.model);
-      const figures = deck.slides.flatMap((s, i) => (hasFigure(s) ? [i + 1] : []));
-      let rendered: { pdf: Buffer; images: Map<number, Buffer> };
-      try {
-        rendered = await renderSlidesExport(store, a.model, deck.slides.length, figures, a.width ?? 1280);
-      } catch (e) {
-        if (e instanceof BrowserNotFoundError) throw e;
-        throw new StoreError(`説明資料を書き出せませんでした: ${(e as Error).message}`);
-      }
-
-      // 中身をすべて作ってから書く
-      const contents = new Map<string, Buffer | string>([["slides.pdf", rendered.pdf]]);
-      const files: SlideFiles[] = [];
-      for (const [i, slide] of deck.slides.entries()) {
-        const base = slideFileBase(i, slide);
-        const f: SlideFiles = {};
-        const png = rendered.images.get(i + 1);
-        if (png) {
-          f.image = `images/${base}.png`;
-          contents.set(f.image, png);
-        }
-        const csv = slideCSV(data, slide);
-        if (csv) {
-          f.data = `data/${base}.csv`;
-          // Excel でそのまま開けるよう、BOM を付ける
-          contents.set(f.data, "﻿" + csv);
-        }
-        files.push(f);
-      }
-      contents.set("slides.md", slidesMarkdown(data, deck, { exportedAt: new Date(), pdf: "slides.pdf", files }));
-
-      // 先に新しいファイルを書き（1 つずつ一時ファイルから置き換える）、そのあとで images/ と data/ の古いファイルを消す。
-      // ほかのアプリで開かれていて書けなくても、古いファイルを消したあとで止まらないように
-      const busy = "ファイルがほかのアプリ（Excel や PDF のビューアなど）で開かれていないか確かめてから、もう一度書き出してください。";
-      for (const [relFile, content] of contents) {
-        const file = path.join(dir, ...relFile.split("/"));
-        try {
-          if (typeof content === "string") await store.writeTextFile(file, content);
-          else await store.writeBinaryFile(file, content);
-        } catch (e) {
-          throw new StoreError(`${relFile} を書けませんでした（${(e as Error).message}）。${busy}`);
-        }
-      }
-      // images/ と data/ は中身を入れ替える（消したスライドの画像や CSV が残らないように）。フォルダのほかのファイルには触らない
-      const leftovers: string[] = [];
-      for (const sub of ["images", "data"]) {
-        const entries = await readdir(path.join(dir, sub)).catch(() => [] as string[]);
-        for (const entry of entries) {
-          if (contents.has(`${sub}/${entry}`)) continue;
-          try {
-            await rm(path.join(dir, sub, entry), { recursive: true, force: true });
-          } catch {
-            leftovers.push(`${sub}/${entry}`);
-          }
-        }
-        // 空になったフォルダは消す（消せなくても困らない）
-        if (entries.length && !entries.some((e) => contents.has(`${sub}/${e}`))) await rmdir(path.join(dir, sub)).catch(() => undefined);
-      }
-      return {
-        model: a.model,
-        dir,
-        files: [...contents.keys()].sort(),
-        slides: deck.slides.map((s, i) => `${i + 1}. ${SLIDE_KIND_LABEL[s.kind]}：${s.title}`),
-        warnings,
-        ...(leftovers.length ? { cleanup_warning: `前に書き出した ${leftovers.join("、")} を消せませんでした。${busy}` } : {}),
-        next_step: "slides.pdf は、そのまま説明する相手に送れます。正式な提案資料を作るときは、slides.md と images/・data/ を素材に使えます（数字は data/ の CSV から取れます）。",
       };
     }),
   );
@@ -1089,94 +805,6 @@ async function renderDiagram(store: ModelStore, name: string, width: number, hei
       const query = loop ? `&loop=${encodeURIComponent(JSON.stringify(loop))}` : "";
       await browser.open(`${viewer.url}?view=diagram${query}#${encodeURIComponent(name)}`);
       return await browser.screenshot();
-    } finally {
-      await browser.close();
-    }
-  } finally {
-    await viewer.close();
-  }
-}
-
-/** ビューアを一時的に起動し、ヘッドレスのブラウザで発表モードのスライドを 1 枚ずつ PNG にする */
-async function renderSlides(store: ModelStore, name: string, numbers: number[], width: number, height: number): Promise<Buffer[]> {
-  if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
-  const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
-  try {
-    const browser = await launchBrowser();
-    try {
-      await browser.setViewport(width, height);
-      const ready = (n: number) => `document.querySelector('.slide[data-index="${n}"][data-ready="1"]')`;
-      await browser.open(`${viewer.url}?view=present&slide=${numbers[0]}#${encodeURIComponent(name)}`, ready(numbers[0]!));
-      const out: Buffer[] = [];
-      for (const n of numbers) {
-        // 開き直さずに、アドレスの slide= を変えて切り替える（ページを開き直すたびにビューアへのつながりが増えないように）
-        await browser.evaluate(
-          `(() => { const u = new URL(location.href); u.searchParams.set("slide", "${n}"); history.replaceState(null, "", u); dispatchEvent(new PopStateEvent("popstate")); })()`,
-        );
-        await browser.waitFor(ready(n));
-        await new Promise((r) => setTimeout(r, 400)); // グラフと図を描き終えるのを待つ
-        out.push(await browser.screenshot());
-      }
-      return out;
-    } finally {
-      await browser.close();
-    }
-  } finally {
-    await viewer.close();
-  }
-}
-
-/** PDF のページの大きさ（16:9）。1 インチは 96 px なので、発表モードを幅 1280 px で開いたときの 1 枚がちょうど 1 ページになる */
-const PDF_PAGE = { width: 1280, height: 720 };
-
-/**
- * ビューアを一時的に起動し、ヘッドレスのブラウザで発表モードを描いて、説明資料の PDF と、グラフや図だけの画像を作る。
- * PDF はスライドをすべて並べて 1 枚 1 ページに。画像は figures のスライド（番号は 1 から）のグラフや図だけを、幅 width で描く（高さはグラフや図に合わせる）
- */
-async function renderSlidesExport(
-  store: ModelStore,
-  name: string,
-  count: number,
-  figures: number[],
-  width: number,
-): Promise<{ pdf: Buffer; images: Map<number, Buffer> }> {
-  if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
-  const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
-  try {
-    const browser = await launchBrowser();
-    try {
-      await browser.setViewport(PDF_PAGE.width, PDF_PAGE.height);
-      await browser.open(`${viewer.url}?view=present&print=1#${encodeURIComponent(name)}`, `document.querySelectorAll('.slide[data-ready="1"]').length === ${count}`);
-      await new Promise((r) => setTimeout(r, 400)); // グラフと図を描き終えるのを待つ
-      const { data } = await browser.send("Page.printToPDF", {
-        paperWidth: PDF_PAGE.width / 96,
-        paperHeight: PDF_PAGE.height / 96,
-        marginTop: 0,
-        marginBottom: 0,
-        marginLeft: 0,
-        marginRight: 0,
-        printBackground: true,
-        preferCSSPageSize: false,
-      });
-      const pdf = Buffer.from(data as string, "base64");
-
-      const images = new Map<number, Buffer>();
-      if (figures.length) {
-        // 枠の縦横の比は 1:1 まで（styles.css の .present-figure）なので、高さも幅と同じだけあれば収まる
-        await browser.setViewport(width, width);
-        const ready = (n: number) => `document.querySelector('.slide-figure[data-index="${n}"][data-ready="1"]')`;
-        await browser.open(`${viewer.url}?view=present&figure=1&slide=${figures[0]}#${encodeURIComponent(name)}`, ready(figures[0]!));
-        for (const n of figures) {
-          // 開き直さずに、アドレスの slide= を変えて切り替える（view_slides と同じ）
-          await browser.evaluate(
-            `(() => { const u = new URL(location.href); u.searchParams.set("slide", "${n}"); history.replaceState(null, "", u); dispatchEvent(new PopStateEvent("popstate")); })()`,
-          );
-          await browser.waitFor(ready(n));
-          await new Promise((r) => setTimeout(r, 400)); // グラフと図を描き終えるのを待つ
-          images.set(n, await browser.screenshot(".present-figure .stage"));
-        }
-      }
-      return { pdf, images };
     } finally {
       await browser.close();
     }

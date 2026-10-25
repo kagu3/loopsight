@@ -49,17 +49,16 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、23 個のツールが見える", async () => {
+  test("クライアントから接続でき、20 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
-    expect(client.getInstructions()).toMatch(/「説明資料を作って」[^]*問題 → 原因 → 解決案 → 比較 → 結論/);
-    expect(client.getInstructions()).toMatch(/「説明資料を作って」[^\n]*正式な提案資料の素材/);
+    // スライドの機能は削除したので、説明文にも出さない
+    expect(client.getInstructions()).not.toMatch(/slides|説明資料|発表モード|筋書き/);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "create_folder",
         "create_model",
-        "export_slides",
         "find_loops",
         "get_model",
         "import_data",
@@ -74,12 +73,10 @@ describe("MCP server", () => {
         "run_simulation",
         "set_scenarios",
         "set_simulation",
-        "set_slides",
         "sweep_parameter",
         "upsert_elements",
         "validate_model",
         "view_diagram",
-        "view_slides",
       ].sort(),
     );
   });
@@ -246,76 +243,6 @@ describe("MCP server", () => {
     expect(await callError("import_data", { model: "sir" })).toMatch(/path か content/);
   });
 
-  test("説明資料の筋書きを保存し、名前を変えると筋書きの中も直す", async () => {
-    await call("create_model", { model: "sir", simulation: { time_length: 100, time_units: "DAYS" } });
-    await call("upsert_elements", { model: "sir", elements: SIR });
-    await call("set_scenarios", { model: "sir", scenarios: [{ name: "外出を控える", description: "接触を半分にする", values: { "Contact Rate": 0.2 } }] });
-    await call("import_data", { model: "sir", content: "Day,Infected\n0,10\n10,60\n" });
-    // 原因のスライドのループ（Infected → Infection → Infected）が R だと決まるように、極性を入れる
-    await call("upsert_elements", { model: "sir", elements: [{ type: "LINK", from: "Infected", to: "Infection", behavior: { polarity: "POSITIVE" } }] });
-    const slides = [
-      { kind: "problem", title: "感染が広がる", message: "このままだと半分近くが感染する", elements: ["infected"], data: ["Infected"], now: 10 },
-      { kind: "cause", title: "うつす人が増えるほど広がる", message: "感染者が増えるほど新しい感染が増える", loop: { elements: ["Infected", "Infection"], polarity: "R" } },
-      { kind: "solution", title: "外出を控える", message: "接触を減らす", scenario: "外出を控える" },
-      { kind: "compare", title: "比べる", message: "山が低くなる", scenarios: ["外出を控える"], elements: ["Infected"], at: 40 },
-      { kind: "conclusion", title: "結論", message: "外出を控えると山を低くできる" },
-    ];
-
-    // 名前が合わなければ保存せず、何枚目の何が合わないかを返す
-    const bad = JSON.parse(await callError("set_slides", { model: "sir", slides: [{ ...slides[2], scenario: "外出を控る" }] }));
-    expect(bad.error).toMatch(/保存しませんでした/);
-    expect(bad.issues[0]).toMatchObject({ slide: 1 });
-    expect(bad.issues[0].hint).toMatch(/もしかして "外出を控える"/);
-    expect(await callError("set_slides", { model: "sir", slides: [{ kind: "chart", title: "a", message: "b" }] })).toMatch(/kind/);
-    expect(await callError("view_slides", { model: "sir", image: false })).toMatch(/筋書きがありません/);
-    expect(await callError("export_slides", { model: "sir" })).toMatch(/筋書きがありません/);
-
-    const saved = await call("set_slides", { model: "sir", title: "感染症の対策", slides });
-    expect(path.basename(saved.file)).toBe("sir.slides.json");
-    expect(saved.slides).toEqual(["1. 問題：感染が広がる", "2. 原因：うつす人が増えるほど広がる", "3. 解決案：外出を控える", "4. 比較：比べる", "5. 結論：結論"]);
-    expect(saved.warnings).toEqual([]);
-    // 一覧には出さない
-    expect((await call("list_models")).models.map((m: any) => m.name)).toEqual(["sir"]);
-    const viewed = await call("view_slides", { model: "sir", image: false });
-    expect(viewed).toMatchObject({ title: "感染症の対策", version: saved.version, errors: [] });
-    // 表記はモデルにそろえて保存する
-    expect(viewed.slides[0].elements).toEqual(["Infected"]);
-
-    // 要素とシナリオの名前を変えると、筋書きの中も直す
-    const renamed = await call("upsert_elements", { model: "sir", elements: [{ name: "Infected", rename_to: "感染者" }] });
-    expect(renamed.changes.notes.join("\n")).toMatch(/sir\.slides\.json/);
-    const scenario = await call("set_scenarios", { model: "sir", scenarios: [{ name: "外出を控える", rename_to: "外出の自粛" }] });
-    expect(scenario.changes.notes.join("\n")).toMatch(/sir\.slides\.json/);
-    const after = await call("view_slides", { model: "sir", image: false });
-    expect(after.errors).toEqual([]);
-    expect(after.slides[0]).toMatchObject({ elements: ["感染者"], data: ["感染者"] });
-    expect(after.slides[1].loop.elements).toEqual(["感染者", "Infection"]);
-    expect(after.slides[2].scenario).toBe("外出の自粛");
-    expect(after.slides[3]).toMatchObject({ scenarios: ["外出の自粛"], elements: ["感染者"] });
-
-    // 期間を縮めて注目する時点が外に出たり、実際のデータの列がなくなったりしたら知らせる
-    const shorter = await call("set_simulation", { model: "sir", time_length: 30 });
-    expect(shorter.slides_issues.map((i: any) => i.message).join("\n")).toMatch(/4 枚目.*注目する時点（40）/);
-    expect((await call("set_simulation", { model: "sir", time_length: 100 })).slides_issues).toBeUndefined();
-    const replaced = await call("import_data", { model: "sir", content: "Day,Recovered\n0,0\n" });
-    expect(replaced.slides_issues.map((i: any) => i.message).join("\n")).toMatch(/1 枚目.*列 "感染者" がありません/);
-    expect((await call("import_data", { model: "sir", content: "Day,感染者\n0,10\n" })).slides_issues).toBeUndefined();
-
-    // 筋書きが使っているシナリオを消すと、そのことを知らせる
-    const removed = await call("set_scenarios", { model: "sir", remove: ["外出の自粛"] });
-    expect(removed.slides_issues.map((i: any) => i.slide)).toEqual([3, 4]);
-    // 合わないところがあれば、PDF に書き出さない
-    const notExported = JSON.parse(await callError("export_slides", { model: "sir" }));
-    expect(notExported.error).toMatch(/書き出しませんでした/);
-    expect(notExported.issues.map((i: any) => i.slide)).toEqual([3, 4]);
-
-    // 版が違えば保存しない
-    expect(await callError("set_slides", { model: "sir", slides: [slides[4]], version: "0000" })).toMatch(/ほかのところで変わって/);
-    const ok = await call("set_slides", { model: "sir", slides: [slides[4]], version: after.version });
-    expect(ok.version).not.toBe(after.version);
-    expect(await callError("view_slides", { model: "sir", slides: [3] })).toMatch(/スライド 3 はありません/);
-  });
-
   test("エラーは直し方つきで返す", async () => {
     expect(await callError("get_model", { model: "none" })).toMatch(/見つかりません/);
     expect(await callError("get_model", { model: "../x" })).toMatch(/使えない文字/);
@@ -325,10 +252,6 @@ describe("MCP server", () => {
     expect(bad.validation.ok).toBe(false);
     const err = JSON.parse(await callError("run_simulation", { model: "e" }));
     expect(err.issues[0].element).toBe("x");
-    await call("set_slides", { model: "e", slides: [{ kind: "conclusion", title: "結論", message: "まとめ" }] });
-    expect(await callError("export_slides", { model: "e", path: "../../outside" })).toMatch(/外を指して/);
-    expect(await callError("export_slides", { model: "e", path: "out/e.pdf" })).toMatch(/フォルダを指定して/);
-    expect(await callError("export_slides", { model: "e", path: "." })).toMatch(/作業フォルダそのもの/);
     // どのエラーも { error } の JSON で返る
     expect(JSON.parse(await callError("get_model", { model: "none" })).error).toMatch(/見つかりません/);
     expect(JSON.parse(await callError("upsert_elements", { model: "e", elements: [{ name: "z" }] })).error).toMatch(/type が必要/);
@@ -436,103 +359,6 @@ describe("MCP server", () => {
     expect(await callError("find_loops", { model: "brooks", element: "新入" })).toMatch(/"新入.*見つかりません。もしかして.*新人/);
   });
 
-  test("view_slides はスライドを 1 枚ずつ PNG で返す（ブラウザと画面のビルドがあるとき）", async () => {
-    await call("create_model", { model: "p" });
-    await call("upsert_elements", { model: "p", elements: SIR });
-    await call("set_slides", {
-      model: "p",
-      slides: [
-        { kind: "problem", title: "感染が広がる", message: "山ができる", elements: ["Infected"] },
-        { kind: "conclusion", title: "結論", message: "対策が要る" },
-      ],
-    });
-    const res = await client.callTool({ name: "view_slides", arguments: { model: "p", width: 800 } });
-    expect(res.isError).toBeFalsy();
-    const content = res.content as { type: string; text?: string; data?: string; mimeType?: string }[];
-    const info = JSON.parse(content[0]!.text!);
-    if (info.image_error) {
-      expect(info.image_error).toMatch(/Edge か Chrome|ビルド/);
-      return;
-    }
-    expect(content.slice(1).map((c) => (c.type === "text" ? c.text : c.mimeType))).toEqual(["スライド 1", "image/png", "スライド 2", "image/png"]);
-    const png = Buffer.from(content[2]!.data!, "base64");
-    expect(png.subarray(1, 4).toString()).toBe("PNG");
-    // 16:9 の高さ（PNG の IHDR の幅と高さ）
-    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([800, 450]);
-  }, 60_000);
-
-  test("export_slides は PDF・骨子・画像・CSV をフォルダに書き出す（ブラウザと画面のビルドがあるとき）", async () => {
-    await call("create_model", { model: "p", simulation: { time_length: 50 } });
-    await call("upsert_elements", { model: "p", elements: SIR });
-    await call("set_scenarios", { model: "p", scenarios: [{ name: "外出を控える", description: "人と会う回数を減らす", values: { "Contact Rate": 0.2 } }] });
-    await call("import_data", { model: "p", content: "Day,Infected\n0,10\n10,40\n12.5,70\n" });
-    const slides = [
-      { kind: "problem", title: "感染が広がる", message: "山ができる", elements: ["Infected"], now: 10 },
-      { kind: "cause", title: "うつす人が増える", message: "感染者が増えるほど広がる", loop: { elements: ["Infected", "Infection"], polarity: "R" } },
-      { kind: "solution", title: "外出を控える", message: "会う回数を減らす", scenario: "外出を控える" },
-      { kind: "compare", title: "比べる", message: "山が低くなる", scenarios: ["外出を控える", "外出を控える"], elements: ["Infected"], at: 40 },
-      { kind: "conclusion", title: "結論", message: "対策が要る" },
-    ];
-    await call("set_slides", { model: "p", title: "感染症の対策", slides });
-    const res = await client.callTool({ name: "export_slides", arguments: { model: "p", path: "out/説明" } });
-    const text = (res.content as { text: string }[])[0]!.text;
-    if (res.isError) {
-      // ブラウザか画面のビルドがない環境では、書き出せないことを知らせる
-      expect(JSON.parse(text).error).toMatch(/Edge か Chrome|ビルド/);
-      return;
-    }
-    const out = JSON.parse(text);
-    const folder = path.join(dir, "out", "説明");
-    expect(out.dir).toBe(folder);
-    expect(out.files).toEqual(
-      ["data/01-problem.csv", "data/04-compare.csv", "images/01-problem.png", "images/02-cause.png", "images/04-compare.png", "slides.md", "slides.pdf"].sort(),
-    );
-    expect(out.next_step).toMatch(/slides\.md と images\/・data\//);
-
-    const pdf = (await readFile(path.join(folder, "slides.pdf"))).toString("latin1");
-    expect(pdf.startsWith("%PDF-")).toBe(true);
-    // 1 スライド 1 ページで、どのページも 16:9（13.33 × 7.5 インチ = 960 × 540 ポイント）
-    expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(5);
-    expect(pdf.match(/\/MediaBox \[[^\]]*\]/g)).toEqual(Array(5).fill("/MediaBox [0 0 960 540]"));
-    // フォントを埋め込み、ビューア（127.0.0.1）へのリンクを残さない
-    expect(pdf).toMatch(/\/FontFile2?\b/);
-    expect(pdf).not.toMatch(/127\.0\.0\.1|\/URI/);
-
-    // 画像は幅 1280 の PNG。高さはグラフや図に合わせる（1 つのグラフと図は 16:9、比較は値の並びのぶん高い）
-    const size = async (f: string) => {
-      const png = await readFile(path.join(folder, f));
-      expect(png.subarray(1, 4).toString()).toBe("PNG");
-      return [png.readUInt32BE(16), png.readUInt32BE(20)];
-    };
-    expect(await size("images/01-problem.png")).toEqual([1280, 720]);
-    expect(await size("images/02-cause.png")).toEqual([1280, 720]);
-    expect(await size("images/04-compare.png")).toEqual([1280, 800]);
-
-    // slides.md からのリンクは、どれも書き出したファイルを指す
-    const md = await readFile(path.join(folder, "slides.md"), "utf8");
-    const links = [...md.matchAll(/\]\(([^)]+)\)/g)].map((x) => x[1]!);
-    expect(new Set(links)).toEqual(new Set(out.files.filter((f: string) => f !== "slides.md")));
-    expect(md).toMatch(/^# 感染症の対策\n/);
-    expect(md).toMatch(/## 2\. 原因：うつす人が増える\n\n言いたいこと：感染者が増えるほど広がる/);
-    expect(md).toMatch(/ループ：Infected → Infection → Infected/);
-
-    // CSV は BOM 付きの UTF-8。比較のシナリオの重なりは 1 つにまとめる
-    const csv = await readFile(path.join(folder, "data", "04-compare.csv"), "utf8");
-    expect(csv.startsWith("﻿時間,Infected（元のモデル）,Infected（外出を控える）\r\n")).toBe(true);
-    const problem = await readFile(path.join(folder, "data", "01-problem.csv"), "utf8");
-    expect(problem.split("\r\n")[0]).toBe("﻿時間,Infected（モデル）,Infected（実際のデータ）");
-    // モデルの刻みにない時刻の実際のデータは、行を足す（モデルの値は空）
-    expect(problem).toMatch(/\r\n12\.5,,70\r\n/);
-
-    // スライドを減らして書き出し直すと、消したスライドの画像と CSV は残らない。フォルダのほかのファイルには触らない
-    await writeFile(path.join(folder, "メモ.txt"), "残す");
-    await call("set_slides", { model: "p", slides: [slides[1], slides[4]] });
-    const again = await call("export_slides", { model: "p", path: "out/説明" });
-    expect(again.files).toEqual(["images/01-cause.png", "slides.md", "slides.pdf"]);
-    expect((await readdir(path.join(folder, "images"))).sort()).toEqual(["01-cause.png"]);
-    expect(await readdir(path.join(folder, "data")).catch(() => [])).toEqual([]);
-    expect(await readFile(path.join(folder, "メモ.txt"), "utf8")).toBe("残す");
-  }, 90_000);
 });
 
 describe("フォルダに分けたモデル", () => {
@@ -588,20 +414,4 @@ describe("フォルダに分けたモデル", () => {
     const { tools } = await client.listTools();
     expect(tools.find((t) => t.name === "remove_model")!.description).toMatch(/使う前に.*人に.*確かめる/);
   });
-
-  test("export_slides の既定の書き出し先は exports/<フォルダ>/<名前>/（ブラウザと画面のビルドがあるとき）", async () => {
-    await call("create_model", { model: "事例/p" });
-    await call("upsert_elements", { model: "事例/p", elements: SIR });
-    await call("set_slides", { model: "事例/p", slides: [{ kind: "conclusion", title: "結論", message: "対策が要る" }] });
-    const res = await client.callTool({ name: "export_slides", arguments: { model: "事例/p" } });
-    const text = (res.content as { text: string }[])[0]!.text;
-    if (res.isError) {
-      expect(JSON.parse(text).error).toMatch(/Edge か Chrome|ビルド/);
-      return;
-    }
-    expect(JSON.parse(text).dir).toBe(path.join(dir, "exports", "事例", "p"));
-    expect(await readdir(path.join(dir, "exports", "事例", "p"))).toContain("slides.pdf");
-    // 書き出した資料のフォルダは、一覧に出さない
-    expect((await call("list_models")).folders).toEqual([{ name: "事例", models: 1 }]);
-  }, 90_000);
 });

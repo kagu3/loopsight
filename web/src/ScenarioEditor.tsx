@@ -3,7 +3,7 @@ import type { ModelJSON, ScenarioPatch } from "../../src/viewer/api.js";
 import { descriptionPatchOf, findScenario } from "./scenarios.js";
 
 // シナリオの説明の編集欄。表の見出しのシナリオの名前を押して出る吹き出しの「説明を直す」で、左の欄に出す（要素の「編集」と同じ場所）。
-// 説明は発表モードの解決案のスライドに出る文なので、ここで直す。名前・値・シナリオを足す・消すは、シナリオの中身の表で直す。
+// 説明は凡例にカーソルを乗せたときに出る文で、ここで直す。名前・値・シナリオを足す・消すは、シナリオの中身の表で直す。
 // 変更は MCP の set_scenarios と同じ形（説明だけ）でサーバーに送る。
 
 export interface ScenarioEditorProps {
@@ -82,7 +82,7 @@ export function ScenarioEditor({ model, name, onSave, onClose }: ScenarioEditorP
       </div>
       <div className="form">
         <label>
-          <span>説明（どんなシナリオか。発表モードの解決案のスライドに出ます）</span>
+          <span>説明（どんなシナリオか。凡例にカーソルを乗せると出ます）</span>
           <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} autoFocus />
         </label>
         <small className="muted">名前と値は、グラフの上の表（「▸ 中身を見る」）で直します。</small>

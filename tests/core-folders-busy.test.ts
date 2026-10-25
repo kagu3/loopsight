@@ -33,7 +33,6 @@ async function setup() {
   const store = new ModelStore(dir);
   await store.write("m", emptyModel("M"));
   await store.writeData("m", "t,x\n0,1\n");
-  await store.writeSlides("m", { slides: [{ kind: "conclusion", title: "t", message: "m" }] });
   return { dir, store };
 }
 
@@ -44,15 +43,15 @@ describe("付属のファイルを動かせない・消せないとき", () => {
     await expect(store.moveModel("m", "x/m")).rejects.toThrow(/m\.json を動かせなかった.*開かれていないか/);
     busy.suffix = undefined;
     // 動かすために作ったフォルダも残さない
-    expect((await readdir(dir)).sort()).toEqual(["m.data.csv", "m.json", "m.slides.json"]);
+    expect((await readdir(dir)).sort()).toEqual(["m.data.csv", "m.json"]);
   });
 
   test("付属のファイルを消せなければ、モデルは消さない", async () => {
     const { dir, store } = await setup();
-    busy.suffix = "m.slides.json";
-    await expect(store.removeModel("m")).rejects.toThrow(/m\.slides\.json を消せなかったため、モデルは消していません/);
+    busy.suffix = "m.data.csv";
+    await expect(store.removeModel("m")).rejects.toThrow(/m\.data\.csv を消せなかったため、モデルは消していません/);
     busy.suffix = undefined;
-    expect((await readdir(dir)).sort()).toEqual(["m.json", "m.slides.json"]);
+    expect((await readdir(dir)).sort()).toEqual(["m.data.csv", "m.json"]);
     expect((await store.list()).map((x) => x.name)).toEqual(["m"]);
   });
 });
