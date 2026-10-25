@@ -1,6 +1,6 @@
 import { loadModelJSON, type Model } from "simulation";
 import type { ModelElement, ModelJSON } from "./modeljson.js";
-import { ELEMENT_TYPES, canReference, didYouMean, equationsOf, findElement, isConnector, nameKey, referencesIn, sameName } from "./modeljson.js";
+import { ELEMENT_TYPES, canReference, didYouMean, engineModel, equationsOf, findElement, isConnector, nameKey, referencesIn, sameName } from "./modeljson.js";
 
 export interface Issue {
   /** 問題のある要素の名前（わかる場合） */
@@ -182,7 +182,8 @@ export function staticCheck(model: ModelJSON): { errors: Issue[]; warnings: Issu
 /** ModelJSON から実行用の Model を作る。失敗したら ModelError を投げる。 */
 export function buildModel(model: ModelJSON): Model {
   try {
-    return loadModelJSON(model);
+    // ループサイト独自の display の項目（強調など）は、エンジンが知らないので取り除いて渡す
+    return loadModelJSON(engineModel(model));
   } catch (e) {
     throw toModelError(e);
   }

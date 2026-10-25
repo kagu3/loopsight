@@ -8,7 +8,7 @@
 import { layoutModel } from "./layout.js";
 import { boxLayout, BOX_TYPES } from "./geometry.js";
 export { LINK_BEND, linkControlPoint } from "./geometry.js";
-import { sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
+import { isEmphasized, sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
 
 export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "STATE" | "VALVE" | "CLOUD";
 export type Shape = "rect" | "ellipse";
@@ -22,6 +22,8 @@ export interface GraphNode {
   lines?: string[];
   /** 名前が、モデルで決まった大きさ（display.size）の箱に入りきらないか。画面は箱の中で折り返して描く */
   wrapLabel?: boolean;
+  /** 強調した要素（display.emphasis）。箱・名前の文字・枠の太さをまとめて大きくして描く */
+  emphasis?: boolean;
   /** モデルの要素名（雲はなし）。フローの弁はフローの名前 */
   element?: string;
   x: number;
@@ -104,7 +106,8 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
   for (const el of model.elements) {
     if (!BOX_TYPES.has(el.type) || !el.name) continue;
     const kind = el.type as NodeKind;
-    const { size: [w, h], lines, fits } = boxLayout(kind, el.name, el.display?.size);
+    const emphasis = isEmphasized(el);
+    const { size: [w, h], lines, fits } = boxLayout(kind, el.name, el.display?.size, emphasis);
     const [x, y] = hasCoordinates(el) ? el.display!.coordinates! : [0, 0];
     const node: GraphNode = {
       id: elementId(el.name),
@@ -112,6 +115,7 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
       label: el.name,
       lines,
       ...(fits ? {} : { wrapLabel: true }),
+      ...(emphasis ? { emphasis: true } : {}),
       element: el.name,
       x,
       y,

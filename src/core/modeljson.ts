@@ -29,6 +29,11 @@ export interface ElementDisplay {
   interactive_min?: number;
   interactive_max?: number;
   symbol?: string;
+  /**
+   * 図で強調して大きく描くか（ループサイト独自の項目。Insight Maker は使わず、シミュレーションにも影響しない）。
+   * 段階は「ふつう」（項目なし）と「強調」（true）の 2 つだけ
+   */
+  emphasis?: boolean;
   [key: string]: unknown;
 }
 
@@ -92,6 +97,32 @@ export interface ModelJSON {
 
 export function isConnector(type: ElementType): boolean {
   return type === "FLOW" || type === "LINK" || type === "TRANSITION";
+}
+
+/**
+ * ループサイト独自の display の項目。シミュレーションのエンジン（simulation の loadModelJSON）は知らない項目をエラーにするので、
+ * 実行するときは engineModel で取り除いてから渡す
+ */
+export const LOOPSIGHT_DISPLAY_KEYS: readonly string[] = ["emphasis"];
+
+/** エンジンに渡すモデル。ループサイト独自の display の項目を取り除いたコピー（なければそのまま返す） */
+export function engineModel(model: ModelJSON): ModelJSON {
+  const has = (el: ModelElement) => !!el.display && LOOPSIGHT_DISPLAY_KEYS.some((k) => k in el.display!);
+  if (!model.elements.some(has)) return model;
+  return {
+    ...model,
+    elements: model.elements.map((el) => {
+      if (!has(el)) return el;
+      const display = Object.fromEntries(Object.entries(el.display!).filter(([k]) => !LOOPSIGHT_DISPLAY_KEYS.includes(k)));
+      const { display: _display, ...rest } = el;
+      return Object.keys(display).length ? { ...rest, display } : rest;
+    }),
+  };
+}
+
+/** 図で強調する要素か（display.emphasis） */
+export function isEmphasized(el: ModelElement): boolean {
+  return el.display?.emphasis === true;
 }
 
 /** 名前の比較キー。Insight Maker の名前は大文字小文字を区別しない。 */

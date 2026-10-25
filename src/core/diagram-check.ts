@@ -18,6 +18,8 @@ export interface DiagramPosition {
   /** 箱は左上の座標、雲は中心の座標（ModelJSON の display と同じ） */
   coordinates: [number, number];
   size?: [number, number];
+  /** 強調した要素か（大きさは強調で大きくしたもの） */
+  emphasis?: boolean;
 }
 
 export interface DiagramCheck {
@@ -193,7 +195,7 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
   const positions: DiagramPosition[] = boxes.map((n) =>
     n.kind === "CLOUD"
       ? { name: nameOf(n), type: "CLOUD", coordinates: center(n).map(Math.round) as [number, number] }
-      : { name: n.label, type: n.kind, coordinates: [Math.round(n.x), Math.round(n.y)], size: [n.width, n.height] },
+      : { name: n.label, type: n.kind, coordinates: [Math.round(n.x), Math.round(n.y)], size: [n.width, n.height], ...(n.emphasis ? { emphasis: true } : {}) },
   );
 
   const xs = graph.nodes.map((n) => n.x);

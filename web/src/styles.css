@@ -425,6 +425,15 @@ button.link {
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
   font-size: 13px;
 }
+/* 図で強調する（display.emphasis）の切り替え */
+.emphasis-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
 
 /* 右側 */
 .main {
@@ -722,6 +731,20 @@ button.link.danger-link {
   background: var(--state-fill);
   border: 1.5px solid var(--state-border);
   border-radius: 10px;
+}
+/* 強調した要素（display.emphasis）。箱の大きさは core（boxLayout）で EMPHASIS_SCALE（1.4）倍にしてあるので、
+   名前の文字・内側の余白・枠の太さも同じ倍率で大きくする（名前の行の分け方がふつうのときと同じになるように）。
+   色は変えない（薄くするときも、ほかの要素と同じに薄くなる） */
+.node.is-emphasis {
+  font-size: calc(13px * 1.4);
+  font-weight: 600;
+  border-width: 3px;
+}
+.node.is-emphasis .node-body {
+  padding: calc(2px * 1.4) calc(6px * 1.4);
+}
+.node.is-emphasis .node-value {
+  font-size: calc(12px * 1.4);
 }
 .node-valve svg {
   overflow: visible;

@@ -1,5 +1,5 @@
 import type { ModelElement, ModelJSON, Point } from "./modeljson.js";
-import { nameKey, sameName } from "./modeljson.js";
+import { isEmphasized, nameKey, sameName } from "./modeljson.js";
 import { boxLayout, BOX_TYPES, flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
 
 // 簡易レイアウト：図にしたとき要素が重ならない程度に座標を付ける（layout_model と、ビューアの仮の並び）。
@@ -16,9 +16,9 @@ function hasCoordinates(el: ModelElement): boolean {
   return Array.isArray(c) && c.length === 2 && !(c[0] === 0 && c[1] === 0);
 }
 
-/** 箱の大きさ（モデルになければ名前の長さから決める。図と同じ） */
+/** 箱の大きさ（モデルになければ名前の長さから決める。強調した要素は大きくする。図と同じ） */
 function sizeOf(el: ModelElement): Point {
-  return boxLayout(el.type, el.name ?? "", el.display?.size).size;
+  return boxLayout(el.type, el.name ?? "", el.display?.size, isEmphasized(el)).size;
 }
 
 function rectOf(el: ModelElement): Rect | undefined {
