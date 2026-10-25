@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, SERVER_NAME } from "../src/mcp/server.js";
 import { type ModelJSON } from "../src/core/index.js";
-import { FIXTURES_DIR, SAMPLES_DIR, tempDir } from "./helpers.js";
+import { FIXTURES_DIR, SAMPLES_DIR, tempDir, UNSUPPORTED_SAMPLE } from "./helpers.js";
 
 let client: Client;
 let dir: string;
@@ -211,6 +211,23 @@ describe("MCP server", () => {
     expect(await callError("import_model", { content: "<InsightMakerModel></InsightMakerModel>", model: "xml" })).toMatch(/ModelJSON/);
     expect(await callError("import_model", { path: "no/such/file.json" })).toMatch(/読めません/);
     expect(await callError("import_model", { path: path.join(SAMPLES_DIR, "predator_prey.json") })).toMatch(/すでにあります/);
+  });
+
+  test("状態（STATE）か遷移（TRANSITION）を含むモデルは、取り込みも読み込みも断る（ほかのモデルは使える）", async () => {
+    const bath = path.join(SAMPLES_DIR, `${UNSUPPORTED_SAMPLE}.json`);
+    // エラーの文は JSON（{ error }）で返る
+    const imported = (JSON.parse(await callError("import_model", { path: bath, model: "bath" })) as { error: string }).error;
+    expect(imported).toMatch(/対応していない要素があります: STATE "[^"]+"/);
+    expect(imported).toMatch(/システムダイナミクスのモデル/);
+    expect((await call("list_models")).models).toEqual([]);
+
+    // 作業フォルダに直接置かれたファイルは、そのモデルだけがエラーになる
+    await writeFile(path.join(dir, "bath.json"), await readFile(bath, "utf8"));
+    await call("create_model", { model: "ok" });
+    expect(await callError("get_model", { model: "bath" })).toMatch(/対応していない要素があります: STATE/);
+    expect(await callError("run_simulation", { model: "bath" })).toMatch(/対応していない要素/);
+    expect((await call("list_models")).models.map((m: any) => m.name)).toEqual(["bath", "ok"]);
+    await expect(call("get_model", { model: "ok" })).resolves.toBeDefined();
   });
 
   test("実際のデータを取り込む。合わない列は「もしかして」を付けて知らせ、名前を変えると列名も直す", async () => {

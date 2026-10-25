@@ -91,14 +91,12 @@ const BOX_SIZE: Record<string, Point> = {
   STOCK: [100, 40],
   VARIABLE: [120, 50],
   CONVERTER: [120, 50],
-  STATE: [100, 40],
 };
 /** 名前が 2 行のときの箱の高さ（ストックは下に値も出すので、そのぶんも入れる） */
 const TWO_LINE_HEIGHT: Record<string, number> = {
   STOCK: 56,
   VARIABLE: 60,
   CONVERTER: 60,
-  STATE: 56,
 };
 
 /** 箱になる要素の種類 */

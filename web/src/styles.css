@@ -19,8 +19,6 @@
   --var-border: #c8622e;
   --conv-fill: #e3f3ea;
   --conv-border: #1e8a5e;
-  --state-fill: #ece9f8;
-  --state-border: #4a3aa7;
   --flow: #3d4f6b;
   --link: #8b8a84;
   /* 注釈の点線の枠 */
@@ -93,8 +91,6 @@
     --var-border: #e0844f;
     --conv-fill: #173a2b;
     --conv-border: #3dbb86;
-    --state-fill: #2b2550;
-    --state-border: #9085e9;
     --flow: #b8c4d8;
     --link: #8f8e86;
     --note-border: #55544f;
@@ -782,11 +778,6 @@ button.link.danger-link {
   border: 1.5px solid var(--conv-border);
   border-radius: 10px 2px 10px 2px;
 }
-.node-state {
-  background: var(--state-fill);
-  border: 1.5px solid var(--state-border);
-  border-radius: 10px;
-}
 /* 強調した要素（display.emphasis）。箱の大きさは core（boxLayout）で EMPHASIS_SCALE（1.4）倍にしてあるので、
    名前の文字・内側の余白・枠の太さも同じ倍率で大きくする（名前の行の分け方がふつうのときと同じになるように）。
    色は変えない（薄くするときも、ほかの要素と同じに薄くなる） */
@@ -854,8 +845,7 @@ button.link.danger-link {
 }
 .node.is-selected.node-stock,
 .node.is-selected.node-variable,
-.node.is-selected.node-converter,
-.node.is-selected.node-state {
+.node.is-selected.node-converter {
   box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 5px var(--selected);
 }
 .node-valve.is-selected .valve-shape {
@@ -879,13 +869,9 @@ button.link.danger-link {
   }
 }
 
-.react-flow__edge-path.edge-flow,
-.react-flow__edge-path.edge-transition {
+.react-flow__edge-path.edge-flow {
   stroke: var(--flow);
   stroke-width: 3;
-}
-.react-flow__edge-path.edge-transition {
-  stroke-width: 2;
 }
 .react-flow__edge-path.edge-link {
   stroke: var(--link);
@@ -921,8 +907,7 @@ button.link.danger-link {
   stroke: var(--link);
   stroke-width: 2;
 }
-.edge-delay.edge-flow,
-.edge-delay.edge-transition {
+.edge-delay.edge-flow {
   stroke: var(--flow);
   stroke-width: 2.5;
 }
@@ -959,10 +944,6 @@ button.link.danger-link {
 .node-converter.is-dimmed {
   background: color-mix(in srgb, var(--conv-fill) 30%, var(--surface-1));
   border-color: color-mix(in srgb, var(--conv-border) 25%, var(--surface-1));
-}
-.node-state.is-dimmed {
-  background: color-mix(in srgb, var(--state-fill) 30%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--state-border) 25%, var(--surface-1));
 }
 .node-valve.is-dimmed .valve-shape {
   stroke: color-mix(in srgb, var(--flow) 25%, var(--surface-1));

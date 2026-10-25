@@ -13,14 +13,12 @@ const TYPE_LABEL: Record<string, string> = {
   FLOW: "フロー",
   VARIABLE: "変数",
   CONVERTER: "コンバーター",
-  STATE: "状態",
-  TRANSITION: "遷移",
 };
 
-/** 編集できる種類。状態と遷移は段階 1 と同じく編集しない */
+/** 編集できる種類（図の箱になる要素とフロー） */
 const EDITABLE = new Set(["STOCK", "FLOW", "VARIABLE", "CONVERTER"]);
 /** 強調できる種類（図の箱になる要素。core の BOX_TYPES と同じ） */
-const EMPHASIZABLE = new Set(["STOCK", "VARIABLE", "CONVERTER", "STATE"]);
+const EMPHASIZABLE = new Set(["STOCK", "VARIABLE", "CONVERTER"]);
 
 export interface DetailsProps {
   el: ModelElement;
@@ -173,7 +171,7 @@ export function Details({ el, value, onSave }: DetailsProps) {
   }
 
   const rows: [string, string][] = [];
-  if (el.type === "FLOW" || el.type === "TRANSITION") rows.push(["流れ", `${el.from ?? "（外）"} → ${el.to ?? "（外）"}`]);
+  if (el.type === "FLOW") rows.push(["流れ", `${el.from ?? "（外）"} → ${el.to ?? "（外）"}`]);
   if (b.initial_value !== undefined) rows.push(["初期値", String(b.initial_value)]);
   if (b.value !== undefined) rows.push([el.type === "FLOW" ? "流量" : "式", String(b.value)]);
   if (el.type === "CONVERTER") {

@@ -1,18 +1,32 @@
 // ModelJSON（https://github.com/scottfr/modeljson）の型と小さな補助関数
 
-export const ELEMENT_TYPES = [
-  "STOCK",
-  "FLOW",
-  "VARIABLE",
-  "CONVERTER",
-  "LINK",
-  "STATE",
-  "TRANSITION",
-] as const;
+export const ELEMENT_TYPES = ["STOCK", "FLOW", "VARIABLE", "CONVERTER", "LINK"] as const;
 export type ElementType = (typeof ELEMENT_TYPES)[number];
 
-/** 段階 1 で追加・変更できる要素。STATE と TRANSITION は読み込み・保存・実行だけ扱う。 */
-export const EDITABLE_TYPES = ["STOCK", "FLOW", "VARIABLE", "CONVERTER", "LINK"] as const;
+/**
+ * 対応していない要素の種類。ModelJSON にはあるが、エージェントベースのモデルの部品で、システムダイナミクスのモデルには使わない。
+ * 含むモデルは読み込むときに断る（unsupportedElementsMessage）
+ */
+const UNSUPPORTED_TYPES = ["STATE", "TRANSITION"];
+
+/** 断る文に並べる要素の数の上限 */
+const MAX_UNSUPPORTED_LISTED = 10;
+
+/** 対応していない要素（STATE、TRANSITION）があれば、どの要素かと理由を書いた文を返す。なければ undefined */
+export function unsupportedElementsMessage(elements: readonly unknown[]): string | undefined {
+  const found = elements.filter(
+    (e): e is { type: string; name?: unknown } => !!e && typeof e === "object" && UNSUPPORTED_TYPES.includes((e as { type?: unknown }).type as string),
+  );
+  if (!found.length) return undefined;
+  const listed = found
+    .slice(0, MAX_UNSUPPORTED_LISTED)
+    .map((e) => (typeof e.name === "string" && e.name.trim() ? `${e.type} "${e.name}"` : `名前のない ${e.type}`));
+  const more = found.length > MAX_UNSUPPORTED_LISTED ? `ほか ${found.length - MAX_UNSUPPORTED_LISTED} 個` : "";
+  return (
+    `対応していない要素があります: ${[...listed, ...(more ? [more] : [])].join("、")}。` +
+    "ループサイトはシステムダイナミクスのモデル（ストック、フロー、変数、コンバーター、リンク）だけを扱うため、状態（STATE）と遷移（TRANSITION）を含むモデルは読み込めません。"
+  );
+}
 
 export const TIME_UNITS = ["SECONDS", "MINUTES", "HOURS", "DAYS", "WEEKS", "MONTHS", "YEARS"] as const;
 export type TimeUnits = (typeof TIME_UNITS)[number];
@@ -47,7 +61,6 @@ export interface ElementBehavior {
   interpolation?: "NONE" | "LINEAR";
   data?: Point[];
   polarity?: "NEUTRAL" | "POSITIVE" | "NEGATIVE";
-  trigger?: "PROBABILITY" | "TIMEOUT" | "CONDITION";
   [key: string]: unknown;
 }
 
@@ -123,7 +136,7 @@ export interface ModelJSON {
 }
 
 export function isConnector(type: ElementType): boolean {
-  return type === "FLOW" || type === "LINK" || type === "TRANSITION";
+  return type === "FLOW" || type === "LINK";
 }
 
 /**
@@ -193,7 +206,7 @@ export function findLink(model: ModelJSON, from: string, to: string): ModelEleme
 /** el の式が ref を参照してよいか（リンクがあるか、フローが自分のストックを見ているか）。検証（validate.ts）と、画面でリンクを消せるかの判断で使う */
 export function canReference(model: ModelJSON, el: ModelElement, ref: string): boolean {
   if (el.name && sameName(el.name, ref)) return true;
-  if ((el.type === "FLOW" || el.type === "TRANSITION") && (sameName(el.from, ref) || sameName(el.to, ref))) return true;
+  if (el.type === "FLOW" && (sameName(el.from, ref) || sameName(el.to, ref))) return true;
   return model.elements.some((l) => l.type === "LINK" && sameName(l.from, ref) && sameName(l.to, el.name));
 }
 
@@ -202,7 +215,7 @@ export function equationsOf(el: ModelElement): { field: "initial_value" | "value
   const out: { field: "initial_value" | "value"; text: string }[] = [];
   const b = el.behavior ?? {};
   if (el.type === "STOCK" && typeof b.initial_value === "string") out.push({ field: "initial_value", text: b.initial_value });
-  if ((el.type === "VARIABLE" || el.type === "FLOW" || el.type === "TRANSITION") && typeof b.value === "string") {
+  if ((el.type === "VARIABLE" || el.type === "FLOW") && typeof b.value === "string") {
     out.push({ field: "value", text: b.value });
   }
   return out;

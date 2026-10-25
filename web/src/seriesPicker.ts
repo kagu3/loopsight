@@ -12,14 +12,13 @@ export interface SeriesGroup {
   items: SeriesCandidate[];
 }
 
-/** まとめる順と見出し。ここにない種類は最後の「その他」にまとめる */
+/** まとめる順と見出し（グラフに出せる要素の種類のすべて） */
 const GROUPS: { type: string; label: string }[] = [
   { type: "STOCK", label: "ストック" },
   { type: "FLOW", label: "フロー" },
   { type: "VARIABLE", label: "変数" },
   { type: "CONVERTER", label: "コンバーター" },
 ];
-const OTHER = { type: "OTHER", label: "その他" };
 
 /** 比べるための形。全角と半角、大文字と小文字の違いは見ない */
 function fold(s: string): string {
@@ -38,11 +37,10 @@ export function matchesQuery(name: string, query: string): boolean {
 
 /** 候補を種類ごとにまとめ、名前で絞り込む。中の並びは元の順のまま。空のまとまりは出さない */
 export function groupCandidates(candidates: SeriesCandidate[], query = ""): SeriesGroup[] {
-  const groups = [...GROUPS, OTHER].map((g) => ({ ...g, items: [] as SeriesCandidate[] }));
-  const other = groups[groups.length - 1]!;
+  const groups = GROUPS.map((g) => ({ ...g, items: [] as SeriesCandidate[] }));
   for (const c of candidates) {
     if (!matchesQuery(c.name, query)) continue;
-    (groups.find((g) => g.type === c.type) ?? other).items.push(c);
+    groups.find((g) => g.type === c.type)?.items.push(c);
   }
   return groups.filter((g) => g.items.length > 0);
 }

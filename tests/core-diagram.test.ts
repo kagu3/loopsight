@@ -186,23 +186,6 @@ describe("選んだ要素につながるもの", () => {
     expect(sorted(variable.edges)).toEqual([link.id]);
   });
 
-  test("遷移の線もフローと同じく最後までたどる", () => {
-    // 状態と遷移は upsert_elements でまだ足せないので、ModelJSON を直接書く
-    const m = emptyModel("states");
-    m.elements.push(
-      { type: "STATE", name: "Healthy" },
-      { type: "STATE", name: "Sick" },
-      { type: "STATE", name: "Recovered" },
-      { type: "TRANSITION", name: "Infect", from: "Healthy", to: "Sick" },
-      { type: "TRANSITION", name: "Recover", from: "Sick", to: "Recovered" },
-    );
-    const g = toGraph(m);
-    const c = connectedTo(g, "Healthy")!;
-    expect(sorted(c.nodes)).toEqual(["el:healthy", "el:sick", "valve:infect"]);
-    expect(sorted(c.edges)).toEqual(["valve:infect:in", "valve:infect:out"]);
-    expect(g.edges.filter((e) => c.edges.has(e.id)).every((e) => e.kind === "transition")).toBe(true);
-  });
-
   test("図にない要素なら何も薄くしない", () => {
     expect(connectedTo(toGraph(population()), "Nothing")).toBeUndefined();
   });

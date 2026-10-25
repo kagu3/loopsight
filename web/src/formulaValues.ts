@@ -234,7 +234,7 @@ function stockView(model: Pick<ModelJSON, "elements">, el: ModelElement, value: 
 
 /**
  * 選んだ要素の、値を入れた式。series の at 番目の時点の値を使う。
- * 式を出さない要素（変換器、状態など）や、見つからない要素は undefined
+ * 式を出さない要素（変換器など）や、見つからない要素は undefined
  */
 export function formulaView(
   model: Pick<ModelJSON, "elements">,

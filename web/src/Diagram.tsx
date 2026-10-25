@@ -714,7 +714,7 @@ export function Diagram(props: DiagramProps) {
           changed: !!g.element && changed.has(g.element.toLowerCase()),
           dimmed: !!focus && !focus.edges.has(g.id),
           inLoop: !!loop?.edges.has(g.id),
-          // つなぎ替えられるのは、編集モードのフローの端（遷移の端は状態なので、ここでは扱わない）
+          // つなぎ替えられるのは、編集モードのフローの端
           grip: editable && !props.embed && onReconnect && g.kind === "flow" ? (g.id.endsWith(":in") ? "from" : "to") : undefined,
           grabbed: !!grabbed && g.kind === "flow" && nameKey(g.element ?? "") === nameKey(grabbed.flow) && g.id.endsWith(grabbed.end === "from" ? ":in" : ":out"),
           onGrip,

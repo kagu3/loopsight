@@ -15,7 +15,6 @@ import {
   withBaseline,
   type ModelJSON,
 } from "../src/core/index.js";
-import { loadSample } from "./helpers.js";
 
 function growth(): ModelJSON {
   const m = emptyModel("growth", { time_length: 10, time_units: "YEARS" });
@@ -88,13 +87,6 @@ describe("実行と要約", () => {
       expect(e).toBeInstanceOf(ModelError);
       expect((e as ModelError).issues[0]!.element).toBe("Rate");
     }
-  });
-
-  test("状態（0/1）と遷移を含むモデルも要約できる", () => {
-    const bath = loadSample("bathtub");
-    const s = summarizeRun(runModel(bath), ["Bathtub", "Is Filling"], 0);
-    expect(s.results["Is Filling"]).toMatchObject({ initial: 1, final: 0, min: 0, max: 1 });
-    expect(s.results.Bathtub!.max).toBe(60);
   });
 
   test("間引き位置は先頭と末尾を含む", () => {

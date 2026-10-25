@@ -13,8 +13,6 @@ export interface ModelSummary {
   flows: Record<string, unknown>[];
   variables: Record<string, unknown>[];
   converters: Record<string, unknown>[];
-  states?: Record<string, unknown>[];
-  transitions?: Record<string, unknown>[];
   links: string[];
   scenarios?: string[];
   /** 図のグループ（名前、色、属する要素） */
@@ -72,10 +70,6 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
       return `${e.from ?? "?"} → ${e.to ?? "?"}${p === "POSITIVE" ? " (+)" : p === "NEGATIVE" ? " (-)" : ""}${hasDelayMark(e) ? " ‖遅れ" : ""}`;
     }),
   };
-  if (counts.STATE) summary.states = of("STATE").map((e) => compact({ name: e.name, initial_value: e.behavior?.initial_value, emphasis: emphasis(e), description: e.description }));
-  if (counts.TRANSITION) {
-    summary.transitions = of("TRANSITION").map((e) => compact({ name: e.name, from: e.from, to: e.to, trigger: e.behavior?.trigger, value: e.behavior?.value }));
-  }
   if (model.scenarios?.length) summary.scenarios = model.scenarios.map((s) => s.name ?? "(名前なし)");
   const groups = wellFormedGroups(model);
   if (groups.length) summary.groups = groups.map((g) => ({ name: g.name, color: g.color, elements: g.elements }));

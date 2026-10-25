@@ -8,7 +8,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   BASELINE_SCENARIO,
-  EDITABLE_TYPES,
+  ELEMENT_TYPES,
   EditError,
   GROUP_COLORS,
   ImportError,
@@ -85,7 +85,7 @@ const simulation = z.object(simulationShape);
 const targets = z.array(z.string()).optional().describe("結果を返す要素名。省略するとストックすべて");
 
 const elementPatch = z.object({
-  type: z.enum(EDITABLE_TYPES).optional().describe("新しく追加するときは必須"),
+  type: z.enum(ELEMENT_TYPES).optional().describe("新しく追加するときは必須"),
   name: z.string().optional().describe("要素名（LINK 以外は必須）。既存の名前なら更新、なければ追加"),
   rename_to: z.string().optional().describe("既存の要素の名前を変える。式やリンクの参照と、実際のデータ（<モデル名>.data.csv）の列名も書き換える"),
   description: z.string().nullable().optional(),
@@ -104,7 +104,7 @@ const elementPatch = z.object({
     .describe(
       "表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる。" +
         "emphasis: true で図の要素を強調する（箱・名前の文字・枠の太さをまとめて大きく描く。size を指定した要素はその大きさを基準に大きくする）。false でふつうに戻す。" +
-        "強調できるのはストック、変数、コンバーター、状態。付け外ししても箱の真ん中の位置は変わらない（coordinates も一緒に指定したときはそれに従う）。シミュレーションには影響しない。" +
+        "強調できるのはストック、変数、コンバーター。付け外ししても箱の真ん中の位置は変わらない（coordinates も一緒に指定したときはそれに従う）。シミュレーションには影響しない。" +
         "emphasis はループサイト独自の項目で、Insight Maker などほかのツールは読み込めないことがあるので、ほかのツールに渡すときは強調を外す / " +
         "LINK と FLOW: delay（true で遅れの印 ‖ を図の線の途中に描く。false か null で外す。見た目だけで、シミュレーションには影響しない。実際の遅れは式の Delay や Smooth などで表す）",
     ),

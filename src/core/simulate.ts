@@ -77,8 +77,8 @@ export function applyOverrides(model: ModelJSON, options: RunOptions = {}): Mode
 
 function setValue(el: ModelElement, value: Equation): void {
   el.behavior ??= {};
-  if (el.type === "STOCK" || el.type === "STATE") el.behavior.initial_value = value;
-  else if (el.type === "VARIABLE" || el.type === "FLOW" || el.type === "TRANSITION") el.behavior.value = value;
+  if (el.type === "STOCK") el.behavior.initial_value = value;
+  else if (el.type === "VARIABLE" || el.type === "FLOW") el.behavior.value = value;
   else throw new ModelError(`${el.type} "${el.name}" の値は上書きできません。`, [{ element: el.name, message: "上書きできるのは STOCK（初期値）、VARIABLE、FLOW です。" }]);
 }
 
@@ -98,7 +98,7 @@ export function runModel(model: ModelJSON, options: RunOptions = {}): RunData {
   const columns = new Map<string, unknown[]>();
   for (const p of m.find((x) => !(x instanceof Link))) {
     const el = findElement(model, p.name);
-    if (!el || el.type === "LINK" || el.type === "TRANSITION") continue;
+    if (!el || el.type === "LINK") continue;
     try {
       columns.set(el.name!, results.series(p));
     } catch {
