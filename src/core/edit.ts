@@ -1,7 +1,8 @@
-import type { ElementBehavior, ElementDisplay, ElementType, Equation, ModelElement, ModelJSON, Scenario, SimulationSettings } from "./modeljson.js";
-import { boxLayout, BOX_TYPES } from "./geometry.js";
+import type { Annotation, ElementBehavior, ElementDisplay, ElementType, Equation, ModelElement, ModelJSON, Point, Scenario, SimulationSettings } from "./modeljson.js";
+import { bounds, toGraph } from "./diagram.js";
+import { ANNOTATION_MAX_WIDTH, ANNOTATION_MIN_WIDTH, boxLayout, BOX_TYPES } from "./geometry.js";
 import { DELAY_MARK_TYPES } from "./delay.js";
-import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
+import { annotationsOf, EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 import { removeFromGroups, renameInGroups } from "./groups.js";
 
 export class EditError extends Error {
@@ -436,6 +437,109 @@ export function setScenarios(model: ModelJSON, patches: ScenarioPatch[], options
 
   if (scenarios.length) model.scenarios = scenarios;
   else delete model.scenarios;
+  return report;
+}
+
+/** set_annotations の 1 件分。id で既存の注釈を探し、あれば重ね、なければ足す */
+export interface AnnotationPatch {
+  /** 注釈の id。新しく足すときは省略してよい（「注釈1」のように付ける） */
+  id?: string;
+  /** 文字。改行で行を分けられる。新しく足すときは必須 */
+  text?: string;
+  /** 左上の座標。新しく足すときに省略すると、図の下に置く */
+  coordinates?: Point;
+  /** 折り返す幅。null で既定の幅に戻す */
+  width?: number | null;
+}
+
+export interface AnnotationReport {
+  added: string[];
+  updated: string[];
+  removed: string[];
+}
+
+/** 新しい注釈の id。「注釈1」「注釈2」…のうち、まだ使っていないもの（大文字と小文字は区別しない） */
+export function newAnnotationId(model: ModelJSON): string {
+  const taken = new Set(annotationsOf(model).map((a) => nameKey(a.id)));
+  for (let n = 1; ; n++) if (!taken.has(nameKey(`注釈${n}`))) return `注釈${n}`;
+}
+
+/** 足した注釈を、図の下に置くときの間 */
+const ANNOTATION_GAP = 40;
+
+function checkPoint(p: unknown, what: string): Point {
+  if (!Array.isArray(p) || p.length !== 2 || !p.every((v) => typeof v === "number" && Number.isFinite(v))) {
+    throw new EditError(`${what}の coordinates は [x, y] の 2 つの数にしてください。`);
+  }
+  return [Math.round(p[0]), Math.round(p[1])];
+}
+
+function checkWidth(w: unknown, what: string): number {
+  if (typeof w !== "number" || !Number.isFinite(w) || w < ANNOTATION_MIN_WIDTH || w > ANNOTATION_MAX_WIDTH) {
+    throw new EditError(`${what}の width は ${ANNOTATION_MIN_WIDTH} から ${ANNOTATION_MAX_WIDTH} の数にしてください。`);
+  }
+  return Math.round(w);
+}
+
+/**
+ * 図の注釈（どこにもつながらない文字だけのもの）をまとめて足す・直す・消す。モデルはその場で書き換える。
+ * 注釈はシミュレーションの要素ではないので、elements ではなくモデルの annotations に入れる。replace なら今の注釈を捨ててから足す。
+ * 座標のない新しい注釈は、図（要素とほかの注釈）の下に置く
+ */
+export function setAnnotations(model: ModelJSON, patches: AnnotationPatch[], options: { remove?: string[]; replace?: boolean } = {}): AnnotationReport {
+  const report: AnnotationReport = { added: [], updated: [], removed: [] };
+  const current = annotationsOf(model);
+  const list: Annotation[] = options.replace ? [] : [...current];
+  if (options.replace) report.removed.push(...current.map((a) => a.id));
+
+  const find = (id: string) => list.find((a) => sameName(a.id, id));
+  for (const id of options.remove ?? []) {
+    if (typeof id !== "string") throw new EditError("消す注釈は id（文字列）で指定してください。");
+    const a = find(id);
+    if (!a) throw new EditError(`消す注釈 "${id}" が見つかりません。${didYouMean(id, list.map((x) => x.id))}`);
+    list.splice(list.indexOf(a), 1);
+    report.removed.push(a.id);
+  }
+
+  for (const p of patches) {
+    if (!p || typeof p !== "object") throw new EditError("注釈の変更は { id, text, coordinates, width } の形にしてください。");
+    if (p.id !== undefined && typeof p.id !== "string") throw new EditError("注釈の id は文字列にしてください。");
+    const id = p.id?.trim();
+    const what = id ? `注釈 "${id}" ` : "新しい注釈";
+    if (p.text !== undefined && typeof p.text !== "string") throw new EditError(`${what}の text は文字列にしてください。`);
+    if (p.text !== undefined && !p.text.trim()) {
+      throw new EditError(`${what}の text が空です。注釈を消すときは remove に id を入れてください。`);
+    }
+    const existing = id ? find(id) : undefined;
+    if (existing) {
+      if (p.text !== undefined) existing.text = p.text.trim();
+      if (p.coordinates !== undefined) existing.coordinates = checkPoint(p.coordinates, what);
+      if (p.width === null) delete existing.width;
+      else if (p.width !== undefined) existing.width = checkWidth(p.width, what);
+      report.updated.push(existing.id);
+      continue;
+    }
+    if (p.text === undefined) {
+      const guess = id ? didYouMean(id, list.map((a) => a.id)) : "";
+      throw new EditError(`${what}には text が必要です。${guess}`);
+    }
+    const a: Annotation = { id: id || newAnnotationId({ ...model, annotations: list }), text: p.text.trim(), coordinates: [0, 0] };
+    if (p.width !== undefined && p.width !== null) a.width = checkWidth(p.width, what);
+    if (p.coordinates !== undefined) a.coordinates = checkPoint(p.coordinates, what);
+    else {
+      // 図（要素と、ここまでの注釈）の下に置く
+      const b = bounds(toGraph({ ...model, annotations: list }).nodes);
+      a.coordinates = b.width ? [Math.round(b.x), Math.round(b.y + b.height + ANNOTATION_GAP)] : [ANNOTATION_GAP, ANNOTATION_GAP];
+    }
+    list.push(a);
+    report.added.push(a.id);
+  }
+
+  // 壊れていて図に描けない注釈（手で書き換えたものなど）は、そのまま残す
+  const broken = Array.isArray(model.annotations) && !options.replace ? model.annotations.filter((a) => !current.includes(a)) : [];
+  const next = [...list, ...broken];
+  if (next.length) model.annotations = next;
+  else delete model.annotations;
   return report;
 }
 

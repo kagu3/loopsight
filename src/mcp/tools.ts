@@ -38,6 +38,7 @@ import {
   resolveTargets,
   runModel,
   runToCSV,
+  setAnnotations,
   setGroups,
   setScenarios,
   setSimulation,
@@ -50,6 +51,7 @@ import {
   upsertElements,
   validateModel,
   withBaseline,
+  type AnnotationPatch,
   type ElementPatch,
   type GroupPatch,
   type LoopStep,
@@ -219,7 +221,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
-6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている
+6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている。要素の補足や図の読み方は、set_annotations で説明する箱の近くに注釈（文字だけのもの）として置ける
    要素が多いときは、set_groups で意味のまとまり（「お店側」「お客側」など）をグループにする。図では属する要素が薄い色の背景で囲まれ、凡例が出る。layout_model は同じグループの要素を近くに集めて並べる
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
@@ -400,6 +402,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       description:
         "座標のない要素に、重ならないように座標を付けて保存する（ビューアが座標のない要素を仮に並べるのと同じ簡易レイアウト）。reset: true ですべて並べ直す。強調した要素（display.emphasis）は大きくした箱の大きさで並べる。" +
         "グループ（set_groups）があれば、同じグループの要素が近くに集まるように並べる。" +
+        "注釈（set_annotations）は動かさない。箱は注釈を避けて置くが、雲やフローの線・名前は注釈に重なることがあるので、view_diagram で確かめて直す。" +
         "結果に図の確認（重なり、線が要素や名前の上を通るところ、線の交差、1 か所に集まる線）を付ける。直すときは view_diagram で図を見ながら upsert_elements の display で位置を変える。",
       inputSchema: {
         model: modelName,
@@ -429,9 +432,10 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "図を見る",
       description:
-        "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、" +
+        "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり（注釈も含む）、線（フロー、リンク）がつながっていない要素や注釈の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、" +
         "グループ（set_groups）の囲みどうしの重なりとグループに属さない要素が囲みに入っているところ（group_issues）、グループの囲みの範囲（groups）、各要素の位置を返す。" +
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
+        "注釈（positions の type が NOTE）は set_annotations の coordinates（左上）で直す。" +
         "強調した要素（display.emphasis）は大きく描き、重なりなどの確認もその大きさで行う（positions の size も大きくしたもの）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
         "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。" +
@@ -465,7 +469,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         model: a.model,
         ...(loop ? { loop: { ...loop, steps: loopSteps } } : {}),
         how_to_move:
-          "upsert_elements で [{name:'要素名', display:{coordinates:[x, y]}}]（左上）。雲は [{name:'フロー名', display:{from_coordinates:[x, y]}}]（中心、行き先なら to_coordinates）。y は下向き",
+          "upsert_elements で [{name:'要素名', display:{coordinates:[x, y]}}]（左上）。雲は [{name:'フロー名', display:{from_coordinates:[x, y]}}]（中心、行き先なら to_coordinates）。注釈は set_annotations で [{id:'注釈1', coordinates:[x, y]}]（左上）。y は下向き",
         ...checkDiagram(m),
         ...unmarkedDelaysCheck(m),
       };
@@ -711,6 +715,53 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         groups: m.groups ?? [],
         diagram: { group_issues, ...(groups ? { areas: groups.map((g) => ({ name: g.name, ...g.area })) } : {}) },
         next_step: "view_diagram で図を見て確かめてください。グループの要素が離れているときは、layout_model（reset: true）で並べ直すと近くに集まります。",
+      };
+    }),
+  );
+
+  server.registerTool(
+    "set_annotations",
+    {
+      title: "図の注釈を置く",
+      description:
+        "図に注釈（どこにもつながらない、文字だけのもの）を置いて保存する。要素の補足や「この図の読み方」を、説明する箱の近くに書くのに使う。" +
+        "注釈はシミュレーションの要素ではない（式から参照できず、ループや検証、グラフの要素の一覧には出ない）。モデルの annotations に保存し、Insight Maker に読み込ませると消える。" +
+        "id で既存の注釈を探し、あれば重ね、なければ足す（id を省くと「注釈1」のように付ける）。remove で消し、replace: true で今の注釈をすべて置き換える。" +
+        "文字は決まった幅（既定 200）で折り返し、改行（\n）で行を分けられる。coordinates は左上。新しい注釈で省くと、図の下に置く。" +
+        "ビューアの図と view_diagram の図の両方に出る（図の部品は共通）。layout_model は注釈を動かさない（箱は注釈を避けて置くが、雲やフローの線・名前は重なることがあるので、view_diagram で確かめて直す）。" +
+        "結果の diagram_issues に、注釈と要素・線の重なりを返す。view_diagram で図を見て、重なっていれば coordinates を直す。" +
+        "図の左上は、ループを目立たせる表示（view_diagram の loop）でループの名前の札に隠れることがあるので、左上の角は避ける。" +
+        "色の説明（凡例）は注釈で作らない。",
+      inputSchema: {
+        model: modelName,
+        annotations: z
+          .array(
+            z.object({
+              id: z.string().optional().describe("注釈の id。既存の id なら直し、なければ足す。省くと新しく足す"),
+              text: z.string().optional().describe("文字。改行で行を分けられる。新しく足すときは必須"),
+              coordinates: z.tuple([z.number(), z.number()]).optional().describe("左上の座標 [x, y]（y は下向き）。新しい注釈で省くと図の下に置く"),
+              width: z.number().nullable().optional().describe("折り返す幅（60〜800。既定 200）。null で既定に戻す"),
+            }),
+          )
+          .optional()
+          .describe("[{text:'外から人が入ってくると人口は増える', coordinates:[100, 40]}, {id:'注釈1', coordinates:[300, 40]}]"),
+        remove: z.array(z.string()).optional().describe("消す注釈の id"),
+        replace: z.boolean().optional().describe("今の注釈をすべて捨ててから annotations を保存する（既定は false）"),
+      },
+    },
+    handle(async (a: { model: string; annotations?: AnnotationPatch[]; remove?: string[]; replace?: boolean }) => {
+      if (!a.annotations?.length && !a.remove?.length && !a.replace) throw new EditError("annotations か remove を指定してください。");
+      const m = await store.read(a.model);
+      const report = setAnnotations(m, a.annotations ?? [], { remove: a.remove, replace: a.replace });
+      const file = await store.write(a.model, m);
+      const check = checkDiagram(m);
+      const issues = [...check.overlaps, ...check.lines_through_elements].filter((t) => t.includes("注釈 "));
+      return {
+        model: a.model,
+        file,
+        changes: report,
+        annotations: check.positions.filter((p) => p.type === "NOTE"),
+        ...(issues.length ? { diagram_issues: issues } : {}),
       };
     }),
   );

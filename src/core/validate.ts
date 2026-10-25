@@ -179,7 +179,7 @@ export function staticCheck(model: ModelJSON): { errors: Issue[]; warnings: Issu
   return { errors, warnings };
 }
 
-/** ModelJSON から実行用の Model を作る。失敗したら ModelError を投げる。Loopsight 独自の項目（強調、遅れの印、図のグループなど）は外して渡す（engineModel） */
+/** ModelJSON から実行用の Model を作る。失敗したら ModelError を投げる。Loopsight 独自の項目（強調、遅れの印、図のグループ、注釈など）は外して渡す（engineModel） */
 export function buildModel(model: ModelJSON): Model {
   try {
     return loadModelJSON(engineModel(model));

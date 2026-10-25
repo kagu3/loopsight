@@ -409,6 +409,46 @@ describe("ビューアからの編集", () => {
   });
 });
 
+describe("ビューアからの注釈の編集", () => {
+  test("注釈を足し、要素といっしょに動かし、文字を直し、消す。どれも元に戻せる", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+    const added = await post<EditResponse>("/api/models/pop/edit", { version: v0.version, elements: [], annotations: [{ id: "注釈1", text: "注釈", coordinates: [400, 40] }] });
+    expect(added.status).toBe(200);
+    expect(added.body.report!.added).toEqual(['注釈 "注釈1"']);
+    expect(added.body.model.model.annotations).toEqual([{ id: "注釈1", text: "注釈", coordinates: [400, 40] }]);
+    // 注釈があっても実行できる
+    expect(added.body.model.run).toBeDefined();
+
+    // 要素と注釈をいっしょに動かすと、1 回の保存にする
+    const moved = await post<EditResponse>("/api/models/pop/edit", {
+      version: added.body.model.version,
+      elements: [{ name: "Population", display: { coordinates: [300, 200] } }],
+      annotations: [{ id: "注釈1", coordinates: [500, 60] }],
+    });
+    expect(moved.status).toBe(200);
+    expect(moved.body.model.model.annotations![0]!.coordinates).toEqual([500, 60]);
+    expect(moved.body.model.undo_available).toBe(2);
+
+    const edited = await post<EditResponse>("/api/models/pop/edit", { version: moved.body.model.version, elements: [], annotations: [{ id: "注釈1", text: "人口は出生で増える" }] });
+    expect(edited.body.model.model.annotations![0]!.text).toBe("人口は出生で増える");
+
+    const removed = await post<EditResponse>("/api/models/pop/remove", { version: edited.body.model.version, elements: [], annotations: ["注釈1"] });
+    expect(removed.status).toBe(200);
+    expect(removed.body.report!.removed).toEqual(['注釈 "注釈1"']);
+    expect(removed.body.model.model.annotations).toBeUndefined();
+
+    const undone = await post<EditResponse>("/api/models/pop/undo", { version: removed.body.model.version });
+    expect(undone.body.model.model.annotations![0]!.text).toBe("人口は出生で増える");
+
+    // 誤りは 400 で、ファイルは変えない
+    const bad = await post<EditErrorResponse>("/api/models/pop/edit", { version: undone.body.model.version, elements: [], annotations: [{ id: "注釈1", text: "" }] });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/text が空/);
+    expect((await post<EditErrorResponse>("/api/models/pop/remove", { version: undone.body.model.version, elements: [], annotations: [1] })).status).toBe(400);
+    expect((await post<EditErrorResponse>("/api/models/pop/edit", { version: undone.body.model.version, elements: [], annotations: [{ id: 1, text: "a" }] })).status).toBe(400);
+  });
+});
+
 describe("ビューアからのシナリオの編集", () => {
   test("シナリオを足し、直し、消す。保存した内容はモデルの scenarios に入り、グラフの実行結果も返す", async () => {
     const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;

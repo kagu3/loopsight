@@ -1,6 +1,7 @@
 // サーバーとのやりとり
 import {
   VIEWER_HEADER,
+  type AnnotationPatch,
   type EditErrorResponse,
   type EditResponse,
   type ElementPatch,
@@ -49,12 +50,13 @@ async function post(url: string, body: unknown): Promise<WriteResult> {
   return res.ok ? { ok: true, data: json as EditResponse } : { ok: false, error: json as EditErrorResponse };
 }
 
-export const postEdit = (name: string, version: string, elements: ElementPatch[]) =>
-  post(`/api/models/${encodeURIComponent(name)}/edit`, { version, elements });
+/** 要素を足す・直す。annotations（注釈の変更。MCP の set_annotations と同じ形）があれば、同じ 1 回の保存で変える */
+export const postEdit = (name: string, version: string, elements: ElementPatch[], annotations?: AnnotationPatch[]) =>
+  post(`/api/models/${encodeURIComponent(name)}/edit`, annotations?.length ? { version, elements, annotations } : { version, elements });
 
-/** 要素を消す。elements は MCP の remove_elements と同じ形 */
-export const postRemove = (name: string, version: string, elements: RemoveTarget[]) =>
-  post(`/api/models/${encodeURIComponent(name)}/remove`, { version, elements });
+/** 要素を消す。elements は MCP の remove_elements と同じ形。annotations は消す注釈の id */
+export const postRemove = (name: string, version: string, elements: RemoveTarget[], annotations?: string[]) =>
+  post(`/api/models/${encodeURIComponent(name)}/remove`, annotations?.length ? { version, elements, annotations } : { version, elements });
 
 /** シナリオを足す・直す・消す。scenarios と remove は MCP の set_scenarios と同じ形 */
 export const postScenarios = (name: string, version: string, scenarios: ScenarioPatch[], remove?: string[]) =>

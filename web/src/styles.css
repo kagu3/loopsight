@@ -23,6 +23,8 @@
   --state-border: #4a3aa7;
   --flow: #3d4f6b;
   --link: #8b8a84;
+  /* 注釈の点線の枠 */
+  --note-border: #b9b7b0;
   --changed: #eda100;
   --selected: #2a78d6;
   /* 目立たせるループ（R：強める、B：釣り合わせる） */
@@ -95,6 +97,7 @@
     --state-border: #9085e9;
     --flow: #b8c4d8;
     --link: #8f8e86;
+    --note-border: #55544f;
     --changed: #c98500;
     --selected: #5598e7;
     --loop-r: #e66767;
@@ -477,6 +480,15 @@ button.link {
   font-size: 13px;
   cursor: pointer;
 }
+/* 注釈の文字（改行はそのまま出す） */
+.details .note-text {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.type-note {
+  border-style: dashed;
+}
 
 /* 右側 */
 .main {
@@ -818,6 +830,27 @@ button.link.danger-link {
   fill: var(--surface-1);
   stroke: var(--text-muted);
   stroke-width: 1.2;
+}
+/* 注釈：要素と見分けが付くよう、塗りの色を付けず、点線の枠にする。左寄せの文字。
+   行は core（annotationLayout）で分けてあるので折り返さない。余白と枠の線の合計（7px）と行の高さ（1.4）は core と同じにする */
+.node-note {
+  display: block;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px dashed var(--note-border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  line-height: 1.4;
+  text-align: left;
+}
+.note-line {
+  display: block;
+  white-space: pre;
+}
+.node-note.is-selected {
+  border: 1px solid var(--selected);
+  box-shadow: 0 0 0 1px var(--selected);
 }
 .node.is-selected.node-stock,
 .node.is-selected.node-variable,

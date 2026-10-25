@@ -1,5 +1,5 @@
 import { hasDelayMark } from "./delay.js";
-import type { ModelElement, ModelJSON } from "./modeljson.js";
+import { annotationsOf, type ModelElement, type ModelJSON } from "./modeljson.js";
 import { wellFormedGroups } from "./groups.js";
 
 /** AI が読みやすい、座標などを省いたモデルの要約 */
@@ -19,6 +19,8 @@ export interface ModelSummary {
   scenarios?: string[];
   /** 図のグループ（名前、色、属する要素） */
   groups?: { name: string; color: string; elements: string[] }[];
+  /** 図の注釈（要素ではない、文字だけのもの） */
+  annotations?: { id: string; text: string }[];
 }
 
 function compact(o: Record<string, unknown>): Record<string, unknown> {
@@ -77,5 +79,7 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
   if (model.scenarios?.length) summary.scenarios = model.scenarios.map((s) => s.name ?? "(名前なし)");
   const groups = wellFormedGroups(model);
   if (groups.length) summary.groups = groups.map((g) => ({ name: g.name, color: g.color, elements: g.elements }));
+  const notes = annotationsOf(model);
+  if (notes.length) summary.annotations = notes.map((a) => ({ id: a.id, text: a.text }));
   return compact(summary as unknown as Record<string, unknown>) as unknown as ModelSummary;
 }

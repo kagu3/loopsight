@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport } from "../core/index.js";
+import type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport } from "../core/index.js";
 
-export type { EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport };
+export type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport };
 
 /**
  * GET /api/models。モデルと、一覧に出すフォルダ（モデルがあるフォルダと空のフォルダ）。
@@ -70,10 +70,15 @@ export interface ModelResponse {
  */
 export type ChangeEvent = { type: "changed" | "removed"; name: string } | { type: "folders" };
 
-/** POST /api/models/:name/edit の本文。elements は MCP の upsert_elements と同じ形 */
+/**
+ * POST /api/models/:name/edit の本文。elements は MCP の upsert_elements と同じ形。
+ * annotations（注釈の変更。MCP の set_annotations と同じ形）もあれば、同じ 1 回の保存で変える（図をまとめて動かしたときなど）。
+ * annotations があれば elements は空でよい
+ */
 export interface EditRequest {
   version: string;
   elements: ElementPatch[];
+  annotations?: AnnotationPatch[];
 }
 
 /** POST /api/models/:name/scenarios の本文。scenarios と remove は MCP の set_scenarios と同じ形 */
@@ -92,10 +97,11 @@ export interface GroupsRequest {
   remove?: string[];
 }
 
-/** POST /api/models/:name/remove の本文。elements は MCP の remove_elements と同じ形 */
+/** POST /api/models/:name/remove の本文。elements は MCP の remove_elements と同じ形。annotations は消す注釈の id（あれば elements は空でよい） */
 export interface RemoveRequest {
   version: string;
   elements: RemoveTarget[];
+  annotations?: string[];
 }
 
 /** POST /api/models/:name/undo の本文 */

@@ -13,12 +13,14 @@ import {
   removeElements,
   renamesSince,
   runScenarios,
+  setAnnotations,
   setGroups,
   setScenarios,
   toGraph,
   upsertElements,
   validateModel,
   versionOf,
+  type EditReport,
   type ModelElement,
   type ModelJSON,
   type RemoveTarget,
@@ -27,6 +29,7 @@ import {
 import {
   VIEWER_HEADER,
   type ActualDataResult,
+  type AnnotationPatch,
   type ChangeEvent,
   type EditErrorResponse,
   type EditRequest,
@@ -43,7 +46,7 @@ import {
 import { watchTree } from "./watch.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
-// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups と同じ処理を通す）。
+// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_annotations と同じ処理を通す）。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
 // 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
 
@@ -212,6 +215,24 @@ class HttpError extends Error {
   }
 }
 
+const emptyEditReport = (): EditReport => ({ added: [], updated: [], removed: [], auto_links: [], notes: [] });
+
+/** 注釈の変更の結果を、要素の編集の結果に足す（画面は要素の編集と同じ形で受け取る） */
+function addAnnotationReport(report: EditReport, notes: { added: string[]; updated: string[]; removed: string[] }): void {
+  report.added.push(...notes.added.map((id) => `注釈 "${id}"`));
+  report.updated.push(...notes.updated.map((id) => `注釈 "${id}"`));
+  report.removed.push(...notes.removed.map((id) => `注釈 "${id}"`));
+}
+
+/** 編集の要求の annotations（なければ空） */
+function checkAnnotationPatches(value: unknown): AnnotationPatch[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || !value.every((a) => a && typeof a === "object" && !Array.isArray(a))) {
+    throw new HttpError(400, "annotations の中身は注釈の変更（オブジェクト）にしてください。");
+  }
+  return value as AnnotationPatch[];
+}
+
 /** 書き込みの要求が、このビューアの画面から来たものか確かめる */
 function checkWriteRequest(req: IncomingMessage): void {
   if (req.method !== "POST") throw new HttpError(405, "POST で送ってください。");
@@ -356,10 +377,12 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           return [409, await conflict(name, "ほかのところ（AI など）で先にモデルが変わっていたため、書き込みませんでした。最新の内容を読み直しました。")];
         }
         if (action === "edit") {
-          if (!Array.isArray(body.elements) || body.elements.length === 0) throw new HttpError(400, "elements がありません。");
+          const notes = checkAnnotationPatches(body.annotations);
+          if (!Array.isArray(body.elements) || (body.elements.length === 0 && !notes.length)) throw new HttpError(400, "elements がありません。");
           if (!body.elements.every((e) => e && typeof e === "object" && !Array.isArray(e))) throw new HttpError(400, "elements の中身は要素の変更（オブジェクト）にしてください。");
           const names = namesByElement(current.model);
-          const report = upsertElements(current.model, body.elements);
+          const report = body.elements.length ? upsertElements(current.model, body.elements) : emptyEditReport();
+          if (notes.length) addAnnotationReport(report, setAnnotations(current.model, notes));
           const version = await store.writeVersioned(name, current.model);
           const renamed = renamesSince(current.model, names);
           // 実際のデータの列名は、記録を残してから直す（直せなくても、保存したモデルは元に戻せるように）
@@ -409,15 +432,18 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         }
         if (action === "remove") {
           const targets: RemoveTarget[] = body.elements;
-          if (!Array.isArray(targets) || targets.length === 0) throw new HttpError(400, "elements がありません。");
+          const notes = body.annotations ?? [];
+          if (!Array.isArray(notes) || !notes.every((id) => typeof id === "string")) throw new HttpError(400, "annotations は消す注釈の id の並びにしてください。");
+          if (!Array.isArray(targets) || (targets.length === 0 && !notes.length)) throw new HttpError(400, "elements がありません。");
           const named = (t: RemoveTarget) => typeof t.name === "string" || (typeof t.from === "string" && typeof t.to === "string");
           if (!targets.every((t) => t && typeof t === "object" && !Array.isArray(t) && named(t))) {
             throw new HttpError(400, "elements の中身は、消す要素の name（LINK なら from と to）にしてください。");
           }
           // つながるフローは残して端を雲にする（MCP の remove_elements の既定と同じ）。雲は消した要素のあった場所に置く
           const placeClouds = keepCloudsInPlace(current.model);
-          const report = removeElements(current.model, targets);
+          const report = targets.length ? removeElements(current.model, targets) : emptyEditReport();
           placeClouds();
+          if (notes.length) addAnnotationReport(report, setAnnotations(current.model, [], { remove: notes }));
           const version = await store.writeVersioned(name, current.model);
           // 実際のデータの列はそのまま残す（合わなくなったところは「問題」に出る。元に戻せばまた合う）
           hist.push({ before: current.text, after: version, renamed: [] });

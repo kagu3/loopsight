@@ -1,7 +1,8 @@
 // 要素の編集フォームの中身と、送る変更の組み立て（編集モードで要素を足す・リンクを引くときも）。React に依存しない（テストから直接使う）
-import type { ElementPatch, ModelElement, ModelJSON } from "../../src/viewer/api.js";
-import { positionPatches, shiftIntoView, type Graph, type GraphNode } from "../../src/core/diagram.js";
-import { boxLayout } from "../../src/core/geometry.js";
+import type { AnnotationPatch, ElementPatch, ModelElement, ModelJSON } from "../../src/viewer/api.js";
+import { annotationPatches, positionPatches, shiftIntoView, type Graph, type GraphNode } from "../../src/core/diagram.js";
+import { newAnnotationId } from "../../src/core/edit.js";
+import { annotationLayout, boxLayout } from "../../src/core/geometry.js";
 import { canReference, equationsOf, findElement, findLink, nameKey, referencesIn, sameName } from "../../src/core/modeljson.js";
 
 /** 式の中で、半角にしないところ。[名前] の参照（全角の［］も）と、引用符で囲んだ文字列 */
@@ -113,9 +114,15 @@ export function newElementName(model: ModelJSON, type: NewElementType): string {
 
 /**
  * 図の at（図の座標）を中心に要素を足す変更。値は 0 で、名前や式はあとで詳細欄の「編集」で直す。フローは両端を雲にする。
- * 図を動かしたときと同じく、座標のない要素を仮に並べているときや、左や上にはみ出すときは、見えている配置もまとめて保存する
+ * 図を動かしたときと同じく、座標のない要素を仮に並べているときや、左や上にはみ出すときは、見えている配置もまとめて保存する。
+ * 全体をずらすときは、注釈も同じだけずらす（notes）
  */
-export function addElementPatches(model: ModelJSON, graph: Graph, type: NewElementType, at: { x: number; y: number }): { name: string; patches: ElementPatch[] } {
+export function addElementPatches(
+  model: ModelJSON,
+  graph: Graph,
+  type: NewElementType,
+  at: { x: number; y: number },
+): { name: string; patches: ElementPatch[]; notes: AnnotationPatch[] } {
   const name = newElementName(model, type);
   const added: GraphNode[] = [];
   if (type === "FLOW") {
@@ -131,7 +138,26 @@ export function addElementPatches(model: ModelJSON, graph: Graph, type: NewEleme
   const shifted = shiftIntoView(all);
   const ids = graph.missingCoordinates || shifted ? undefined : new Set(added.map((n) => n.id));
   const behavior = type === "STOCK" ? { initial_value: 0 } : { value: 0 };
-  return { name, patches: [{ type, name, behavior }, ...positionPatches(shifted ?? all, ids)] };
+  return { name, patches: [{ type, name, behavior }, ...positionPatches(shifted ?? all, ids)], notes: shifted ? annotationPatches(shifted) : [] };
+}
+
+/** 足す注釈の仮の文字。あとで詳細欄の「編集」で直す */
+export const NEW_NOTE_TEXT = "注釈";
+
+/**
+ * 図の at（図の座標）を真ん中にして注釈を足す変更。id は「注釈1」のように、まだ使っていないものにする。
+ * 要素を足すときと同じく、座標のない要素を仮に並べているときや、左や上にはみ出すときは、見えている配置もまとめて保存する
+ */
+export function addNotePatches(model: ModelJSON, graph: Graph, at: { x: number; y: number }): { id: string; elements: ElementPatch[]; notes: AnnotationPatch[] } {
+  const id = newAnnotationId(model);
+  const [w, h] = annotationLayout(NEW_NOTE_TEXT).size;
+  const note: GraphNode = { id: "new-note", kind: "NOTE", label: NEW_NOTE_TEXT, x: at.x - w / 2, y: at.y - h / 2, width: w, height: h, shape: "rect" };
+  const all = [...graph.nodes, note];
+  const shifted = shiftIntoView(all);
+  const placed = (shifted ?? all).at(-1)!;
+  const added: AnnotationPatch = { id, text: NEW_NOTE_TEXT, coordinates: [Math.round(placed.x), Math.round(placed.y)] };
+  if (!shifted && !graph.missingCoordinates) return { id, elements: [], notes: [added] };
+  return { id, elements: positionPatches(shifted ?? all), notes: [...annotationPatches(shifted ?? all), added] };
 }
 
 /**
@@ -175,6 +201,18 @@ export type FlowEnd = "from" | "to";
  * 雲を置くときは、要素を足すときと同じく、座標のない要素を仮に並べているときや、左や上にはみ出すときは、見えている配置もまとめて保存する
  */
 export function reconnectPatches(model: ModelJSON, graph: Graph, flow: string, end: FlowEnd, to: string | { x: number; y: number }): ElementPatch[] | string {
+  const changes = reconnectChanges(model, graph, flow, end, to);
+  return typeof changes === "string" ? changes : changes.elements;
+}
+
+/** reconnectPatches と同じ。全体をずらすときに、注釈も同じだけずらす変更（notes）も返す */
+export function reconnectChanges(
+  model: ModelJSON,
+  graph: Graph,
+  flow: string,
+  end: FlowEnd,
+  to: string | { x: number; y: number },
+): { elements: ElementPatch[]; notes: AnnotationPatch[] } | string {
   const f = findElement(model, flow);
   if (!f || f.type !== "FLOW") return `フロー「${flow}」が見つかりません。消された可能性があります。`;
   const key = end === "from" ? "from_coordinates" : "to_coordinates";
@@ -182,9 +220,9 @@ export function reconnectPatches(model: ModelJSON, graph: Graph, flow: string, e
     const s = findElement(model, to);
     if (!s) return `「${to}」が見つかりません。消された可能性があります。`;
     if (s.type !== "STOCK") return `フローの端は、ストックにだけつなげます（「${s.name}」はストックではありません）。`;
-    if (sameName(f[end], s.name)) return [];
+    if (sameName(f[end], s.name)) return { elements: [], notes: [] };
     if (sameName(f[end === "from" ? "to" : "from"], s.name)) return `「${f.name}」の両端を、同じストック「${s.name}」にはつなげません。`;
-    return [{ name: f.name!, [end]: s.name!, display: { [key]: null } }];
+    return { elements: [{ name: f.name!, [end]: s.name!, display: { [key]: null } }], notes: [] };
   }
   const [w, h] = CLOUD_SIZE;
   const cloud: GraphNode = { id: `cloud:${end}`, kind: "CLOUD", label: "", cloudOf: { flow: f.name!, end }, x: to.x - w / 2, y: to.y - h / 2, width: w, height: h, shape: "rect" };
@@ -192,6 +230,6 @@ export function reconnectPatches(model: ModelJSON, graph: Graph, flow: string, e
   const all = [...graph.nodes.filter((n) => !(n.cloudOf && sameName(n.cloudOf.flow, f.name) && n.cloudOf.end === end)), cloud];
   const shifted = shiftIntoView(all);
   const detach: ElementPatch[] = f[end] ? [{ name: f.name!, [end]: null }] : [];
-  if (graph.missingCoordinates || shifted) return [...detach, ...positionPatches(shifted ?? all)];
-  return [{ name: f.name!, ...(f[end] ? { [end]: null } : {}), display: { [key]: [Math.round(to.x), Math.round(to.y)] } }];
+  if (graph.missingCoordinates || shifted) return { elements: [...detach, ...positionPatches(shifted ?? all)], notes: shifted ? annotationPatches(shifted) : [] };
+  return { elements: [{ name: f.name!, ...(f[end] ? { [end]: null } : {}), display: { [key]: [Math.round(to.x), Math.round(to.y)] } }], notes: [] };
 }
