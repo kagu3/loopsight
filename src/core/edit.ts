@@ -560,14 +560,29 @@ export function setSimulation(model: ModelJSON, patch: SimulationSettings): Simu
   return next;
 }
 
-export function checkSimulation(s: SimulationSettings): void {
-  if (s.time_length !== undefined && !(s.time_length > 0)) throw new EditError("time_length は正の数にしてください。");
-  if (s.time_step !== undefined && !(s.time_step > 0)) throw new EditError("time_step は正の数にしてください。");
-  if (s.time_step !== undefined && s.time_length !== undefined && s.time_step > s.time_length) {
-    throw new EditError("time_step が time_length より大きくなっています。");
+/** シミュレーション設定の誤り 1 つ分。field はどの項目の誤りか（ビューアで、その欄の近くに出すため） */
+export interface SimulationIssue {
+  field: keyof SimulationSettings;
+  message: string;
+}
+
+/** シミュレーション設定の誤りをすべて挙げる（MCP の set_simulation とビューアの設定の欄で同じ確かめを使う） */
+export function simulationIssues(s: SimulationSettings): SimulationIssue[] {
+  const issues: SimulationIssue[] = [];
+  if (s.time_length !== undefined && !(s.time_length > 0)) issues.push({ field: "time_length", message: "time_length（期間）は正の数にしてください。" });
+  if (s.time_step !== undefined && !(s.time_step > 0)) issues.push({ field: "time_step", message: "time_step（刻み幅）は正の数にしてください。" });
+  else if (s.time_step !== undefined && s.time_length !== undefined && s.time_length > 0 && s.time_step > s.time_length) {
+    issues.push({ field: "time_step", message: "time_step（刻み幅）が time_length（期間）より大きくなっています。" });
   }
-  if (s.algorithm !== undefined && s.algorithm !== "RK1" && s.algorithm !== "RK4") throw new EditError('algorithm は "RK1"（オイラー法）か "RK4" です。');
-  if (s.time_units !== undefined && !TIME_UNITS.includes(s.time_units)) throw new EditError(`time_units は ${TIME_UNITS.join(", ")} のどれかです。`);
+  if (s.algorithm !== undefined && s.algorithm !== "RK1" && s.algorithm !== "RK4") issues.push({ field: "algorithm", message: 'algorithm（解法）は "RK1"（オイラー法）か "RK4" です。' });
+  if (s.time_units !== undefined && !TIME_UNITS.includes(s.time_units)) issues.push({ field: "time_units", message: `time_units（時間の単位）は ${TIME_UNITS.join(", ")} のどれかです。` });
+  return issues;
+}
+
+/** シミュレーション設定に誤りがあれば、はじめの誤りを EditError で投げる */
+export function checkSimulation(s: SimulationSettings): void {
+  const first = simulationIssues(s)[0];
+  if (first) throw new EditError(first.message);
 }
 
 function stripUndefined<T extends object>(o: T): Partial<T> {

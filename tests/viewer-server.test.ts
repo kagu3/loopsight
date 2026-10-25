@@ -8,6 +8,7 @@ import { startViewer, type Viewer } from "../src/viewer/server.js";
 import { watchTree } from "../src/viewer/watch.js";
 import { reconnectPatches } from "../web/src/editing.js";
 import { cellPatchOf, clearValuePatches, newScenarioPatchOf } from "../web/src/scenarios.js";
+import { simulationFormOf, simulationPatchOf } from "../web/src/simulation.js";
 import { loadSample, tempDir, UNSUPPORTED_SAMPLE } from "./helpers.js";
 
 let dir: string;
@@ -635,6 +636,71 @@ describe("ビューアからのシナリオの編集", () => {
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [{ values: {} }] })).status).toBe(400);
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [], remove: "高い" })).status).toBe(400);
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "x" }] }, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await store.readVersioned("pop")).version).toBe(v0);
+    expect((await get<ModelResponse>("/api/models/pop")).body.undo_available).toBe(0);
+  });
+});
+
+describe("ビューアからのシミュレーションの設定", () => {
+  test("変えた項目だけを保存し、すぐ実行し直した結果を返す。ファイルにも入り、元に戻せる", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+    const base = simulationFormOf(v0.model.simulation);
+    const { patch } = simulationPatchOf(base, { ...base, time_length: "20", time_step: "0.5", time_units: "MONTHS" });
+    expect(patch).toEqual({ time_length: 20, time_step: 0.5, time_units: "MONTHS" });
+    const r = await post<EditResponse>("/api/models/pop/simulation", { version: v0.version, simulation: patch });
+    expect(r.status).toBe(200);
+    expect(r.body.model.model.simulation).toEqual({ ...v0.model.simulation, time_length: 20, time_step: 0.5, time_units: "MONTHS" });
+    expect(r.body.model.run!.times.at(-1)).toBe(20);
+    expect(r.body.model.run!.time_units.toLowerCase()).toBe("months");
+    expect(r.body.model.undo_available).toBe(1);
+    // AI の get_model が読むファイルにも入る
+    expect((await new ModelStore(dir).read("pop")).simulation).toMatchObject({ time_length: 20, time_step: 0.5, time_units: "MONTHS" });
+
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: r.body.model.version });
+    expect(u.status).toBe(200);
+    expect(u.body.model.version).toBe(v0.version);
+    expect(u.body.model.model.simulation).toEqual(v0.model.simulation);
+  });
+
+  test("期間を変えて実際のデータの時刻と重ならなくなったら、警告を返す", async () => {
+    await new ModelStore(dir).writeData("pop", "Year,Population\n8,200\n10,260\n");
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+    expect(v0.actual!.issues).toEqual([]);
+    const r = await post<EditResponse>("/api/models/pop/simulation", { version: v0.version, simulation: { time_length: 5 } });
+    expect(r.status).toBe(200);
+    expect(r.body.model.actual!.issues.map((i) => i.message)).toEqual([expect.stringMatching(/重なりません/)]);
+  });
+
+  test("版が違えば書き込まず、最新を返す（AI などが先に設定を変えた場合）", async () => {
+    const before = (await get<ModelResponse>("/api/models/pop")).body;
+    const m = population();
+    m.simulation!.time_length = 30;
+    await new ModelStore(dir).write("pop", m);
+    const { status, body } = await post<EditErrorResponse>("/api/models/pop/simulation", { version: before.version, simulation: { time_step: 0.5 } });
+    expect(status).toBe(409);
+    expect(body.conflict).toBe(true);
+    expect(body.current!.model.simulation).toMatchObject({ time_length: 30, time_step: 1 });
+  });
+
+  test("set_simulation と同じ確かめを通し、誤りは 400 で、ファイルは変えない", async () => {
+    const store = new ModelStore(dir);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const bad = async (simulation: unknown) => {
+      const r = await post<EditErrorResponse>("/api/models/pop/simulation", { version: v0, simulation });
+      expect(r.status).toBe(400);
+      return r.body.error;
+    };
+    expect(await bad({ time_length: 0 })).toMatch(/time_length（期間）は正の数/);
+    expect(await bad({ time_step: -1 })).toMatch(/time_step（刻み幅）は正の数/);
+    expect(await bad({ time_step: 11 })).toMatch(/time_length（期間）より大きく/);
+    expect(await bad({ time_units: "CENTURIES" })).toMatch(/time_units/);
+    expect(await bad({ algorithm: "RK2" })).toMatch(/algorithm/);
+    // 形の誤り
+    expect(await bad({ time_length: "20" })).toMatch(/数にしてください/);
+    expect(await bad({ time_end: 20 })).toMatch(/どれかを指定/);
+    expect(await bad({})).toMatch(/どれかを指定/);
+    expect(await bad(undefined)).toMatch(/simulation がありません/);
+    expect((await post("/api/models/pop/simulation", { version: v0, simulation: { time_length: 20 } }, { Origin: "https://evil.example" })).status).toBe(403);
     expect((await store.readVersioned("pop")).version).toBe(v0);
     expect((await get<ModelResponse>("/api/models/pop")).body.undo_available).toBe(0);
   });

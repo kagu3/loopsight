@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport } from "../core/index.js";
+import type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings } from "../core/index.js";
 
-export type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport };
+export type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings };
 
 /**
  * GET /api/models。モデルと、一覧に出すフォルダ（モデルがあるフォルダと空のフォルダ）。
@@ -95,6 +95,12 @@ export interface GroupsRequest {
   groups: GroupPatch[];
   /** 消すグループの名前 */
   remove?: string[];
+}
+
+/** POST /api/models/:name/simulation の本文。simulation は MCP の set_simulation と同じ形（指定しなかった項目はそのまま） */
+export interface SimulationRequest {
+  version: string;
+  simulation: SimulationSettings;
 }
 
 /** POST /api/models/:name/remove の本文。elements は MCP の remove_elements と同じ形。annotations は消す注釈の id（あれば elements は空でよい） */

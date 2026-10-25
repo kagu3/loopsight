@@ -139,7 +139,7 @@ export function checkActualData(model: ModelJSON, data: ActualData): Issue[] {
   if (data.times.length && data.times.every((t) => t < start || t > end)) {
     issues.push({
       message: `実際のデータの時刻（${data.times[0]} から ${data.times.at(-1)}）が、シミュレーションの期間（${start} から ${end}）と重なりません。`,
-      hint: "時刻の数え方（年の数え始めなど）をモデルにそろえるか、set_simulation で期間を変えてください。",
+      hint: "時刻の数え方（年の数え始めなど）をモデルにそろえるか、期間を変えてください（AI は set_simulation、ビューアはグラフの上の帯の期間のボタン ⏱）。",
     });
   }
   return issues;

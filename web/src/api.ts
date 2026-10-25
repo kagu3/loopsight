@@ -11,6 +11,7 @@ import {
   type ModelResponse,
   type RemoveTarget,
   type ScenarioPatch,
+  type SimulationSettings,
 } from "../../src/viewer/api.js";
 
 /** 読めなかったときのエラー。status はサーバーの応答の番号（404 ならモデルのファイルがない） */
@@ -62,6 +63,9 @@ export const postRemove = (name: string, version: string, elements: RemoveTarget
 /** シナリオを足す・直す・消す。scenarios と remove は MCP の set_scenarios と同じ形 */
 export const postScenarios = (name: string, version: string, scenarios: ScenarioPatch[], remove?: string[]) =>
   post(`/api/models/${encodeURIComponent(name)}/scenarios`, remove?.length ? { version, scenarios, remove } : { version, scenarios });
+
+/** シミュレーションの設定を直す。simulation は MCP の set_simulation と同じ形（変えた項目だけ） */
+export const postSimulation = (name: string, version: string, simulation: SimulationSettings) => post(`/api/models/${encodeURIComponent(name)}/simulation`, { version, simulation });
 
 export const postUndo = (name: string, version: string) => post(`/api/models/${encodeURIComponent(name)}/undo`, { version });
 
