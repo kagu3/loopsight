@@ -82,6 +82,16 @@ export interface Scenario {
   values: Record<string, Equation>;
 }
 
+/**
+ * 図のグループ（ループサイト独自。scenarios と同じくモデルに保存し、シミュレーションには使わない）。
+ * 属する要素を図で薄い色の長方形で囲み、凡例に出す。色は決まった一覧（groups.ts の GROUP_COLORS）から選ぶ
+ */
+export interface ElementGroup {
+  name: string;
+  color: string;
+  elements: string[];
+}
+
 export interface ModelJSON {
   engine?: "SIMULATION_PACKAGE";
   name?: string;
@@ -91,6 +101,7 @@ export interface ModelJSON {
   elements: ModelElement[];
   visualizations?: Visualization[];
   scenarios?: Scenario[];
+  groups?: ElementGroup[];
   engine_settings?: { units?: { name: string; base?: string; factor?: number }[]; globals?: string };
   [key: string]: unknown;
 }
@@ -107,12 +118,15 @@ export function isConnector(type: ElementType): boolean {
  */
 export const LOOPSIGHT_DISPLAY_KEYS: readonly string[] = ["emphasis", "delay"];
 
-/** エンジンに渡すモデル。ループサイト独自の display の項目を取り除いたコピー（なければそのまま返す） */
+/**
+ * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の図のグループ（groups）を取り除いたコピー（なければそのまま返す）
+ */
 export function engineModel(model: ModelJSON): ModelJSON {
   const has = (el: ModelElement) => !!el.display && LOOPSIGHT_DISPLAY_KEYS.some((k) => k in el.display!);
-  if (!model.elements.some(has)) return model;
+  const { groups: _groups, ...rest } = model;
+  if (!model.elements.some(has)) return "groups" in model ? rest : model;
   return {
-    ...model,
+    ...rest,
     elements: model.elements.map((el) => {
       if (!has(el)) return el;
       const display = Object.fromEntries(Object.entries(el.display!).filter(([k]) => !LOOPSIGHT_DISPLAY_KEYS.includes(k)));

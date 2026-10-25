@@ -10,6 +10,7 @@ import {
   BASELINE_SCENARIO,
   EDITABLE_TYPES,
   EditError,
+  GROUP_COLORS,
   ImportError,
   LOOP_KIND_LABEL,
   MAX_LOOPS,
@@ -37,6 +38,7 @@ import {
   resolveTargets,
   runModel,
   runToCSV,
+  setGroups,
   setScenarios,
   setSimulation,
   staticCheck,
@@ -49,6 +51,7 @@ import {
   validateModel,
   withBaseline,
   type ElementPatch,
+  type GroupPatch,
   type LoopStep,
   type LoopView,
   type ModelJSON,
@@ -217,6 +220,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている
+   要素が多いときは、set_groups で意味のまとまり（「お店側」「お客側」など）をグループにする。図では属する要素が薄い色の背景で囲まれ、凡例が出る。layout_model は同じグループの要素を近くに集めて並べる
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -395,6 +399,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       title: "図の配置を付ける",
       description:
         "座標のない要素に、重ならないように座標を付けて保存する（ビューアが座標のない要素を仮に並べるのと同じ簡易レイアウト）。reset: true ですべて並べ直す。強調した要素（display.emphasis）は大きくした箱の大きさで並べる。" +
+        "グループ（set_groups）があれば、同じグループの要素が近くに集まるように並べる。" +
         "結果に図の確認（重なり、線が要素や名前の上を通るところ、線の交差、1 か所に集まる線）を付ける。直すときは view_diagram で図を見ながら upsert_elements の display で位置を変える。",
       inputSchema: {
         model: modelName,
@@ -424,7 +429,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     {
       title: "図を見る",
       description:
-        "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、各要素の位置を返す。" +
+        "モデルの図を、ビューアと同じ描き方で PNG の画像にして返す。あわせて、箱の重なり、線（フロー、リンク）がつながっていない要素の上を通るところ、線の交差、リンクがフローの名前の上を通るところ、1 か所に集まる線（ほぼ同じ向きでつながる線、1 つの弁に集まる多くのリンク）、" +
+        "グループ（set_groups）の囲みどうしの重なりとグループに属さない要素が囲みに入っているところ（group_issues）、グループの囲みの範囲（groups）、各要素の位置を返す。" +
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
         "強調した要素（display.emphasis）は大きく描き、重なりなどの確認もその大きさで行う（positions の size も大きくしたもの）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
@@ -660,6 +666,52 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         extra.comparison = { targets: names, time_units, rows };
       }
       return saveAndCheck(a.model, m, extra);
+    }),
+  );
+
+  server.registerTool(
+    "set_groups",
+    {
+      title: "図のグループを保存する",
+      description:
+        "図のグループをモデルの groups に保存する（シミュレーションには影響しない）。グループは名前、色、属する要素の組。図では属する要素をまとめて薄い色の長方形で囲み、隅に名前を出し、図の端に凡例（色と名前の一覧）を出す。" +
+        "囲みの位置と大きさは要素の位置から自動で決まる。ビューアの図と view_diagram の図の両方に出る（図の部品は共通）。" +
+        `色は ${GROUP_COLORS.join("、")} のどれか（省略すると、ほかのグループが使っていない色）。1 つの要素が属するグループは 1 つまでで、ほかのグループに属する要素を足すとそちらから移す。` +
+        "名前で既存のグループを探し、あれば重ね、なければ追加する。remove で消し、replace: true で今のグループをすべて置き換える。要素の名前を変えたり消したりすると、グループの中身も合わせて直る。" +
+        "並べ直すときは layout_model（reset: true）で、同じグループの要素が近くに集まる。view_diagram の group_issues で、囲みどうしの重なりや、グループに属さない要素が囲みに入っているところを確かめる。",
+      inputSchema: {
+        model: modelName,
+        groups: z
+          .array(
+            z.object({
+              name: z.string().describe("グループ名。既存の名前なら更新、なければ追加"),
+              rename_to: z.string().optional().describe("既存のグループの名前を変える"),
+              color: z.enum(GROUP_COLORS).optional().describe("背景の色"),
+              elements: z.array(z.string()).optional().describe("属する要素をこの並びに置き換える（LINK 以外の要素名）"),
+              add_elements: z.array(z.string()).optional().describe("属する要素に足す"),
+              remove_elements: z.array(z.string()).optional().describe("属する要素から外す"),
+            }),
+          )
+          .optional()
+          .describe("[{name:'お店側', color:'green', elements:['在庫','仕入れ']}, ...]"),
+        remove: z.array(z.string()).optional().describe("消すグループの名前"),
+        replace: z.boolean().optional().describe("今のグループをすべて捨ててから groups を保存する（既定は false）"),
+      },
+    },
+    handle(async (a: { model: string; groups?: GroupPatch[]; remove?: string[]; replace?: boolean }) => {
+      if (!a.groups?.length && !a.remove?.length && !a.replace) throw new EditError("groups か remove を指定してください。");
+      const m = await store.read(a.model);
+      const report = setGroups(m, a.groups ?? [], { remove: a.remove, replace: a.replace });
+      const file = await store.write(a.model, m);
+      const { group_issues, groups } = checkDiagram(m);
+      return {
+        model: a.model,
+        file,
+        changes: report,
+        groups: m.groups ?? [],
+        diagram: { group_issues, ...(groups ? { areas: groups.map((g) => ({ name: g.name, ...g.area })) } : {}) },
+        next_step: "view_diagram で図を見て確かめてください。グループの要素が離れているときは、layout_model（reset: true）で並べ直すと近くに集まります。",
+      };
     }),
   );
 

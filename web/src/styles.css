@@ -33,6 +33,28 @@
   /* 図に出す値の、最初からの変化（増えた・減った） */
   --value-up: #c4431a;
   --value-down: #1f66c2;
+  /* 図のグループの囲み（背景・縁・名前）。ループの R（赤）・B（青）と紛れないよう、赤と青は使わず、背景はごく薄くする */
+  --group-yellow-bg: #fbf4d6;
+  --group-yellow-border: #dcc06a;
+  --group-yellow-text: #6f5600;
+  --group-green-bg: #e6f2df;
+  --group-green-border: #93c27f;
+  --group-green-text: #2f6420;
+  --group-teal-bg: #dcf0ed;
+  --group-teal-border: #7cbfb6;
+  --group-teal-text: #1d6259;
+  --group-purple-bg: #eee9f8;
+  --group-purple-border: #ab9cdc;
+  --group-purple-text: #4a3aa7;
+  --group-pink-bg: #fae6ee;
+  --group-pink-border: #dc9cb5;
+  --group-pink-text: #8f2c55;
+  --group-brown-bg: #f2e8de;
+  --group-brown-border: #bf9a7a;
+  --group-brown-text: #694629;
+  --group-gray-bg: #ecebe7;
+  --group-gray-border: #b3b1aa;
+  --group-gray-text: #52514e;
 
   /* グラフの系列（dataviz の検証済みパレット、明るい表示） */
   --series-1: #2a78d6;
@@ -80,6 +102,27 @@
     --editing-bg: #1c2a3d;
     --value-up: #f28c5e;
     --value-down: #6eaaf0;
+    --group-yellow-bg: #2b2714;
+    --group-yellow-border: #7d6a26;
+    --group-yellow-text: #e3c766;
+    --group-green-bg: #1b2717;
+    --group-green-border: #4b7a3c;
+    --group-green-text: #9fd38a;
+    --group-teal-bg: #152826;
+    --group-teal-border: #3b7d76;
+    --group-teal-text: #86d1c8;
+    --group-purple-bg: #221e31;
+    --group-purple-border: #6559a8;
+    --group-purple-text: #b6aaf0;
+    --group-pink-bg: #2d1a21;
+    --group-pink-border: #8f4b66;
+    --group-pink-text: #f0a5c1;
+    --group-brown-bg: #29211a;
+    --group-brown-border: #765840;
+    --group-brown-text: #d9b08a;
+    --group-gray-bg: #222220;
+    --group-gray-border: #5a5954;
+    --group-gray-text: #c3c2b7;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -893,6 +936,67 @@ button.link.danger-link {
 }
 .node-cloud.is-dimmed .cloud-shape {
   stroke: color-mix(in srgb, var(--text-muted) 25%, var(--surface-1));
+}
+/* グループの囲み。要素と線の後ろに描く薄い背景と、左上の隅の名前。色ごとの --g-* は下で決める */
+.group-yellow { --g-bg: var(--group-yellow-bg); --g-border: var(--group-yellow-border); --g-text: var(--group-yellow-text); }
+.group-green { --g-bg: var(--group-green-bg); --g-border: var(--group-green-border); --g-text: var(--group-green-text); }
+.group-teal { --g-bg: var(--group-teal-bg); --g-border: var(--group-teal-border); --g-text: var(--group-teal-text); }
+.group-purple { --g-bg: var(--group-purple-bg); --g-border: var(--group-purple-border); --g-text: var(--group-purple-text); }
+.group-pink { --g-bg: var(--group-pink-bg); --g-border: var(--group-pink-border); --g-text: var(--group-pink-text); }
+.group-brown { --g-bg: var(--group-brown-bg); --g-border: var(--group-brown-border); --g-text: var(--group-brown-text); }
+.group-gray { --g-bg: var(--group-gray-bg); --g-border: var(--group-gray-border); --g-text: var(--group-gray-text); }
+.group-area {
+  position: relative;
+  background: var(--g-bg);
+  border: 1px solid var(--g-border);
+  border-radius: 12px;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.group-area-name {
+  position: absolute;
+  top: 3px;
+  left: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  color: var(--g-text);
+  white-space: nowrap;
+}
+/* ループを見せている・要素を選んでいるときは、ほかの要素と同じく背景の色に寄せて薄くする */
+.group-area.is-dimmed {
+  background: color-mix(in srgb, var(--g-bg) 35%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--g-border) 30%, var(--surface-1));
+}
+.group-area.is-dimmed .group-area-name {
+  color: color-mix(in srgb, var(--g-text) 30%, var(--surface-1));
+}
+/* 凡例（図の下の真ん中）。グループの色と名前を横に並べる */
+.group-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  max-width: 70%;
+  padding: 4px 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.group-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.group-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 12px;
+  background: var(--g-bg);
+  border: 1px solid var(--g-border);
+  border-radius: 3px;
 }
 /* シナリオに注目している間（凡例にカーソルを乗せている・左の欄で直している）：変えた要素に、シナリオの線の色（--scenario）の点線の枠と札を付ける。
    枠は選んだときの枠や変わったときの枠（box-shadow）より外に、点線で描く（重なっても見分けられるように）。
@@ -2231,4 +2335,73 @@ button.scenario-chip-button.on {
     right: auto;
     max-width: calc(100vw - 32px);
   }
+}
+
+/* 図のグループの欄（左の欄） */
+.groups-panel h2 {
+  margin-bottom: 0;
+}
+.groups-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.group-color {
+  flex: none;
+  width: 56px;
+  background: var(--g-bg);
+  border: 1px solid var(--g-border);
+  color: var(--g-text);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+}
+.group-name {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+.group-count {
+  flex: none;
+  min-width: 1.5em;
+  text-align: right;
+}
+.group-remove {
+  flex: none;
+}
+.group-of {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.group-of select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+.group-add {
+  align-self: flex-start;
+  font-size: 12px;
 }

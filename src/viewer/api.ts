@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { EditReport, ElementPatch, Equation, FolderInfo, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport } from "../core/index.js";
+import type { EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport } from "../core/index.js";
 
-export type { EditReport, ElementPatch, Equation, FolderInfo, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport };
+export type { EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport };
 
 /**
  * GET /api/models。モデルと、一覧に出すフォルダ（モデルがあるフォルダと空のフォルダ）。
@@ -84,6 +84,14 @@ export interface ScenariosRequest {
   remove?: string[];
 }
 
+/** POST /api/models/:name/groups の本文。groups と remove は MCP の set_groups と同じ形 */
+export interface GroupsRequest {
+  version: string;
+  groups: GroupPatch[];
+  /** 消すグループの名前 */
+  remove?: string[];
+}
+
 /** POST /api/models/:name/remove の本文。elements は MCP の remove_elements と同じ形 */
 export interface RemoveRequest {
   version: string;
@@ -97,8 +105,8 @@ export interface UndoRequest {
 
 /** 書き込みの結果。成功すると新しいモデルを返す */
 export interface EditResponse {
-  /** 要素の編集なら EditReport、シナリオの編集なら ScenarioReport */
-  report?: EditReport | ScenarioReport;
+  /** 要素の編集なら EditReport、シナリオの編集なら ScenarioReport、グループの編集なら GroupReport */
+  report?: EditReport | ScenarioReport | GroupReport;
   model: ModelResponse;
   /** 書き込めたが、知らせたいこと（実際のデータの列名を直せなかったときなど） */
   warning?: string;

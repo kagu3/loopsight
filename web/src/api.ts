@@ -4,6 +4,7 @@ import {
   type EditErrorResponse,
   type EditResponse,
   type ElementPatch,
+  type GroupPatch,
   type ModelListResponse,
   type ModelResponse,
   type RemoveTarget,
@@ -60,3 +61,7 @@ export const postScenarios = (name: string, version: string, scenarios: Scenario
   post(`/api/models/${encodeURIComponent(name)}/scenarios`, remove?.length ? { version, scenarios, remove } : { version, scenarios });
 
 export const postUndo = (name: string, version: string) => post(`/api/models/${encodeURIComponent(name)}/undo`, { version });
+
+/** 図のグループを足す・直す・消す。groups と remove は MCP の set_groups と同じ形 */
+export const postGroups = (name: string, version: string, groups: GroupPatch[], remove?: string[]) =>
+  post(`/api/models/${encodeURIComponent(name)}/groups`, remove?.length ? { version, groups, remove } : { version, groups });
