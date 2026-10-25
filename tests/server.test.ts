@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、22 個のツールが見える", async () => {
+  test("クライアントから接続でき、23 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     // スライドの機能は削除したので、説明文にも出さない
@@ -59,6 +59,7 @@ describe("MCP server", () => {
       [
         "create_folder",
         "create_model",
+        "export_diagram",
         "find_loops",
         "get_model",
         "import_data",
@@ -395,6 +396,94 @@ describe("MCP server", () => {
     expect(await callError("view_diagram", { model: "brooks", image: false, loop: { elements: ["新人", "採用"] } })).toMatch(/ループになっていません/);
     expect(await callError("find_loops", { model: "brooks", element: "新入" })).toMatch(/"新入.*見つかりません。もしかして.*新人/);
   });
+
+  test("export_diagram は図だけを SVG と PNG で exports/<モデル名>/ に書き出す（ブラウザと画面のビルドがあるとき）", async () => {
+    await call("import_model", { path: path.join(FIXTURES_DIR, "brooks_law.json"), model: "事例/brooks" });
+    // path に画像のファイル名や作業フォルダそのものを渡すと、描く前に断る（フォルダを作らない）
+    expect(await callError("export_diagram", { model: "事例/brooks", path: "図.svg" })).toMatch(/フォルダを指定/);
+    expect(await callError("export_diagram", { model: "事例/brooks", path: "." })).toMatch(/作業フォルダそのもの/);
+    expect(await readdir(dir)).not.toContain("図.svg");
+    const res = await client.callTool({ name: "export_diagram", arguments: { model: "事例/brooks" } });
+    const text = (res.content as { text: string }[])[0]!.text;
+    if (res.isError) {
+      // ブラウザか画面のビルドがない環境では、書き出せないことを知らせる
+      expect(JSON.parse(text).error).toMatch(/Edge か Chrome|ビルド/);
+      return;
+    }
+    const out = JSON.parse(text);
+    const folder = path.join(dir, "exports", "事例", "brooks");
+    expect(out.dir).toBe(folder);
+    expect(out.files).toEqual([path.join(folder, "diagram.svg"), path.join(folder, "diagram.png")]);
+
+    // SVG：白い背景、文字は <text>（画面で測った幅を textLength で決め、日本語のフォントを後ろに並べる）、矢じりは短い id で指す
+    const svg = await readFile(path.join(folder, "diagram.svg"), "utf8");
+    expect(svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" width="${out.size.width}" height="${out.size.height}"`));
+    expect(svg).toMatch(/<rect x="0" y="0" width="\d+" height="\d+" fill="#ffffff"\/>/);
+    for (const name of ["新人", "経験者", "採用", "全員の人数"]) expect(svg).toMatch(new RegExp(`<text [^>]*textLength="[\\d.]+"[^>]*>${name}</text>`));
+    expect(svg).toMatch(/font-family="[^"]*Noto Sans JP/);
+    expect(svg).toMatch(/marker-end="url\(#d\d+\)"/);
+    expect(svg).toMatch(/<marker id="d\d+"/);
+    // 操作用の部品や、画面の配色の名前（var(--...)）は入れない
+    expect(svg).not.toMatch(/react-flow|var\(--|<foreignObject|class=/);
+    // 図全体を図の座標で書き出す（画面の大きさによらない）。箱は図の座標の大きさ
+    expect(out.size.width).toBeGreaterThan(900);
+
+    // PNG は SVG の 2 倍の解像度
+    const png = await readFile(path.join(folder, "diagram.png"));
+    expect(png.subarray(1, 4).toString()).toBe("PNG");
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([out.size.width * 2, out.size.height * 2]);
+
+    // ループを目立たせ、名前を変えて SVG だけ書き出す。ループの札は図の上に付く
+    await call("upsert_elements", {
+      model: "事例/brooks",
+      elements: [
+        { from: "新人", to: "全員の人数", behavior: { polarity: "POSITIVE" } },
+        { from: "全員の人数", to: "採用", behavior: { polarity: "NEGATIVE" } },
+      ],
+    });
+    const loop = await call("export_diagram", {
+      model: "事例/brooks",
+      loop: { elements: ["新人", "全員の人数", "採用"], name: "採用で人数をそろえる" },
+      formats: ["svg"],
+      name: "loop-b1",
+      path: "資料",
+    });
+    expect(loop.files).toEqual([path.join(dir, "資料", "loop-b1.svg")]);
+    expect(loop.png_size).toBeUndefined();
+    const loopSvg = await readFile(path.join(dir, "資料", "loop-b1.svg"), "utf8");
+    expect(loopSvg).toMatch(/>採用で人数をそろえる<\/text>/);
+    expect(loopSvg).toMatch(/>B<\/text>/);
+    expect(loop.size.height).toBeGreaterThan(out.size.height);
+    expect(await callError("export_diagram", { model: "事例/brooks", name: "a/b" })).toMatch(/使えません/);
+
+    // 強調・遅れの印・グループ・注釈も、画面の図と同じく書き出しに入る
+    await call("upsert_elements", {
+      model: "事例/brooks",
+      elements: [
+        { name: "新人", display: { emphasis: true } },
+        { from: "新人", to: "全員の人数", display: { delay: true } },
+      ],
+    });
+    await call("set_groups", { model: "事例/brooks", groups: [{ name: "人のまとまり", color: "green", elements: ["新人", "経験者"] }] });
+    await call("set_annotations", { model: "事例/brooks", annotations: [{ id: "メモ", text: "新人はやがて経験者になる" }] });
+    const all = await call("export_diagram", { model: "事例/brooks", formats: ["svg"], name: "all" });
+    const allSvg = await readFile(path.join(folder, "all.svg"), "utf8");
+    // 強調した箱は、名前の文字を 1.4 倍（13 → 18.2）にする
+    expect(allSvg).toMatch(/font-size="18\.2"[^>]*>新人<\/text>/);
+    // 遅れの印 ‖ は、線の途中の 2 本の短い線（1 本の path）
+    expect(allSvg).toMatch(/<path d="M[\d.,]+ L[\d.,]+ M[\d.,]+ L[\d.,]+" fill="none"/);
+    // 注釈は点線の枠と文字
+    expect(allSvg).toMatch(/stroke-dasharray="3 2"/);
+    expect(allSvg).toMatch(/>新人はやがて経験者になる<\/text>/);
+    // グループの囲み（緑の薄い背景）は、線より先に描く（線の後ろに回す）。名前は囲みの左上と、下の凡例の 2 か所
+    const area = allSvg.indexOf('fill="#e6f2df"');
+    expect(area).toBeGreaterThan(0);
+    expect(area).toBeLessThan(allSvg.indexOf("marker-end="));
+    expect(allSvg.match(/>人のまとまり<\/text>/g)).toHaveLength(2);
+    // 凡例（画面では図の下の真ん中）は、左の端に寄せず真ん中に置く
+    const legend = [...allSvg.matchAll(/<g transform="translate\(([\d.]+) ([\d.]+)\)">/g)].at(-1)!;
+    expect(Number(legend[1])).toBeGreaterThan(all.size.width / 4);
+  }, 90_000);
 
   test("upsert_elements の display.delay で遅れの印を付け、find_loops と view_diagram と get_model に出す", async () => {
     await call("import_model", { path: path.join(FIXTURES_DIR, "bullwhip.json"), model: "bullwhip" });

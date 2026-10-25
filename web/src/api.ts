@@ -2,6 +2,7 @@
 import {
   VIEWER_HEADER,
   type AnnotationPatch,
+  type DiagramExportResponse,
   type EditErrorResponse,
   type EditResponse,
   type ElementPatch,
@@ -67,3 +68,18 @@ export const postUndo = (name: string, version: string) => post(`/api/models/${e
 /** 図のグループを足す・直す・消す。groups と remove は MCP の set_groups と同じ形 */
 export const postGroups = (name: string, version: string, groups: GroupPatch[], remove?: string[]) =>
   post(`/api/models/${encodeURIComponent(name)}/groups`, remove?.length ? { version, groups, remove } : { version, groups });
+/** 図を書き出した SVG と PNG（base64）を送り、作業フォルダの exports/<モデル名>/ に書いてもらう */
+export async function postDiagramExport(name: string, svg: string, png: string): Promise<{ ok: true; data: DiagramExportResponse } | { ok: false; error: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/models/${encodeURIComponent(name)}/export-diagram`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", [VIEWER_HEADER]: "1" },
+      body: JSON.stringify({ svg, png }),
+    });
+  } catch (e) {
+    return { ok: false, error: `サーバーにつながりません: ${(e as Error).message}` };
+  }
+  const json = (await res.json().catch(() => ({ error: `${res.status}` }))) as DiagramExportResponse & { error?: string };
+  return res.ok ? { ok: true, data: json } : { ok: false, error: json.error ?? `${res.status}` };
+}

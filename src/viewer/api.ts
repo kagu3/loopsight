@@ -127,5 +127,20 @@ export interface EditErrorResponse {
   current?: ModelResponse;
 }
 
+/**
+ * POST /api/models/:name/export-diagram の本文。画面の図を書き出した SVG と PNG（base64）。
+ * サーバーは作業フォルダの exports/<モデル名>/diagram.svg と diagram.png に書く（MCP の export_diagram と同じ書き出し先）
+ */
+export interface DiagramExportRequest {
+  svg: string;
+  png: string;
+}
+
+/** 図を書き出した結果。dir は書き出したフォルダ、files は書いたファイル（どちらも絶対パス） */
+export interface DiagramExportResponse {
+  dir: string;
+  files: string[];
+}
+
 /** 書き込みの要求に付けるヘッダー。これがないと書き込みを断る（ほかのサイトから送れないように） */
 export const VIEWER_HEADER = "X-IM-Viewer";
