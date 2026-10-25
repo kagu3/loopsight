@@ -456,36 +456,58 @@ export function App() {
   // 一覧と変更の知らせ
   useEffect(() => {
     void loadList();
-    const es = new EventSource("/api/events");
-    // つながり直したら読み直す（切れているあいだの変更は知らせが来ないため）
-    let lost = false;
-    es.onopen = () => {
-      setConnected(true);
-      if (lost) {
-        lost = false;
+    let es: EventSource | undefined;
+    const connect = () => {
+      const source = new EventSource("/api/events");
+      es = source;
+      // つながり直したら読み直す（切れているあいだの変更は知らせが来ないため）
+      let lost = false;
+      source.onopen = () => {
+        setConnected(true);
+        if (lost) {
+          lost = false;
+          void loadList();
+          void loadModel(currentRef.current);
+        }
+      };
+      source.onerror = () => {
+        setConnected(false);
+        lost = true;
+      };
+      source.onmessage = (m) => {
+        const ev = JSON.parse(m.data as string) as ChangeEvent;
         void loadList();
-        void loadModel(currentRef.current);
-      }
+        // フォルダを作った・消した・動かした。開いているモデルのファイルもなくなったかもしれないので、読み直して確かめる
+        if (ev.type === "folders") void loadModel(currentRef.current);
+        else if (ev.name.toLowerCase() === currentRef.current.toLowerCase()) {
+          if (ev.type === "changed") void loadModel(currentRef.current);
+          else modelGone(ev.name);
+        }
+      };
     };
-    es.onerror = () => {
-      setConnected(false);
-      lost = true;
+    connect();
+    // ほかのページへ移るときは知らせを切る。ブラウザが前のページを「戻る」ために取っておくと、つながったままの知らせが残り、
+    // 同じサーバーへの接続の上限（6 本）を埋めて、あとで開いたページの読み込みが待たされたままになるため
+    const onPageHide = () => {
+      es?.close();
+      es = undefined;
     };
-    es.onmessage = (m) => {
-      const ev = JSON.parse(m.data as string) as ChangeEvent;
+    // 「戻る」で取っておいたページに戻ったら、つなぎ直して読み直す（離れているあいだの変更は知らせが来ないため）
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted || es) return;
+      connect();
       void loadList();
-      // フォルダを作った・消した・動かした。開いているモデルのファイルもなくなったかもしれないので、読み直して確かめる
-      if (ev.type === "folders") void loadModel(currentRef.current);
-      else if (ev.name.toLowerCase() === currentRef.current.toLowerCase()) {
-        if (ev.type === "changed") void loadModel(currentRef.current);
-        else modelGone(ev.name);
-      }
+      void loadModel(currentRef.current);
     };
     const onHash = () => setCurrent(nameFromHash());
     window.addEventListener("hashchange", onHash);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
     return () => {
-      es.close();
+      es?.close();
       window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, [loadList, loadModel, modelGone]);
 
