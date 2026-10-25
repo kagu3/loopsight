@@ -16,6 +16,7 @@ import {
   setAnnotations,
   setGroups,
   setScenarios,
+  setSimulation,
   toGraph,
   upsertElements,
   validateModel,
@@ -43,13 +44,14 @@ import {
   type RunResult,
   type ScenarioRunResult,
   type ScenariosRequest,
+  type SimulationRequest,
   type UndoRequest,
 } from "./api.js";
 import { DIAGRAM_FILE_BASE, exportFolderOf, writeDiagramImages } from "./diagram-export.js";
 import { watchTree } from "./watch.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
-// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_annotations と同じ処理を通す）。
+// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_annotations、set_simulation と同じ処理を通す）。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
 // 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
 // 画面の図を書き出した画像（SVG と PNG）も受け取り、作業フォルダの exports/<モデル名>/ に書く（MCP の export_diagram と同じ書き出し先）。
@@ -371,10 +373,10 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     current: await loadModelResponse(store, name, historyOf(name).length),
   });
 
-  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "groups" | "remove" | "undo") => {
+  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "groups" | "simulation" | "remove" | "undo") => {
     try {
       checkWriteRequest(req);
-      const body = await readBody<EditRequest & ScenariosRequest & GroupsRequest & RemoveRequest & UndoRequest>(req);
+      const body = await readBody<EditRequest & ScenariosRequest & GroupsRequest & SimulationRequest & RemoveRequest & UndoRequest>(req);
       if (typeof body?.version !== "string") throw new HttpError(400, "version がありません。");
       const result = await serial(name, async (): Promise<[number, EditResponse | EditErrorResponse]> => {
         const current = await store.readVersioned(name);
@@ -435,6 +437,21 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           if (hist.length > HISTORY_LIMIT) hist.shift();
           const model = await modelResponse(store, name, current.model, version, hist.length);
           return [200, { report, model }];
+        }
+        if (action === "simulation") {
+          const sim = body.simulation as Record<string, unknown> | undefined;
+          if (!sim || typeof sim !== "object" || Array.isArray(sim)) throw new HttpError(400, "simulation がありません。");
+          const keys = ["time_start", "time_length", "time_step", "algorithm", "time_units"];
+          if (!Object.keys(sim).length || !Object.keys(sim).every((k) => keys.includes(k))) throw new HttpError(400, `simulation には ${keys.join("・")} のどれかを指定してください。`);
+          const num = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
+          if (!num(sim.time_start) || !num(sim.time_length) || !num(sim.time_step)) throw new HttpError(400, "time_start・time_length・time_step は数にしてください。");
+          // 解法と時間の単位の値は setSimulation が確かめる（MCP の set_simulation と同じ文で断る）
+          setSimulation(current.model, body.simulation);
+          const version = await store.writeVersioned(name, current.model);
+          hist.push({ before: current.text, after: version, renamed: [] });
+          if (hist.length > HISTORY_LIMIT) hist.shift();
+          const model = await modelResponse(store, name, current.model, version, hist.length);
+          return [200, { model }];
         }
         if (action === "remove") {
           const targets: RemoveTarget[] = body.elements;
@@ -519,9 +536,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
       await handleExportDiagram(req, res, decodeURIComponent(exported[1]!));
       return;
     }
-    const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|groups|remove|undo)$/);
+    const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|groups|simulation|remove|undo)$/);
     if (write) {
-      await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as "edit" | "scenarios" | "groups" | "remove" | "undo");
+      await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as "edit" | "scenarios" | "groups" | "simulation" | "remove" | "undo");
       return;
     }
     if (p.startsWith("/api/models/")) {

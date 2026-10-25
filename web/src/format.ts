@@ -1,4 +1,4 @@
-// 値と時刻の書き方（React に依存しない）。グラフのツールチップ・表・図で同じ丸め方にする。
+// 値と時刻の書き方と、時間の単位の名前（React に依存しない）。グラフのツールチップ・表・図で同じ丸め方にする。
 
 /** 作業画面のグラフや表の値（100 以上は小数 2 桁まで、それより小さい値は 4 桁まで） */
 export function formatValue(v: number | null | undefined): string {
@@ -13,3 +13,14 @@ export function formatTime(t: number | null | undefined): string {
   if (t === null || t === undefined || !Number.isFinite(t)) return "—";
   return t.toLocaleString("ja-JP", { useGrouping: false, maximumFractionDigits: 4 });
 }
+
+/** 時間の単位の名前（キーは小文字。実行結果の time_units も、モデルの time_units を小文字にしたものも引ける） */
+export const TIME_UNIT_LABEL: Record<string, string> = {
+  seconds: "秒",
+  minutes: "分",
+  hours: "時間",
+  days: "日",
+  weeks: "週",
+  months: "月",
+  years: "年",
+};

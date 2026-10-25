@@ -21,7 +21,7 @@ import {
   type CompareRuns,
   type MatrixCell,
 } from "./scenarios.js";
-import { formatTime, formatValue } from "./format.js";
+import { formatTime, formatValue, TIME_UNIT_LABEL } from "./format.js";
 import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 
 // 実行結果の時系列グラフと表。
@@ -35,18 +35,8 @@ import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 export const MAX_SERIES = 8;
 const SLOTS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
 
-export const TIME_UNIT_LABEL: Record<string, string> = {
-  seconds: "秒",
-  minutes: "分",
-  hours: "時間",
-  days: "日",
-  weeks: "週",
-  months: "月",
-  years: "年",
-};
-
-// 値と時刻の書き方は、図（diagramValues.ts）と同じものを使う
-export { formatTime, formatValue };
+// 値と時刻の書き方と時間の単位の名前は、図（diagramValues.ts）やシミュレーションの設定の欄と同じものを使う
+export { formatTime, formatValue, TIME_UNIT_LABEL };
 
 /** グラフに出せる要素（数値の結果があるもの）を、モデルの並び順で */
 function candidatesOf(model: ModelJSON, run: RunResult): SeriesCandidate[] {

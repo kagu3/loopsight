@@ -1,7 +1,7 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { AnnotationPatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
-import { FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
+import type { AnnotationPatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch, SimulationSettings } from "../../src/viewer/api.js";
+import { FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postRemove, postScenarios, postSimulation, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details, DelayToggle, linkPolarity, PolarityPicker } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
@@ -23,6 +23,8 @@ import { GroupPanel } from "./GroupPanel.js";
 import { LoopPanel } from "./LoopPanel.js";
 import { listLoops } from "./loopList.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
+import { SimulationEditor } from "./SimulationEditor.js";
+import { describeSimulation, simulationRangeText } from "./simulation.js";
 import { clearValuePatches, findScenario, scenarioBadges } from "./scenarios.js";
 import { draggedResultsRatio, parseExpandedPane, parseResultsRatio, RESULTS_RATIO, type ExpandedPane } from "./split.js";
 
@@ -30,7 +32,7 @@ import { draggedResultsRatio, parseExpandedPane, parseResultsRatio, RESULTS_RATI
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
 // 画面からの編集（式などの変更、位置の変更、シナリオの変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
 // 図の形を変える操作（配置のドラッグ、要素や注釈を足す・消す、線を引く・消す）は、図の左上の「図を編集」をオンにしたときだけできる。
-// 値（詳細欄の「編集」）やシナリオは、「図を編集」に関係なく、いつでも直せる（入力欄に打ち込む操作で、元に戻すでも戻せるため）。
+// 値（詳細欄の「編集」）やシナリオ、シミュレーションの設定は、「図を編集」に関係なく、いつでも直せる（入力欄に打ち込む操作で、元に戻すでも戻せるため）。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
@@ -218,6 +220,21 @@ function ExpandButton({ pane, expanded, onChange, className }: { pane: "diagram"
   );
 }
 
+/** グラフの上の帯の、シミュレーションの期間のボタン。押すと左の欄で設定（開始時刻、期間、刻み幅、解法、時間の単位）を直せる */
+function SimulationButton({ model, on, onClick }: { model: ModelResponse["model"]; on: boolean; onClick(): void }) {
+  return (
+    <button
+      className={`toolbar-button simulation-button ${on ? "on" : ""}`}
+      onClick={onClick}
+      aria-pressed={on}
+      aria-label={`シミュレーションの設定 ${simulationRangeText(model.simulation)}`}
+      title={`シミュレーションの設定：${describeSimulation(model.simulation)}。押すと左の欄で直せます`}
+    >
+      ⏱ {simulationRangeText(model.simulation)}
+    </button>
+  );
+}
+
 export function App() {
   const [list, setList] = useState<ModelListResponse>();
   const [current, setCurrent] = useState(nameFromHash());
@@ -236,6 +253,8 @@ export function App() {
   const scenarioSeq = useRef(0);
   // 図で目立たせているループ（左の欄の「ループ」で押したもの。LoopItem の key）
   const [shownLoop, setShownLoop] = useState<string>();
+  // 左の欄でシミュレーションの設定を直しているか（グラフの上の帯の期間のボタンで開く）
+  const [editingSimulation, setEditingSimulation] = useState(false);
   // 左の欄を開いているか（たたむと、右の図とグラフを広く使える）。ブラウザに覚えておき、開き直したときも同じ状態から始める。
   // 画面の幅では自動で開け閉めしない（狭い画面で縦に並べるときは、CSS でたたまずに出す）
   const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
@@ -259,6 +278,19 @@ export function App() {
   /** 左の欄でシナリオの説明を直す。同じシナリオの欄を開いていれば、そのままにする。左の欄をたたんでいれば開く */
   const editScenarioDescription = useCallback((name: string) => {
     setScenario((s) => (s && sameName(s.name, name) ? s : { name, id: ++scenarioSeq.current }));
+    setEditingSimulation(false);
+    setSidebarOpen(true);
+  }, []);
+  /**
+   * 左の欄でシミュレーションの設定を直す。左の欄をたたんでいれば開く。
+   * 左に出ていない要素を Delete キーで消さないよう、選んでいる要素・線・注釈は外す
+   */
+  const openSimulation = useCallback(() => {
+    setScenario(undefined);
+    setSelected(undefined);
+    setSelectedLink(undefined);
+    setSelectedNote(undefined);
+    setEditingSimulation(true);
     setSidebarOpen(true);
   }, []);
   // グラフの上のシナリオの凡例にカーソルを乗せているシナリオ
@@ -529,6 +561,7 @@ export function App() {
     setSelectedLink(undefined);
     setSelectedNote(undefined);
     setScenario(undefined);
+    setEditingSimulation(false);
     setHoveredScenario(undefined);
     setValuesScenario(undefined);
     setShownLoop(undefined);
@@ -619,6 +652,16 @@ export function App() {
       }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
   );
+  /** シミュレーションの設定を直す（MCP の set_simulation と同じ形） */
+  const editSimulation = useCallback(
+    (patch: SimulationSettings): Promise<string | undefined> =>
+      enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        return applyWrite(await postSimulation(d.name, d.version, patch));
+      }, SKIPPED_MESSAGE),
+    [applyWrite, enqueueWrite],
+  );
   /** 左の欄で、シナリオの説明を直す */
   const saveScenarioDescription = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
   /**
@@ -696,6 +739,7 @@ export function App() {
   /** 図で要素を選ぶと、シナリオの編集欄を閉じて、その要素を出す */
   const selectElement = useCallback((name: string | undefined) => {
     setScenario(undefined);
+    setEditingSimulation(false);
     setSelected(name);
     setSelectedLink(undefined);
     setSelectedNote(undefined);
@@ -703,6 +747,7 @@ export function App() {
   /** 図で線を押してリンクを選ぶ。要素を選んだときと同じく、シナリオの編集欄を閉じる */
   const selectLink = useCallback((link: LinkEnds) => {
     setScenario(undefined);
+    setEditingSimulation(false);
     setSelected(undefined);
     setSelectedLink(link);
     setSelectedNote(undefined);
@@ -710,6 +755,7 @@ export function App() {
   /** 図で注釈を押して選ぶ。要素を選んだときと同じく、シナリオの編集欄を閉じる */
   const selectNote = useCallback((id: string) => {
     setScenario(undefined);
+    setEditingSimulation(false);
     setSelected(undefined);
     setSelectedLink(undefined);
     setSelectedNote(id);
@@ -1098,8 +1144,10 @@ export function App() {
         </header>
 
         <section className="panel">
-          <h2>{scenario ? "シナリオ" : selectedLink ? "選んだ線" : selectedNote !== undefined ? "選んだ注釈" : "選んだ要素"}</h2>
-          {scenario && data ? (
+          <h2>{editingSimulation ? "シミュレーション" : scenario ? "シナリオ" : selectedLink ? "選んだ線" : selectedNote !== undefined ? "選んだ注釈" : "選んだ要素"}</h2>
+          {editingSimulation && data ? (
+            <SimulationEditor model={data.model} onSave={editSimulation} onClose={() => setEditingSimulation(false)} />
+          ) : scenario && data ? (
             <ScenarioEditor
               key={scenario.id}
               model={data.model}
@@ -1326,10 +1374,18 @@ export function App() {
               onRemoveScenarioValue={removeScenarioValue}
               onFocusScenario={setHoveredScenario}
               onHoverTime={showValues ? setHoverTime : undefined}
-              tools={<ExpandButton pane="results" expanded={expanded} onChange={expandPane} className="toolbar-button" />}
+              tools={
+                <>
+                  <SimulationButton model={data.model} on={editingSimulation} onClick={openSimulation} />
+                  <ExpandButton pane="results" expanded={expanded} onChange={expandPane} className="toolbar-button" />
+                </>
+              }
             />
           ) : data ? (
-            <p className="muted pad">エラーがあるため実行できません。左の欄の「問題」を見てください。</p>
+            <p className="muted pad">
+              エラーがあるため実行できません。左の欄の「問題」を見てください。{" "}
+              <SimulationButton model={data.model} on={editingSimulation} onClick={openSimulation} />
+            </p>
           ) : null}
         </div>
       </main>
