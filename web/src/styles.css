@@ -1436,6 +1436,26 @@ button.edit-tool.danger {
   font-size: 13px;
   cursor: pointer;
 }
+/* リンクの極性（+ / −）を選ぶ欄（選んだリンクの説明） */
+.polarity-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.polarity-choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+.polarity-choices label.check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
 .loop-badge {
   display: flex;
   align-items: center;
