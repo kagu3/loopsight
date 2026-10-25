@@ -8,21 +8,16 @@ import {
   StoreError,
   checkActualData,
   checkModelName,
-  checkSlides,
   namesByElement,
-  namesByScenario,
   parseDataCSV,
-  parseSlides,
   removeElements,
   renamesSince,
   runScenarios,
-  scenarioRenamesSince,
   setScenarios,
   toGraph,
   upsertElements,
   validateModel,
   versionOf,
-  type ActualData,
   type ModelElement,
   type ModelJSON,
   type RemoveTarget,
@@ -41,7 +36,6 @@ import {
   type RunResult,
   type ScenarioRunResult,
   type ScenariosRequest,
-  type SlidesResult,
   type UndoRequest,
 } from "./api.js";
 import { watchTree } from "./watch.js";
@@ -99,7 +93,7 @@ function seriesOf(data: RunData): RunResult["series"] {
   return series;
 }
 
-export async function loadModelResponse(store: ModelStore, name: string, undoAvailable = 0): Promise<ModelResponse> {
+async function loadModelResponse(store: ModelStore, name: string, undoAvailable = 0): Promise<ModelResponse> {
   const { model, version } = await store.readVersioned(name);
   return modelResponse(store, name, model, version, undoAvailable);
 }
@@ -129,14 +123,12 @@ async function modelResponse(store: ModelStore, name: string, model: ModelJSON, 
     }
   }
   const actual = await actualData(store, name, model);
-  if (actual) res.actual = actual.result;
-  const slides = await slidesResult(store, name, model, actual?.data);
-  if (slides) res.slides = slides;
+  if (actual) res.actual = actual;
   return res;
 }
 
-/** 実際のデータを読み、要素に合う列だけを要素名で返す。CSV がなければ undefined。data は読めたときの中身（筋書きの確認に使う） */
-async function actualData(store: ModelStore, name: string, model: ModelJSON): Promise<{ result: ActualDataResult; data?: ActualData } | undefined> {
+/** 実際のデータを読み、要素に合う列だけを要素名で返す。CSV がなければ undefined */
+async function actualData(store: ModelStore, name: string, model: ModelJSON): Promise<ActualDataResult | undefined> {
   const text = await store.readData(name);
   if (text === undefined) return undefined;
   const res: ActualDataResult = { file: path.basename(store.dataPathOf(name)), version: versionOf(text), times: [], series: {}, issues: [] };
@@ -146,25 +138,8 @@ async function actualData(store: ModelStore, name: string, model: ModelJSON): Pr
     res.times = data.times;
     const names = new Set(model.elements.filter((e) => e.type !== "LINK" && e.name).map((e) => e.name!));
     for (const c of data.columns) if (names.has(c.name)) res.series[c.name] = c.values;
-    return { result: res, data };
   } catch (e) {
     res.issues = [{ message: `実際のデータ（${res.file}）を読めません: ${(e as Error).message}` }];
-    return { result: res };
-  }
-}
-
-/** 説明資料の筋書きを読み、モデルに合うか確かめて返す。ファイルがなければ undefined */
-async function slidesResult(store: ModelStore, name: string, model: ModelJSON, data: ActualData | undefined): Promise<SlidesResult | undefined> {
-  const read = await store.readSlidesText(name);
-  if (!read) return undefined;
-  const res: SlidesResult = { file: path.basename(store.slidesPathOf(name)), version: read.version, issues: [] };
-  try {
-    const deck = parseSlides(read.text);
-    const { errors, warnings } = checkSlides(model, deck, data);
-    res.deck = deck;
-    res.issues = [...errors, ...warnings];
-  } catch (e) {
-    res.issues = [{ slide: 0, message: `筋書き（${res.file}）を読めません: ${(e as Error).message}` }];
   }
   return res;
 }
@@ -216,13 +191,12 @@ function keepCloudsInPlace(model: ModelJSON): () => void {
 }
 /**
  * 元に戻すための記録。before は書き込む前の中身、after は書き込んだあとの版。
- * renamed は変えた要素の名前（実際のデータの列名と筋書きの中の名前も戻すため）、renamedScenarios は変えたシナリオの名前（筋書きの中の名前も戻すため）
+ * renamed は変えた要素の名前（実際のデータの列名も戻すため）
  */
 interface HistoryEntry {
   before: string;
   after: string;
   renamed: [string, string][];
-  renamedScenarios: [string, string][];
 }
 const HISTORY_LIMIT = 50;
 const MAX_BODY = 1024 * 1024;
@@ -302,9 +276,10 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
   const notify = (file: string) => {
     // 先頭が . のファイルやフォルダ（.DS_Store、.git など）と、書き込みの途中の一時ファイルは見ない
     if (file.split("/").some((part) => part.startsWith(".")) || file.toLowerCase().endsWith(".tmp")) return;
-    // 実際のデータ（<モデル名>.data.csv）や筋書き（<モデル名>.slides.json）が変わったら、そのモデルが変わったと知らせる
+    // 実際のデータ（<モデル名>.data.csv）が変わったら、そのモデルが変わったと知らせる。
+    // 以前の筋書きのファイル（<モデル名>.slides.json）は、モデル名に使えない名前になるので知らせない
     const lower = file.toLowerCase();
-    const suffix = [".data.csv", ".slides.json"].find((x) => lower.endsWith(x));
+    const suffix = lower.endsWith(".data.csv") ? ".data.csv" : undefined;
     if (!suffix && !lower.endsWith(".json")) {
       // フォルダを作った・消した・動かした（中のどのモデルが変わったかは分からない）か、モデルでないファイルが変わった。
       // 一覧に出すフォルダが変わったかもしれないので、一覧と開いているモデルを読み直してもらう
@@ -321,7 +296,7 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
       const st = await stat(store.pathOf(name)).catch(() => undefined);
       // 名前が .json で終わるフォルダは、モデルではない
       if (st?.isDirectory()) return send({ type: "folders" });
-      // CSV や筋書きだけがあってモデルがなければ、知らせない（モデルが消えたわけではない）
+      // CSV だけがあってモデルがなければ、知らせない（モデルが消えたわけではない）
       if (suffix && !st) return;
       send({ type: st ? "changed" : "removed", name });
     });
@@ -386,15 +361,12 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           const version = await store.writeVersioned(name, current.model);
           const renamed = renamesSince(current.model, names);
           // 実際のデータの列名は、記録を残してから直す（直せなくても、保存したモデルは元に戻せるように）
-          hist.push({ before: current.text, after: version, renamed, renamedScenarios: [] });
+          hist.push({ before: current.text, after: version, renamed });
           if (hist.length > HISTORY_LIMIT) hist.shift();
           const data = await store.renameDataColumns(name, renamed);
           if (data.note) report.notes.push(data.note);
-          const slides = await store.renameSlideNames(name, { elements: renamed });
-          if (slides.note) report.notes.push(slides.note);
-          const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
           const model = await modelResponse(store, name, current.model, version, hist.length);
-          return [200, { report, model, ...(warning ? { warning } : {}), ...(renamed.length ? { renamed } : {}) }];
+          return [200, { report, model, ...(data.warning ? { warning: data.warning } : {}), ...(renamed.length ? { renamed } : {}) }];
         }
         if (action === "scenarios") {
           if (!Array.isArray(body.scenarios)) throw new HttpError(400, "scenarios がありません。");
@@ -405,17 +377,12 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
             throw new HttpError(400, "remove は消すシナリオの名前の並びにしてください。");
           }
           if (body.scenarios.length === 0 && !body.remove?.length) throw new HttpError(400, "scenarios か remove を指定してください。");
-          const names = namesByScenario(current.model);
           const report = setScenarios(current.model, body.scenarios, { remove: body.remove });
           const version = await store.writeVersioned(name, current.model);
-          const renamedScenarios = scenarioRenamesSince(current.model, names);
-          // 筋書きの中の名前は、記録を残してから直す（直せなくても、保存したモデルは元に戻せるように）
-          hist.push({ before: current.text, after: version, renamed: [], renamedScenarios });
+          hist.push({ before: current.text, after: version, renamed: [] });
           if (hist.length > HISTORY_LIMIT) hist.shift();
-          const slides = await store.renameSlideNames(name, { scenarios: renamedScenarios });
-          if (slides.note) report.notes.push(slides.note);
           const model = await modelResponse(store, name, current.model, version, hist.length);
-          return [200, slides.warning ? { report, model, warning: slides.warning } : { report, model }];
+          return [200, { report, model }];
         }
         if (action === "remove") {
           const targets: RemoveTarget[] = body.elements;
@@ -429,8 +396,8 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           const report = removeElements(current.model, targets);
           placeClouds();
           const version = await store.writeVersioned(name, current.model);
-          // 実際のデータの列と筋書きはそのまま残す（合わなくなったところは「問題」に出る。元に戻せばまた合う）
-          hist.push({ before: current.text, after: version, renamed: [], renamedScenarios: [] });
+          // 実際のデータの列はそのまま残す（合わなくなったところは「問題」に出る。元に戻せばまた合う）
+          hist.push({ before: current.text, after: version, renamed: [] });
           if (hist.length > HISTORY_LIMIT) hist.shift();
           const model = await modelResponse(store, name, current.model, version, hist.length);
           return [200, { report, model }];
@@ -444,12 +411,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
         hist.pop();
         await store.writeVersioned(name, { text: last.before });
         const back = last.renamed.map(([from, to]): [string, string] => [to, from]);
-        const backScenarios = last.renamedScenarios.map(([from, to]): [string, string] => [to, from]);
         const data = await store.renameDataColumns(name, back);
-        const slides = await store.renameSlideNames(name, { elements: back, scenarios: backScenarios });
-        const warning = [data.warning, slides.warning].filter(Boolean).join("\n");
         const model = await loadModelResponse(store, name, hist.length);
-        return [200, { model, ...(warning ? { warning } : {}), ...(back.length ? { renamed: back } : {}) }];
+        return [200, { model, ...(data.warning ? { warning: data.warning } : {}), ...(back.length ? { renamed: back } : {}) }];
       });
       sendJSON(res, result[0], result[1]);
     } catch (e) {

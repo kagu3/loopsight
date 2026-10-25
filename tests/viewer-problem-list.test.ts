@@ -7,13 +7,12 @@ const response = (over: Partial<ModelResponse>): ModelResponse =>
   ({ validation: { ok: true, errors: [], warnings: [] }, ...over }) as ModelResponse;
 
 describe("左の欄の「問題」の一覧と、たたんだ帯の件数", () => {
-  test("検証のエラーと警告、実行のエラー、実際のデータの警告、筋書きの警告を、エラーを先にして並べる", () => {
+  test("検証のエラーと警告、実行のエラー、実際のデータの警告を、エラーを先にして並べる", () => {
     const problems = listProblems(
       response({
         validation: { ok: false, errors: [{ message: "e1" }], warnings: [{ message: "w1" }] },
         run_error: { message: "実行できません", issues: [{ message: "e2" }] },
         actual: { issues: [{ message: "w2" }] } as unknown as ModelResponse["actual"],
-        slides: { issues: [{ message: "w3", slide: 1 }] } as unknown as ModelResponse["slides"],
       }),
     );
     expect(problems.map((p) => [p.level, p.issue.message])).toEqual([
@@ -21,9 +20,8 @@ describe("左の欄の「問題」の一覧と、たたんだ帯の件数", () =
       ["error", "e2"],
       ["warning", "w1"],
       ["warning", "w2"],
-      ["warning", "w3"],
     ]);
-    expect(countProblems(problems)).toEqual({ errors: 2, warnings: 3 });
+    expect(countProblems(problems)).toEqual({ errors: 2, warnings: 2 });
   });
 
   test("実行のエラーに中身の一覧がなければ、そのメッセージを 1 件のエラーとして数える", () => {

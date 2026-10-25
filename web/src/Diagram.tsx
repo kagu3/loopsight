@@ -270,7 +270,7 @@ export interface DiagramProps {
   /** 図だけを見せる表示（MCP の view_diagram が画像にする）。操作の道具を出さない */
   embed?: boolean;
   /**
-   * 目立たせるループ（find_loops の結果や、筋書きの「原因」のスライドから渡す）。
+   * 目立たせるループ（find_loops の結果から渡す）。
    * ループの要素と線だけをふつうに出してほかを薄くし、図の左上にループの名前と R / B を出す。
    * 要素を選んでいても、こちらを優先する
    */
@@ -663,7 +663,7 @@ export function Diagram(props: DiagramProps) {
       proOptions={{ hideAttribution: true }}
       onNodeClick={(_, n) => onNodeClick(n)}
       // リンクの線を押すとリンクを選ぶ。フローの線は、そのフローを選ぶ。
-      // 図だけの表示（発表モードの原因のスライド、view_diagram）では渡さない（線を押せない扱いにし、線の上からも見る場所を動かせるように）
+      // 図だけの表示（view_diagram）では渡さない（線を押せない扱いにし、線の上からも見る場所を動かせるように）
       onEdgeClick={
         props.embed
           ? undefined

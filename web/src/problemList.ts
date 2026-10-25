@@ -16,8 +16,6 @@ export function listProblems(data: ModelResponse): Problem[] {
     })),
     ...data.validation.warnings.map((issue) => ({ level: "warning" as const, issue })),
     ...(data.actual?.issues ?? []).map((issue) => ({ level: "warning" as const, issue })),
-    // 説明資料の筋書きの問題は、作業画面でだけ知らせる（発表モードには出さない）
-    ...(data.slides?.issues ?? []).map((issue) => ({ level: "warning" as const, issue })),
   ];
 }
 

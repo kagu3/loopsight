@@ -39,10 +39,12 @@ describe("フォルダに分けたモデルの一覧", () => {
     await store.write("事例/在庫/bullwhip", emptyModel("ブルウィップ"));
     // 付属のファイルはモデルとして出さない
     await store.writeData("ブルックスの法則/brooks_law", "Month,x\n0,1\n");
+    // 削除したスライドの機能の筋書き（<名前>.slides.json）が残っていても、モデルとして出さない
+    await writeFile(path.join(dir, "coffee-cooling.slides.json"), JSON.stringify({ slides: [] }));
     // モデル以外のファイルだけがあるフォルダ（書き出し先）は出さない。その中の空のフォルダも出さない
     await mkdir(path.join(dir, "exports", "brooks_law", "images"), { recursive: true });
     await mkdir(path.join(dir, "exports", "空"), { recursive: true });
-    await writeFile(path.join(dir, "exports", "brooks_law", "slides.pdf"), "pdf");
+    await writeFile(path.join(dir, "exports", "brooks_law", "diagram.png"), "png");
     await mkdir(path.join(dir, "output"));
     await writeFile(path.join(dir, "output", "run.csv"), "t,x\n");
     // 空のフォルダ（空のサブフォルダだけがあるもの、OS が作るファイルだけがあるものも）は出す
@@ -79,7 +81,6 @@ describe("フォルダに分けたモデルの一覧", () => {
     expect((await store.read("a/b/m")).name).toBe("M");
     await store.writeData("a/b/m", "t,x\n0,1\n");
     expect(store.dataPathOf("a/b/m")).toBe(path.join(dir, "a", "b", "m.data.csv"));
-    expect(store.slidesPathOf("a/b/m")).toBe(path.join(dir, "a", "b", "m.slides.json"));
     expect(await store.readData("a/b/m")).toMatch(/t,x/);
     await expect(store.read("a/b/none")).rejects.toThrow(/あるモデル: a\/b\/m/);
   });
@@ -91,7 +92,6 @@ describe("モデルとフォルダの操作", () => {
     const store = new ModelStore(dir);
     await store.write("brooks_law", emptyModel("B"));
     await store.writeData("brooks_law", "Month,x\n0,1\n");
-    await store.writeSlides("brooks_law", { slides: [{ kind: "conclusion", title: "t", message: "m" }] });
     return { dir, store };
   }
 
@@ -99,7 +99,7 @@ describe("モデルとフォルダの操作", () => {
     const { dir, store } = await setup();
     const r = await store.moveModel("brooks_law", "ブルックスの法則/brooks_law");
     expect(r).toMatchObject({ from: "brooks_law", to: "ブルックスの法則/brooks_law" });
-    expect((await readdir(path.join(dir, "ブルックスの法則"))).sort()).toEqual(["brooks_law.data.csv", "brooks_law.json", "brooks_law.slides.json"]);
+    expect((await readdir(path.join(dir, "ブルックスの法則"))).sort()).toEqual(["brooks_law.data.csv", "brooks_law.json"]);
     expect(await exists(path.join(dir, "brooks_law.json"))).toBe(false);
     expect(await exists(path.join(dir, "brooks_law.data.csv"))).toBe(false);
     // 名前を変える
@@ -120,14 +120,14 @@ describe("モデルとフォルダの操作", () => {
     expect(await exists(path.join(dir, "brooks_law.json"))).toBe(true);
   });
 
-  test("モデルを消すと、付属のファイルもいっしょに消え、exports/ の資料は残る", async () => {
+  test("モデルを消すと、付属のファイルもいっしょに消え、exports/ に書き出したファイルは残る", async () => {
     const { dir, store } = await setup();
     await mkdir(path.join(dir, "exports", "brooks_law"), { recursive: true });
-    await writeFile(path.join(dir, "exports", "brooks_law", "slides.pdf"), "pdf");
+    await writeFile(path.join(dir, "exports", "brooks_law", "diagram.png"), "png");
     const r = await store.removeModel("brooks_law");
-    expect(r.files.map((f) => path.basename(f)).sort()).toEqual(["brooks_law.data.csv", "brooks_law.json", "brooks_law.slides.json"]);
+    expect(r.files.map((f) => path.basename(f)).sort()).toEqual(["brooks_law.data.csv", "brooks_law.json"]);
     expect((await readdir(dir)).sort()).toEqual(["exports"]);
-    expect(await readFile(path.join(dir, "exports", "brooks_law", "slides.pdf"), "utf8")).toBe("pdf");
+    expect(await readFile(path.join(dir, "exports", "brooks_law", "diagram.png"), "utf8")).toBe("png");
     await expect(store.removeModel("brooks_law")).rejects.toThrow(/見つかりません/);
   });
 
@@ -158,10 +158,20 @@ describe("モデルとフォルダの操作", () => {
     await expect(store.removeFolder("..")).rejects.toThrow(StoreError);
   });
 
+  test("以前の筋書き（<名前>.slides.json）だけが残ったフォルダは、空のフォルダとして出し、消せる", async () => {
+    const { dir, store } = await setup();
+    await store.moveModel("brooks_law", "事例/brooks_law");
+    await writeFile(path.join(dir, "事例", "brooks_law.slides.json"), JSON.stringify({ slides: [] }));
+    await store.removeModel("事例/brooks_law");
+    expect((await store.tree()).folders).toEqual([{ name: "事例", models: 0 }]);
+    await store.removeFolder("事例");
+    expect(await exists(path.join(dir, "事例"))).toBe(false);
+  });
+
   test.runIf(process.platform === "win32" || process.platform === "darwin")("大文字と小文字だけを変える名前の変更もできる", async () => {
     const { dir, store } = await setup();
     await store.moveModel("brooks_law", "Brooks_Law");
-    expect((await readdir(dir)).sort()).toEqual(["Brooks_Law.data.csv", "Brooks_Law.json", "Brooks_Law.slides.json"]);
+    expect((await readdir(dir)).sort()).toEqual(["Brooks_Law.data.csv", "Brooks_Law.json"]);
     await store.createFolder("abc");
     await store.moveFolder("abc", "ABC");
     expect(await readdir(dir)).toContain("ABC");

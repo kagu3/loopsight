@@ -28,7 +28,7 @@ const same = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Mat
 
 const finite = (v: number | null | undefined): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** 符号をつける（減ったときは発表モードの変化と同じく「−」にする） */
+/** 符号をつける（減ったときは「−」にする） */
 const signed = (positive: boolean, abs: string) => `${positive ? "+" : "−"}${abs}`;
 
 /** 割合（0.2 → +20%）。10% より小さいときは小数を残す（+0.4% が +0% にならないように） */

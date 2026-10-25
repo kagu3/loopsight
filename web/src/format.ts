@@ -1,7 +1,12 @@
 // 値と時刻の書き方（React に依存しない）。グラフのツールチップ・表・図で同じ丸め方にする。
-// 値の書き方は export_slides の slides.md とも同じものを使うため、src/core/format.ts に置いてある。
 
-export { formatValue } from "../../src/core/format.js";
+/** 作業画面のグラフや表の値（100 以上は小数 2 桁まで、それより小さい値は 4 桁まで） */
+export function formatValue(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs !== 0 && (abs >= 1e9 || abs < 1e-3)) return v.toExponential(3);
+  return v.toLocaleString("ja-JP", { maximumFractionDigits: abs >= 100 ? 2 : 4 });
+}
 
 /** 時刻は桁区切りなし（2014.5 年のように） */
 export function formatTime(t: number | null | undefined): string {

@@ -950,7 +950,7 @@ function ScenarioMenu({
               onClose();
             }}
             disabled={saving}
-            title="発表モードの解決案のスライドに出る説明を、左の欄で直します"
+            title="凡例にカーソルを乗せたときに出る説明を、左の欄で直します"
           >
             説明を直す
           </button>
