@@ -20,6 +20,8 @@ import { ModelTree } from "./ModelTree.js";
 import { NoteDetails } from "./NoteDetails.js";
 import { folderKey, foldersOf, modelHash, modelTree } from "./modelList.js";
 import { GroupPanel } from "./GroupPanel.js";
+import { LoopPanel } from "./LoopPanel.js";
+import { listLoops } from "./loopList.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
 import { clearValuePatches, findScenario, scenarioBadges } from "./scenarios.js";
 import { draggedResultsRatio, parseExpandedPane, parseResultsRatio, RESULTS_RATIO, type ExpandedPane } from "./split.js";
@@ -232,6 +234,8 @@ export function App() {
   // id は欄を開いた回ごとの番号。表で名前を変えても同じ欄のまま（書きかけの説明を残す）にするため、欄の key に使う
   const [scenario, setScenario] = useState<{ name: string; id: number }>();
   const scenarioSeq = useRef(0);
+  // 図で目立たせているループ（左の欄の「ループ」で押したもの。LoopItem の key）
+  const [shownLoop, setShownLoop] = useState<string>();
   // 左の欄を開いているか（たたむと、右の図とグラフを広く使える）。ブラウザに覚えておき、開き直したときも同じ状態から始める。
   // 画面の幅では自動で開け閉めしない（狭い画面で縦に並べるときは、CSS でたたまずに出す）
   const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
@@ -527,6 +531,7 @@ export function App() {
     setScenario(undefined);
     setHoveredScenario(undefined);
     setValuesScenario(undefined);
+    setShownLoop(undefined);
     setNotice(undefined);
     void loadModel(current);
   }, [current, loadModel]);
@@ -920,6 +925,15 @@ export function App() {
   );
 
   const graph = useMemo(() => (data ? toGraph(data.model) : undefined), [data]);
+  // フィードバックループの一覧（AI の find_loops と同じ）。モデルが変わるたびに（AI の変更や極性の付け替えも）探し直す
+  const loops = useMemo(() => (data && !EMBED ? listLoops(data.model) : undefined), [data]);
+  // 目立たせているループ。極性が変わって R / B や名前が変わっても、同じ要素を回るループなら目立たせたままにする
+  const loop = shownLoop !== undefined ? loops?.loops.find((l) => l.key === shownLoop) : undefined;
+  const closeLoop = useCallback(() => setShownLoop(undefined), []);
+  // 目立たせていたループがなくなったら（リンクを消した・要素の名前が変わったなど）、目立たせるのをやめる
+  useEffect(() => {
+    if (shownLoop !== undefined && loops && !loop) setShownLoop(undefined);
+  }, [shownLoop, loops, loop]);
   const finalValues = useMemo(() => {
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(data?.run?.series ?? {})) out[k] = formatValue(v.at(-1));
@@ -1128,6 +1142,8 @@ export function App() {
 
         {data && <GroupPanel model={data.model} selected={selectedEl?.name} onSave={editGroups} />}
 
+        {loops && <LoopPanel list={loops} shown={loop?.key} onShow={setShownLoop} />}
+
         {data && <Problems data={data} onSelect={selectElement} />}
 
         <section className="panel models-panel">
@@ -1241,6 +1257,8 @@ export function App() {
                   valueTools={valueTools}
                   formula={selectedFormula}
                   onExport={exportDiagramFiles}
+                  loop={loop?.view}
+                  onLoopClose={closeLoop}
                   paneTools={<ExpandButton pane="diagram" expanded={expanded} onChange={expandPane} className="edit-toggle" />}
                 />
               </ReactFlowProvider>

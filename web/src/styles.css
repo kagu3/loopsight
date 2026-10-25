@@ -1465,6 +1465,33 @@ button.edit-tool.danger {
   border: 2px solid var(--loop);
   border-radius: 10px;
 }
+/* 作業画面で、やめるための ✕。札の大きさを変えない（書き出す画像の札を、AI の画像と同じにする）よう、右上の角に重ねる（札は React Flow の Panel なので、位置の基準になる） */
+.loop-badge-close {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.loop-badge-close:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+/* 作業画面では「図を編集」（同じ左上）の下に出す */
+.react-flow__panel.loop-badge.below-tools {
+  margin-top: 56px;
+}
 .loop-kind {
   display: grid;
   place-items: center;
@@ -2438,4 +2465,84 @@ button.scenario-chip-button.on {
 .group-add {
   align-self: flex-start;
   font-size: 12px;
+}
+
+/* フィードバックループの欄（左の欄）。押したループを図で目立たせる */
+.loops-panel h2 {
+  margin-bottom: 0;
+}
+.loops-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* ループが多いときも、下の「問題」や「モデル」の欄が遠くならないよう、一覧の中で巻き取る */
+.loop-list {
+  max-height: 40vh;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.loop-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.loop-row:hover {
+  background: var(--surface-2);
+}
+/* 目立たせているループ。図の線と同じ色（R は赤、B は青、決まっていなければ灰色）で囲む */
+.loop-row.on {
+  border-color: var(--loop);
+  background: color-mix(in srgb, var(--loop) 10%, transparent);
+}
+.loop-row-kind {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--loop);
+  color: var(--surface-1);
+  font-size: 12px;
+  font-weight: 700;
+}
+.loop-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.loop-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+.loop-row-name {
+  font-weight: 700;
+}
+.loop-row-delay {
+  color: var(--loop);
+  font-weight: 600;
+}
+.loop-row-elements {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }

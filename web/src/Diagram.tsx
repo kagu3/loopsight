@@ -348,6 +348,8 @@ export interface DiagramProps {
    * 要素を選んでいても、こちらを優先する
    */
   loop?: LoopView;
+  /** 目立たせるのをやめる（作業画面だけ渡す）。ループの札に ✕ を出す */
+  onLoopClose?(): void;
   /** 注目しているシナリオ（凡例にカーソルを乗せている・左の欄で直している）。変えた要素に札を付け、枠をシナリオの線の色にする */
   scenario?: ScenarioMarks;
   /** 編集モード。オンのときだけ要素を動かせて、図の上に編集の道具の場所を出す。選ぶ・薄くするなどの見るための操作はいつでもできる */
@@ -835,7 +837,7 @@ export function Diagram(props: DiagramProps) {
           </svg>
         </ViewportPortal>
       )}
-      {props.loop && <LoopBadge loop={props.loop} />}
+      {props.loop && <LoopBadge loop={props.loop} belowTools={!!props.onEditableChange} onClose={props.onLoopClose} />}
       {areas.length > 0 && <GroupLegend areas={areas} />}
       {props.onEditableChange && (
         <EditTools
@@ -1169,10 +1171,14 @@ function FormulaList({ view }: { view: FormulaView }) {
   );
 }
 
-/** 目立たせているループの名前と R / B */
-function LoopBadge({ loop }: { loop: LoopView }) {
+/**
+ * 目立たせているループの名前と R / B。
+ * 作業画面では、左上の「図を編集」と重ならないよう、その下に出す（書き出す画像では、札はいつも図の上に置く）。
+ * onClose を渡すと（作業画面）、やめるための ✕ を札の右上の角に出す。✕ は札の大きさに入れず、書き出す画像にも入れない
+ */
+function LoopBadge({ loop, belowTools, onClose }: { loop: LoopView; belowTools?: boolean; onClose?(): void }) {
   return (
-    <Panel position="top-left" className={`loop-badge loop-${loop.kind.toLowerCase()}`}>
+    <Panel position="top-left" className={`loop-badge loop-${loop.kind.toLowerCase()}${belowTools ? " below-tools" : ""}`}>
       <span className="loop-kind" aria-hidden>
         {loop.kind === "unknown" ? "?" : loop.kind}
       </span>
@@ -1180,6 +1186,11 @@ function LoopBadge({ loop }: { loop: LoopView }) {
         <span className="loop-name">{loop.name}</span>
         {loop.name !== LOOP_KIND_LABEL[loop.kind] && <span className="loop-kind-label">{LOOP_KIND_LABEL[loop.kind]}</span>}
       </span>
+      {onClose && (
+        <button className="loop-badge-close" data-export="skip" onClick={onClose} aria-label={`ループ「${loop.name}」を目立たせるのをやめる`} title="ループを目立たせるのをやめます">
+          ✕
+        </button>
+      )}
     </Panel>
   );
 }
