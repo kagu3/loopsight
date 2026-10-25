@@ -3,7 +3,6 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import type { ActualDataResult, ModelJSON, RunResult, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
 import { sameTime, withActualPoints } from "./actualPoints.js";
 import { renamedName } from "./editing.js";
-import { normalize, normalizeLike, normalizeTogether } from "./normalize.js";
 import {
   addableValues,
   BASELINE_NAME,
@@ -85,31 +84,7 @@ function assignSlots(visible: string[], prev: Map<string, number>): Map<string, 
 /** 線の色の割り当てを、名前を変えたあとの名前にする */
 const renamedKeys = (slots: Map<string, number>, renamed: [string, string][]) => new Map([...slots].map(([n, slot]) => [renamedName(n, renamed), slot]));
 
-/**
- * 縦軸の決め方。
- * - value: 値そのまま
- * - normalized: 要素ごとに、最小を 0%、最大を 100% にそろえる。大きさの違う要素の、増え方や減り方の形を比べるため
- */
-type Scale = "value" | "normalized";
-const SCALE_KEY = "viewer.chartScale";
-function loadScale(): Scale {
-  try {
-    return localStorage.getItem(SCALE_KEY) === "normalized" ? "normalized" : "value";
-  } catch {
-    return "value";
-  }
-}
-function saveScale(scale: Scale) {
-  try {
-    localStorage.setItem(SCALE_KEY, scale);
-  } catch {
-    // 覚えられなくても動く
-  }
-}
-
-const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
-
-/** シナリオの凡例を開いて、シナリオの中身の表にしているか（縦軸と同じく、ブラウザに覚えておく） */
+/** シナリオの凡例を開いて、シナリオの中身の表にしているか（ブラウザに覚えておく） */
 const MATRIX_KEY = "viewer.scenarioMatrix";
 function loadMatrixOpen(): boolean {
   try {
@@ -197,7 +172,6 @@ export function Chart({
   const visible = useMemo(() => (renamed?.length ? chosen.map((n) => renamedName(n, renamed)) : chosen), [chosen, renamed]);
   const slots = useMemo(() => (renamed?.length ? renamedKeys(chosenSlots, renamed) : chosenSlots), [chosenSlots, renamed]);
   const [view, setView] = useState<"chart" | "table">("chart");
-  const [scale, setScaleState] = useState<Scale>(loadScale);
   // シナリオを重ねるか。シナリオが保存されていれば、はじめは重ねる
   const [overlay, setOverlay] = useState(true);
   const compare = useMemo(() => compareRuns(run, scenarios ?? [], MAX_SERIES), [run, scenarios]);
@@ -245,10 +219,6 @@ export function Chart({
   // 図に知らせる。知らせる先が変わったり、グラフが消えたりしたら、前の先には「外した」と知らせる
   useEffect(() => onHoverTime?.(hoverTime), [hoverTime, onHoverTime]);
   useEffect(() => () => onHoverTime?.(undefined), [onHoverTime]);
-  const setScale = (s: Scale) => {
-    setScaleState(s);
-    saveScale(s);
-  };
 
   // 別のモデルを開いたら選び直す。同じモデルの更新では、名前の変わった要素は新しい名前にし、消えた要素だけ外す
   const [shownModel, setShownModel] = useState(modelName);
@@ -295,27 +265,25 @@ export function Chart({
 
   // Recharts の dataKey は「.」を入れ子のパスとして読むので、要素名ではなく番号で持つ
   const keyOf = (name: string) => `s${names.indexOf(name)}`;
-  // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
+  // 行には時刻と行の番号（i）を持たせる。ツールチップは番号から元の値を出す
   const data = useMemo(() => {
-    const series = new Map(visible.map((n) => [n, scale === "normalized" ? normalize(run.series[n] ?? []) : (run.series[n] ?? [])]));
     return run.times.map((t, i) => {
       const row: Record<string, number | null> = { t, i };
-      for (const n of visible) row[keyOf(n)] = series.get(n)?.[i] ?? null;
+      for (const n of visible) row[keyOf(n)] = run.series[n]?.[i] ?? null;
       return row;
     });
-  }, [run, visible, names, scale]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 実際のデータの点。モデルの線と同じ行に入れる。正規化するときはモデルの線と同じ目盛りにする
+  }, [run, visible, names]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 実際のデータの点。モデルの線と同じ行に入れる
   const actualKeyOf = (name: string) => `a${names.indexOf(name)}`;
   const withActual = useMemo(() => {
     const points = new Map<string, { t: number; v: number }[]>();
     for (const n of visible) {
       const values = actual?.series[n];
       if (!values) continue;
-      const scaled = scale === "normalized" ? normalizeLike(values, run.series[n] ?? []) : values;
-      points.set(actualKeyOf(n), actual!.times.flatMap((t, i) => (scaled[i] == null ? [] : [{ t, v: scaled[i]! }])));
+      points.set(actualKeyOf(n), actual!.times.flatMap((t, i) => (values[i] == null ? [] : [{ t, v: values[i]! }])));
     }
     return { rows: withActualPoints(data, points, visible.map(keyOf)), names: visible.filter((n) => points.has(actualKeyOf(n))) };
-  }, [data, actual, run, visible, names, scale]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, actual, visible, names]); // eslint-disable-line react-hooks/exhaustive-deps
   const unit = TIME_UNIT_LABEL[run.time_units.toLowerCase()] ?? run.time_units;
   const colorOf = (name: string) => `var(${SLOTS[slots.get(name) ?? 0]})`;
 
@@ -373,32 +341,6 @@ export function Chart({
             ＋ シナリオを足す
           </button>
         )}
-        {view === "chart" && (
-          <div className="segmented" role="radiogroup" aria-label="縦軸">
-            <button
-              role="radio"
-              aria-checked={scale === "value"}
-              className={scale === "value" ? "on" : ""}
-              onClick={() => setScale("value")}
-              title="値をそのまま出します"
-            >
-              実際の値
-            </button>
-            <button
-              role="radio"
-              aria-checked={scale === "normalized"}
-              className={scale === "normalized" ? "on" : ""}
-              onClick={() => setScale("normalized")}
-              title={
-                comparing
-                  ? "要素ごとに、どのシナリオも通した最小を 0%、最大を 100% にそろえます"
-                  : "要素ごとに、最小を 0%、最大を 100% にそろえます。大きさの違う要素の、変わり方の形を比べられます"
-              }
-            >
-              正規化
-            </button>
-          </div>
-        )}
         <SeriesPicker candidates={candidates} visible={visible} colorOf={colorOf} plain={comparing} onToggle={toggle} />
         {/* 凡例を兼ねる。出している要素だけを色つきで出し、× で外せる。シナリオを重ねているときの色はシナリオのものなので、要素には色を付けない */}
         <ul className="series-legend" aria-label="表示している要素">
@@ -442,7 +384,7 @@ export function Chart({
       ) : comparing && view === "chart" ? (
         <div className="compare-grid">
           {visible.map((n) => (
-            <CompareChart key={n} name={n} times={run.times} runs={compare.runs} unit={unit} scale={scale} actual={actual} onHover={setHoverTime} />
+            <CompareChart key={n} name={n} times={run.times} runs={compare.runs} unit={unit} actual={actual} onHover={setHoverTime} />
           ))}
         </div>
       ) : comparing ? (
@@ -496,7 +438,7 @@ export function Chart({
                 label={{ value: `時間（${unit}）`, position: "insideBottomRight", offset: -4, fill: "var(--text-secondary)", fontSize: 12 }}
                 height={36}
               />
-              {yAxis(scale)}
+              {yAxis()}
               <Tooltip
                 cursor={{ stroke: "var(--text-muted)", strokeWidth: 1 }}
                 content={(p: TooltipContentProps) => <ChartTooltip {...p} unit={unit} visible={visible} run={run} actual={actual} colorOf={colorOf} />}
@@ -561,20 +503,9 @@ export function Chart({
   );
 }
 
-/** 縦軸。正規化しているときは 0%〜100% */
-function yAxis(scale: Scale) {
-  return scale === "normalized" ? (
-    <YAxis
-      domain={[0, 1]}
-      ticks={[0, 0.25, 0.5, 0.75, 1]}
-      tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
-      stroke="var(--axis)"
-      tickFormatter={formatPercent}
-      width={72}
-    />
-  ) : (
-    <YAxis tick={{ fill: "var(--text-secondary)", fontSize: 12 }} stroke="var(--axis)" tickFormatter={(v: number) => formatValue(v)} width={72} />
-  );
+/** 縦軸 */
+function yAxis() {
+  return <YAxis tick={{ fill: "var(--text-secondary)", fontSize: 12 }} stroke="var(--axis)" tickFormatter={(v: number) => formatValue(v)} width={72} />;
 }
 
 /** シナリオの中身の表で、はじめから出す「変えた値」の行の数。超えたぶんは畳んで「ほか N 件」で開く */
@@ -1548,7 +1479,6 @@ const CompareChart = memo(function CompareChart({
   times,
   runs,
   unit,
-  scale,
   actual,
   onHover,
 }: {
@@ -1556,15 +1486,13 @@ const CompareChart = memo(function CompareChart({
   times: number[];
   runs: CompareRun[];
   unit: string;
-  scale: Scale;
   actual?: ActualDataResult;
   onHover(t: number | undefined): void;
 }) {
-  // 行には時刻と行の番号（i）を持たせる。ツールチップは正規化していても、番号から元の値を出す
-  // 実際のデータの点も同じ行に入れる（キーは a）。正規化するときは、どのシナリオも通した最小と最大を目盛りにする
+  // 行には時刻と行の番号（i）を持たせる。ツールチップは番号から元の値を出す
+  // 実際のデータの点も同じ行に入れる（キーは a）
   const data = useMemo(() => {
-    const raw = runs.map((r) => r.series[name] ?? []);
-    const series = scale === "normalized" ? normalizeTogether(raw) : raw;
+    const series = runs.map((r) => r.series[name] ?? []);
     const rows = times.map((t, i) => {
       const row: Record<string, number | null> = { t, i };
       series.forEach((values, k) => (row[`r${k}`] = values[i] ?? null));
@@ -1572,10 +1500,9 @@ const CompareChart = memo(function CompareChart({
     });
     const values = actual?.series[name];
     if (!values) return rows;
-    const scaled = scale === "normalized" ? normalizeLike(values, raw.flat()) : values;
-    const points = actual!.times.flatMap((t, i) => (scaled[i] == null ? [] : [{ t, v: scaled[i]! }]));
+    const points = actual!.times.flatMap((t, i) => (values[i] == null ? [] : [{ t, v: values[i]! }]));
     return withActualPoints(rows, new Map([["a", points]]), runs.map((_, k) => `r${k}`));
-  }, [name, times, runs, scale, actual]);
+  }, [name, times, runs, actual]);
   return (
     <figure className="compare-cell">
       <figcaption title={name}>{name}</figcaption>
@@ -1597,7 +1524,7 @@ const CompareChart = memo(function CompareChart({
               stroke="var(--axis)"
               height={24}
             />
-            {yAxis(scale)}
+            {yAxis()}
             <Tooltip
               cursor={{ stroke: "var(--text-muted)", strokeWidth: 1 }}
               content={(p: TooltipContentProps) => <CompareTooltip {...p} unit={unit} name={name} runs={runs} actual={actual} />}
@@ -1638,7 +1565,7 @@ const CompareChart = memo(function CompareChart({
   );
 });
 
-/** シナリオを重ねたグラフのツールチップ。正規化していても実際の値を出す */
+/** シナリオを重ねたグラフのツールチップ */
 function CompareTooltip(p: TooltipContentProps & { unit: string; name: string; runs: CompareRun[]; actual?: ActualDataResult }) {
   if (!p.active || !p.payload?.length) return null;
   const row = p.payload[0]!.payload as Record<string, number | null>;
