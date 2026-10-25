@@ -31,6 +31,8 @@ import {
   type ActualDataResult,
   type AnnotationPatch,
   type ChangeEvent,
+  type DiagramExportRequest,
+  type DiagramExportResponse,
   type EditErrorResponse,
   type EditRequest,
   type EditResponse,
@@ -43,12 +45,14 @@ import {
   type ScenariosRequest,
   type UndoRequest,
 } from "./api.js";
+import { DIAGRAM_FILE_BASE, exportFolderOf, writeDiagramImages } from "./diagram-export.js";
 import { watchTree } from "./watch.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
 // 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_annotations と同じ処理を通す）。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
 // 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
+// 画面の図を書き出した画像（SVG と PNG）も受け取り、作業フォルダの exports/<モデル名>/ に書く（MCP の export_diagram と同じ書き出し先）。
 
 export interface ViewerOptions {
   /** 作業フォルダ */
@@ -205,6 +209,8 @@ interface HistoryEntry {
 }
 const HISTORY_LIMIT = 50;
 const MAX_BODY = 1024 * 1024;
+/** 図の画像（SVG と、base64 にした PNG）を受け取るときの上限 */
+const MAX_IMAGE_BODY = 64 * 1024 * 1024;
 
 class HttpError extends Error {
   constructor(
@@ -250,12 +256,12 @@ function checkWriteRequest(req: IncomingMessage): void {
   }
 }
 
-async function readBody<T>(req: IncomingMessage): Promise<T> {
+async function readBody<T>(req: IncomingMessage, limit = MAX_BODY): Promise<T> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new HttpError(413, "送る内容が大きすぎます。");
+    if (size > limit) throw new HttpError(413, "送る内容が大きすぎます。");
     chunks.push(chunk as Buffer);
   }
   try {
@@ -471,6 +477,27 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     }
   };
 
+  /** 画面の図を書き出した画像を、exports/<モデル名>/diagram.svg と diagram.png に書く */
+  const handleExportDiagram = async (req: IncomingMessage, res: ServerResponse, name: string) => {
+    try {
+      checkWriteRequest(req);
+      const body = await readBody<DiagramExportRequest>(req, MAX_IMAGE_BODY);
+      if (typeof body?.svg !== "string" || !body.svg.startsWith("<svg")) throw new HttpError(400, "svg がありません。");
+      if (typeof body.png !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.png)) throw new HttpError(400, "png（base64）がありません。");
+      const png = Buffer.from(body.png, "base64");
+      if (png.subarray(1, 4).toString("latin1") !== "PNG") throw new HttpError(400, "png が PNG の画像ではありません。");
+      try {
+        await store.read(name);
+      } catch (e) {
+        throw e instanceof StoreError ? new HttpError(404, e.message) : e;
+      }
+      const written = await writeDiagramImages(store, exportFolderOf(name), DIAGRAM_FILE_BASE, { svg: body.svg, png });
+      sendJSON(res, 200, written satisfies DiagramExportResponse);
+    } catch (e) {
+      sendJSON(res, e instanceof HttpError ? e.status : 500, { error: (e as Error).message } satisfies EditErrorResponse);
+    }
+  };
+
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const host = (req.headers.host ?? "").replace(/:\d+$/, "");
     if (!ALLOWED_HOSTS.has(host)) {
@@ -487,6 +514,11 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     }
     // モデル名はフォルダを含む（ブルックスの法則/brooks_law）。画面は名前を encodeURIComponent で送る（/ は %2F）が、/ のままでも読む。
     // 書き込みは、デコードする前のパスの終わりで見分ける（%2F で送られた名前の中の「/edit」などと取り違えないように）
+    const exported = url.pathname.match(/^\/api\/models\/(.+)\/export-diagram$/);
+    if (exported) {
+      await handleExportDiagram(req, res, decodeURIComponent(exported[1]!));
+      return;
+    }
     const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|groups|remove|undo)$/);
     if (write) {
       await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as "edit" | "scenarios" | "groups" | "remove" | "undo");

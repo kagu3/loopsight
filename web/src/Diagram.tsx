@@ -28,6 +28,7 @@ import { annotationPatches, borderPoint, connectedTo, fitTargets, linkControlPoi
 import { groupAreas, type GroupArea } from "../../src/core/groups.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { delayMarkPath } from "../../src/core/delay.js";
+import { exportDiagram, type ExportedDiagram } from "./diagramExport.js";
 import type { NodeValue } from "./diagramValues.js";
 import { NEW_ELEMENT_LABEL, type FlowEnd, type NewElementType } from "./editing.js";
 import { formulaText, type FormulaToken, type FormulaView } from "./formulaValues.js";
@@ -381,6 +382,11 @@ export interface DiagramProps {
   valueTools?: ValueTools;
   /** 図の右上の「値を表示」の右に並べるもの（ビューアの「広げる」）。渡したときだけ出す */
   paneTools?: ReactNode;
+  /**
+   * 図の右上の「書き出す」を押した。create を呼ぶと、図を SVG と PNG にする（できなければ例外）。渡したときだけボタンを出す。
+   * 画像は、いま見ている表示のまま（「値を表示」の値などは入れ、選んでいる要素の枠や薄くする表示は外す）
+   */
+  onExport?(create: () => Promise<ExportedDiagram>): Promise<void>;
   /** 「値を表示」がオンで要素を選んでいるときの、値を入れた式。選んだ要素の横に出す */
   formula?: SelectedFormula;
 }
@@ -843,9 +849,10 @@ export function Diagram(props: DiagramProps) {
           onRemove={props.onRemove}
         />
       )}
-      {(props.valueTools || props.paneTools) && (
+      {(props.valueTools || props.paneTools || props.onExport) && (
         <Panel position="top-right" className="top-right-tools">
           {props.valueTools && <ValueToolsPanel {...props.valueTools} />}
+          {props.onExport && <ExportButton onExport={props.onExport} dropSelection={!loop && !!(linkEdge || selected)} edges={graph.edges.length} />}
           {props.paneTools}
         </Panel>
       )}
@@ -993,6 +1000,37 @@ function ValueToolsPanel({ on, onChange, scenarios, scenario, onScenario, captio
         値を表示
       </button>
     </div>
+  );
+}
+
+/**
+ * 図の「書き出す」（図の右上）。図だけを SVG と PNG（2 倍の解像度）にして渡す。書き出している間は押せない。
+ * 「広げる」と並ぶので、記号だけにする（言葉は title と aria-label に出す）
+ */
+function ExportButton({ onExport, dropSelection, edges }: { onExport(create: () => Promise<ExportedDiagram>): Promise<void>; dropSelection: boolean; edges: number }) {
+  const domNode = useStore((s) => s.domNode);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    if (!domNode || busy) return;
+    setBusy(true);
+    try {
+      await onExport(() => exportDiagram(domNode, { scale: 2, dropSelection, edges }));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      className="edit-toggle expand-button"
+      onClick={() => void run()}
+      disabled={busy}
+      aria-label="図を画像に書き出す"
+      title="図だけを SVG（拡大してもぼやけない）と PNG（2 倍の解像度）に書き出します。資料に貼る用です。いま見ている表示のまま（「値を表示」の値も入ります）、白い背景の明るい配色で、図全体を書き出します。保存先は作業フォルダの exports/<モデル名>/ です"
+    >
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11" />
+      </svg>
+    </button>
   );
 }
 

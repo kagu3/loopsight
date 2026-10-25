@@ -1,10 +1,11 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { AnnotationPatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
-import { FetchError, fetchList, fetchModel, postEdit, postGroups, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
+import { FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details, DelayToggle } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
+import { blobToBase64, exportDiagram, type ExportedDiagram } from "./diagramExport.js";
 import { nodeValues, peakIndex, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
 import { formulaView } from "./formulaValues.js";
 import { InfoTip } from "./InfoTip.js";
@@ -46,6 +47,22 @@ function loopFromQuery(): LoopView | undefined {
   }
 }
 const EMBED_LOOP = EMBED ? loopFromQuery() : undefined;
+
+/**
+ * 図だけの表示で、図を SVG と PNG にする（MCP の export_diagram がヘッドレスのブラウザから呼ぶ）。
+ * ビューアの図の「書き出す」ボタンと同じ処理で、PNG は base64 で返す
+ */
+/** 図だけの表示で描いている図の線の数（書き出す前に、線が描き終わるのを待つため） */
+let embedEdges = 0;
+if (EMBED) {
+  (window as unknown as { loopsightExportDiagram: (scale?: number) => Promise<unknown> }).loopsightExportDiagram = async (scale = 2) => {
+    const root = document.querySelector<HTMLElement>(".embed-diagram .react-flow");
+    if (!root) throw new Error("図が見つかりません。");
+    await document.fonts.ready;
+    const image = await exportDiagram(root, { scale, edges: embedEdges });
+    return { svg: image.svg, width: image.width, height: image.height, scale: image.scale, png: await blobToBase64(image.png) };
+  };
+}
 
 /** 前の版と比べて、変わった（または増えた）要素の名前（小文字） */
 function changedElements(prev: ModelResponse | undefined, next: ModelResponse): Set<string> {
@@ -990,9 +1007,25 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [canRemove, removeSelected]);
+  // 図の「書き出す」。画像を作り、サーバーに作業フォルダの exports/<モデル名>/ へ書いてもらう
+  const exportDiagramFiles = useCallback(async (create: () => Promise<ExportedDiagram>) => {
+    const name = currentRef.current;
+    let image: ExportedDiagram;
+    try {
+      image = await create();
+    } catch (e) {
+      setNotice(`図を画像にできませんでした: ${(e as Error).message}`);
+      return;
+    }
+    const result = await postDiagramExport(name, image.svg, await blobToBase64(image.png));
+    if (!sameModel(name, currentRef.current)) return;
+    setNotice(result.ok ? `図を書き出しました：${result.data.files.join("、")}` : `図を書き出せませんでした: ${result.error}`);
+  }, []);
+
   const title = data?.model.name || current;
 
   if (EMBED) {
+    embedEdges = graph?.edges.length ?? 0;
     return (
       <div className="embed-diagram">
         {graph && data ? (
@@ -1181,6 +1214,7 @@ export function App() {
                   liveValues={liveValues}
                   valueTools={valueTools}
                   formula={selectedFormula}
+                  onExport={exportDiagramFiles}
                   paneTools={<ExpandButton pane="diagram" expanded={expanded} onChange={expandPane} className="edit-toggle" />}
                 />
               </ReactFlowProvider>

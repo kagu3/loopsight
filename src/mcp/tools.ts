@@ -60,6 +60,7 @@ import {
   type ScenarioPatch,
 } from "../core/index.js";
 import { BrowserNotFoundError, launchBrowser } from "../viewer/browser.js";
+import { DIAGRAM_FILE_BASE, checkFileBase, exportFolderOf, writeDiagramImages } from "../viewer/diagram-export.js";
 import { startViewer } from "../viewer/server.js";
 
 // ---- 入力の形 ----
@@ -223,6 +224,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている。要素の補足や図の読み方は、set_annotations で説明する箱の近くに注釈（文字だけのもの）として置ける
    要素が多いときは、set_groups で意味のまとまり（「お店側」「お客側」など）をグループにする。図では属する要素が薄い色の背景で囲まれ、凡例が出る。layout_model は同じグループの要素を近くに集めて並べる
+7. 図だけを資料（PDF やスライド）に貼るときは、export_diagram で SVG と PNG に書き出す（既定は exports/<モデル名>/diagram.svg と diagram.png）。人はビューアの図の右上の「書き出す」ボタンで同じものを書き出せる
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
 insightmaker.com には自動でアクセスしません。`;
@@ -439,7 +441,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "強調した要素（display.emphasis）は大きく描き、重なりなどの確認もその大きさで行う（positions の size も大きくしたもの）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
         "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。" +
-        "遅れの印（display.delay）のあるリンクやフローは、線の途中に ‖ を描く。先の要素の式が元の要素を Delay や Smooth などの時間をまたぐ関数に渡しているのに印のないリンクがあれば、unmarked_delays で知らせる（自動では付けない）。",
+        "遅れの印（display.delay）のあるリンクやフローは、線の途中に ‖ を描く。先の要素の式が元の要素を Delay や Smooth などの時間をまたぐ関数に渡しているのに印のないリンクがあれば、unmarked_delays で知らせる（自動では付けない）。" +
+        "資料に貼る図の画像をファイルにするときは export_diagram を使う。",
       inputSchema: {
         model: modelName,
         image: z.boolean().optional().describe("画像を付ける（既定は true）。一覧だけでよければ false"),
@@ -486,6 +489,70 @@ export function registerTools(server: McpServer, store: ModelStore): void {
           { type: "image", data: png.toString("base64"), mimeType: "image/png" },
         ],
       } satisfies CallToolResult;
+    }),
+  );
+
+  server.registerTool(
+    "export_diagram",
+    {
+      title: "図を画像に書き出す",
+      description:
+        "モデルの図だけを、資料（PDF やスライド）に貼る画像にして、作業フォルダの中のフォルダに書き出す。ビューアの図の「書き出す」ボタンと同じ描き方で、画面の図をそのまま写す。" +
+        "書き出し先は既定で exports/<モデル名>/（フォルダにあるモデルは exports/<フォルダ>/<名前>/）で、ファイルは <name>.svg と <name>.png（name の既定は diagram。同じ名前のファイルは置き換える）。" +
+        "SVG は拡大してもぼやけない（文字も <text> のまま）。PNG は scale 倍の解像度（既定 2）。背景は白で、いつも明るい配色。" +
+        "全体図・ズームのボタン・背景の点などの操作用の部品は入れず、図全体が収まるように切り取る。" +
+        "loop を渡すと、view_diagram の loop と同じく、そのループを目立たせ、ループの名前と R / B の札を図の上に付ける。ループごとに name を変えると、別のファイルに残せる。" +
+        "Edge か Chrome が必要。",
+      inputSchema: {
+        model: modelName,
+        loop: z
+          .object({
+            elements: z.array(z.string()).min(1).describe("ループを作る要素名を、つながる順に（find_loops の elements）"),
+            name: z.string().optional().describe("図に出すループの名前（省略すると「強めるループ」などの種類の名前）"),
+          })
+          .optional()
+          .describe("目立たせるループ"),
+        formats: z.array(z.enum(["svg", "png"])).min(1).optional().describe("書き出す形式（既定は両方）"),
+        scale: z.number().min(1).max(4).optional().describe("PNG の解像度の倍率（既定 2。図が大きいときは、長い辺が 8000 px に収まるよう下げる）"),
+        path: z.string().optional().describe("書き出すフォルダ。作業フォルダからの相対パス（既定は exports/<モデル名>。フォルダにあるモデルは exports/<フォルダ>/<名前>）"),
+        name: z.string().optional().describe("ファイル名（拡張子なし。既定は diagram）"),
+      },
+    },
+    handle(async (a: { model: string; loop?: { elements: string[]; name?: string }; formats?: ("svg" | "png")[]; scale?: number; path?: string; name?: string }) => {
+      const m = await store.read(a.model);
+      let loop: LoopView | undefined;
+      if (a.loop) {
+        const found = describeLoop(m, a.loop.elements);
+        if ("error" in found) throw new ModelError(`ループになっていません。${found.error}`, []);
+        loop = { name: a.loop.name ?? LOOP_KIND_LABEL[found.loop.kind], kind: found.loop.kind, elements: found.loop.elements };
+      }
+      const rel = a.path ?? exportFolderOf(a.model);
+      const base = checkFileBase(a.name ?? DIAGRAM_FILE_BASE);
+      // 書き出し先は、描く前（ブラウザを起動する前）に確かめる
+      if (/\.(svg|png)$/i.test(rel)) throw new StoreError(`path には書き出すフォルダを指定してください（"${rel}" は画像のファイル名に見えます。ファイル名は name で指定します）。`);
+      const target = store.resolveInside(rel);
+      if (path.relative(store.dir, target) === "") throw new StoreError("作業フォルダそのものには書き出せません。exports/<モデル名> のようなフォルダを指定してください。");
+      const formats = new Set(a.formats ?? ["svg", "png"]);
+      let image: RenderedDiagram;
+      try {
+        image = await renderDiagramExport(store, a.model, a.scale ?? 2, loop);
+      } catch (e) {
+        if (e instanceof BrowserNotFoundError) throw e;
+        throw new StoreError(`図を画像にできませんでした: ${(e as Error).message}`);
+      }
+      const { dir, files } = await writeDiagramImages(store, rel, base, {
+        svg: formats.has("svg") ? image.svg : undefined,
+        png: formats.has("png") ? Buffer.from(image.png, "base64") : undefined,
+      });
+      return {
+        model: a.model,
+        dir,
+        files,
+        size: { width: image.width, height: image.height },
+        ...(formats.has("png") ? { png_size: { width: Math.round(image.width * image.scale), height: Math.round(image.height * image.scale) }, png_scale: image.scale } : {}),
+        ...(loop ? { loop } : {}),
+        next_step: "SVG は PDF やスライドに貼っても、拡大してぼやけません。SVG を貼れないアプリには PNG を使えます。",
+      };
     }),
   );
 
@@ -934,6 +1001,37 @@ async function renderDiagram(store: ModelStore, name: string, width: number, hei
       const query = loop ? `&loop=${encodeURIComponent(JSON.stringify(loop))}` : "";
       await browser.open(`${viewer.url}?view=diagram${query}#${encodeURIComponent(name)}`);
       return await browser.screenshot();
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await viewer.close();
+  }
+}
+
+/** 図を書き出した画像。png は base64、width と height は SVG の大きさ（px）、scale は PNG の倍率 */
+interface RenderedDiagram {
+  svg: string;
+  png: string;
+  width: number;
+  height: number;
+  scale: number;
+}
+
+/**
+ * ビューアを一時的に起動し、ヘッドレスのブラウザで図だけの表示を開いて、ビューアの「書き出す」ボタンと同じ処理（web/src/diagramExport.ts）で SVG と PNG にする。
+ * 画面の大きさは、書き出す画像の大きさに関係しない（図全体を図の座標で書き出す）
+ */
+async function renderDiagramExport(store: ModelStore, name: string, scale: number, loop?: LoopView): Promise<RenderedDiagram> {
+  if (!existsSync(path.join(WEB_DIR, "index.html"))) throw new Error("画面がビルドされていません。npm run build を実行してください。");
+  const viewer = await startViewer({ modelsDir: store.dir, staticDir: WEB_DIR, port: 0 });
+  try {
+    const browser = await launchBrowser();
+    try {
+      await browser.setViewport(1600, 1000);
+      const query = loop ? `&loop=${encodeURIComponent(JSON.stringify(loop))}` : "";
+      await browser.open(`${viewer.url}?view=diagram${query}#${encodeURIComponent(name)}`);
+      return await browser.evaluate<RenderedDiagram>(`window.loopsightExportDiagram(${JSON.stringify(scale)})`);
     } finally {
       await browser.close();
     }
