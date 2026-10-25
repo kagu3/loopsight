@@ -7,6 +7,7 @@ import { formOf, patchOf, type Form } from "./editing.js";
 // 編集は MCP の upsert_elements と同じ形（変えた項目だけ）でサーバーに送る。
 // 図の箱になる要素は、「図で強調する」で強調の印（display.emphasis）を付け外しできる（押すとすぐ保存する）。
 // フローと、選んだリンク（App.tsx）には、遅れの印（‖）を付け外しするチェックを出す（押すとすぐ保存する。MCP の display.delay と同じ）。
+// 選んだリンクには、極性（+ / −）を選ぶ欄も出す（押すとすぐ保存する。MCP の LINK の behavior.polarity と同じ）。
 
 const TYPE_LABEL: Record<string, string> = {
   STOCK: "ストック",
@@ -224,6 +225,55 @@ export function DelayToggle({ on, onChange }: { on: boolean; onChange(on: boolea
         <input type="checkbox" checked={on} disabled={saving} onChange={(e) => void toggle(e.target.checked)} />
         遅れの印（‖）を付ける
       </label>
+      {error && <span className="form-error">{error}</span>}
+    </span>
+  );
+}
+
+/** リンクの極性。null は決めない（項目を消す） */
+export type LinkPolarity = "POSITIVE" | "NEGATIVE" | null;
+
+const POLARITY_CHOICES: { value: LinkPolarity; label: string; title: string }[] = [
+  { value: "POSITIVE", label: "+", title: "元が増えると、先も増える（元が減ると、先も減る）" },
+  { value: "NEGATIVE", label: "−", title: "元が増えると、先は減る（元が減ると、先は増える）" },
+  { value: null, label: "なし（決めない）", title: "極性を決めません。このリンクを通るループは、R か B か決まりません" },
+];
+
+/** リンクの極性（behavior.polarity）。POSITIVE と NEGATIVE のほか（NEUTRAL やないもの）は、決めていないとみなす */
+export function linkPolarity(el: ModelElement): LinkPolarity {
+  const p = el.behavior?.polarity;
+  return p === "POSITIVE" || p === "NEGATIVE" ? p : null;
+}
+
+/**
+ * リンクの極性（+ / −）を選ぶ欄。押すとすぐ保存する。
+ * 極性で、ループが強める（R）か釣り合わせる（B）かが決まる
+ */
+export function PolarityPicker({ value, onChange }: { value: LinkPolarity; onChange(value: LinkPolarity): Promise<string | undefined> }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const choose = async (next: LinkPolarity) => {
+    setSaving(true);
+    const err = await onChange(next);
+    setSaving(false);
+    setError(err);
+  };
+  return (
+    <span className="polarity-picker">
+      <span
+        className="polarity-choices"
+        role="radiogroup"
+        aria-label="極性"
+        title="元が増えたときに先が増えるなら +、減るなら − です。ループの − の数が偶数なら強めるループ（R）、奇数なら釣り合わせるループ（B）になります"
+      >
+        <span className="polarity-label">極性</span>
+        {POLARITY_CHOICES.map((c) => (
+          <label key={c.label} className="check" title={c.title}>
+            <input type="radio" name="link-polarity" value={c.value ?? "none"} checked={value === c.value} disabled={saving} onChange={() => void choose(c.value)} />
+            {c.label}
+          </label>
+        ))}
+      </span>
       {error && <span className="form-error">{error}</span>}
     </span>
   );

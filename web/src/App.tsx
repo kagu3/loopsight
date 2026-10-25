@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import type { AnnotationPatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
 import { FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
-import { Details, DelayToggle } from "./Details.js";
+import { Details, DelayToggle, linkPolarity, PolarityPicker } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
 import { blobToBase64, exportDiagram, type ExportedDiagram } from "./diagramExport.js";
 import { nodeValues, peakIndex, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
@@ -1096,11 +1096,16 @@ export function App() {
           ) : selectedEl ? (
             <Details el={selectedEl} value={finalValues[selectedEl.name!]} onSave={(patch) => edit([patch])} />
           ) : selectedLinkEl ? (
-            // リンクは、何から何への線かと、遅れの印（‖）の付け外しを出す
+            // リンクは、何から何への線かと、極性（+ / −）の選択と、遅れの印（‖）の付け外しを出す
             <p className="link-details">
               <span>
                 <strong>{selectedLinkEl.from}</strong> → <strong>{selectedLinkEl.to}</strong> のリンク
               </span>
+              <PolarityPicker
+                key={`polarity:${selectedLinkEl.from}→${selectedLinkEl.to}`}
+                value={linkPolarity(selectedLinkEl)}
+                onChange={(polarity) => edit([{ type: "LINK", from: selectedLinkEl.from!, to: selectedLinkEl.to!, behavior: { polarity } }])}
+              />
               <DelayToggle
                 key={`${selectedLinkEl.from}→${selectedLinkEl.to}`}
                 on={hasDelayMark(selectedLinkEl)}

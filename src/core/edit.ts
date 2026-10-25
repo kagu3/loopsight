@@ -157,6 +157,17 @@ function checkDelay(type: ElementType, p: ElementPatch): void {
   }
 }
 
+/** リンクの極性（behavior.polarity）として入れられる値。null は項目を消す（決めない） */
+const POLARITIES: readonly unknown[] = ["POSITIVE", "NEGATIVE", "NEUTRAL", null];
+
+/** リンクの極性（behavior.polarity）を確かめる。ビューアで付け外ししても、AI の upsert_elements と同じここを通る */
+function checkPolarity(p: ElementPatch): void {
+  if (!p.behavior || !("polarity" in p.behavior)) return;
+  if (!POLARITIES.includes(p.behavior.polarity)) {
+    throw new EditError(`${describe({ type: "LINK", from: p.from, to: p.to })} の極性（behavior.polarity）は "POSITIVE"（+）か "NEGATIVE"（-）か "NEUTRAL" にしてください（null で外します）。`);
+  }
+}
+
 function checkNewElement(p: ElementPatch): ElementType {
   if (!p.type) throw new EditError(`新しい要素 ${p.name ? `"${p.name}" ` : ""}には type が必要です。`);
   if (!ELEMENT_TYPES.includes(p.type)) throw new EditError(`不明な要素の種類 "${p.type}"（追加できるのは ${ELEMENT_TYPES.join(", ")}）。`);
@@ -174,6 +185,7 @@ export function upsertElements(model: ModelJSON, patches: ElementPatch[], option
     if (p.type === "LINK" || (!p.name && p.from !== undefined && p.to !== undefined && !p.type)) {
       if (!p.from || !p.to) throw new EditError("LINK には from と to の両方が必要です。");
       checkDelay("LINK", p);
+      checkPolarity(p);
       const existing = findLink(model, p.from, p.to);
       if (existing) {
         applyPatch(existing, { ...p, from: undefined, to: undefined });

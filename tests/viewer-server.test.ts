@@ -720,6 +720,29 @@ describe("ビューアからの要素の削除", () => {
     expect(u2.body.model.version).toBe(v0);
   });
 
+  test("リンクの極性（画面の左の欄で選ぶ）を付け・変え・外してファイルに保存し、元に戻せる。誤った値は 400", async () => {
+    const polarityOf = async () => (await new ModelStore(dir).read("pop")).elements.find((e) => e.type === "LINK" && e.from === "Population" && e.to === "Births")?.behavior?.polarity;
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const link = (polarity: unknown): ElementPatch => ({ type: "LINK", from: "Population", to: "Births", behavior: { polarity } });
+    const e1 = await post<EditResponse>("/api/models/pop/edit", { version: v0, elements: [link("POSITIVE")] });
+    expect(e1.status).toBe(200);
+    expect(await polarityOf()).toBe("POSITIVE");
+    const e2 = await post<EditResponse>("/api/models/pop/edit", { version: e1.body.model.version, elements: [link("NEGATIVE")] });
+    expect(e2.status).toBe(200);
+    expect(await polarityOf()).toBe("NEGATIVE");
+    const e3 = await post<EditResponse>("/api/models/pop/edit", { version: e2.body.model.version, elements: [link(null)] });
+    expect(e3.status).toBe(200);
+    expect(await polarityOf()).toBeUndefined();
+    const bad = await post<EditErrorResponse>("/api/models/pop/edit", { version: e3.body.model.version, elements: [link("+")] });
+    expect(bad.status).toBe(400);
+    expect(await polarityOf()).toBeUndefined();
+    // 元に戻すと、外す前・変える前に戻る
+    const u1 = await post<EditResponse>("/api/models/pop/undo", { version: e3.body.model.version });
+    expect(await polarityOf()).toBe("NEGATIVE");
+    await post<EditResponse>("/api/models/pop/undo", { version: u1.body.model.version });
+    expect(await polarityOf()).toBe("POSITIVE");
+  });
+
   test("ない要素や、要素の指定でないものは 400 で、ファイルは変えない。版が違えば書き込まない", async () => {
     const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
     const missing = await post<EditErrorResponse>("/api/models/pop/remove", { version: v0, elements: [{ name: "Rat" }] });

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import { describeLoop, emptyModel, findLoops, upsertElements, type ModelJSON } from "../src/core/index.js";
+import { describeLoop, EditError, emptyModel, findLink, findLoops, upsertElements, type ModelJSON } from "../src/core/index.js";
 import { FIXTURES_DIR } from "./helpers.js";
 
 /** ブルックスの法則のモデル（遅れているプロジェクトに人を足すと、さらに遅れる）。リンクに極性はない */
@@ -188,5 +188,41 @@ describe("要素名の並びのループ", () => {
     const m = withPolarity(brooksLaw());
     const r = describeLoop(m, [...HIRING, ...HIRING]);
     expect("error" in r && r.error).toMatch(/同じ要素が 2 度/);
+  });
+});
+
+describe("リンクの極性を付け外しする", () => {
+  /** 人口が出生を決め、出生が人口を増やすモデル。Population → Births Per Year のリンクの極性を変える */
+  function population(): ModelJSON {
+    const m = emptyModel("population");
+    upsertElements(m, [
+      { type: "STOCK", name: "Population", behavior: { initial_value: 100 } },
+      { type: "VARIABLE", name: "Births Per Year", behavior: { value: "[Population] * 0.03" } },
+      { type: "FLOW", name: "Births", from: null, to: "Population", behavior: { value: "[Births Per Year]" } },
+      { from: "Births Per Year", to: "Births", behavior: { polarity: "POSITIVE" } },
+    ]);
+    return m;
+  }
+  const kinds = (m: ModelJSON) => findLoops(m).loops.map((l) => l.kind);
+
+  test("upsert_elements の behavior.polarity で付ける・変える・外す。ループの R / B もそれに合わせて変わる", () => {
+    const m = population();
+    expect(kinds(m)).toEqual(["unknown"]);
+    upsertElements(m, [{ type: "LINK", from: "Population", to: "Births Per Year", behavior: { polarity: "POSITIVE" } }]);
+    expect(findLink(m, "Population", "Births Per Year")?.behavior?.polarity).toBe("POSITIVE");
+    expect(kinds(m)).toEqual(["R"]);
+    upsertElements(m, [{ type: "LINK", from: "Population", to: "Births Per Year", behavior: { polarity: "NEGATIVE" } }]);
+    expect(kinds(m)).toEqual(["B"]);
+    // null で外す（ほかの項目がなければ behavior ごと消す）
+    upsertElements(m, [{ type: "LINK", from: "Population", to: "Births Per Year", behavior: { polarity: null } }]);
+    expect(findLink(m, "Population", "Births Per Year")?.behavior).toBeUndefined();
+    expect(kinds(m)).toEqual(["unknown"]);
+  });
+
+  test("POSITIVE・NEGATIVE・NEUTRAL・null 以外は断る", () => {
+    const m = population();
+    expect(() => upsertElements(m, [{ type: "LINK", from: "Population", to: "Births Per Year", behavior: { polarity: "+" } }])).toThrow(EditError);
+    expect(() => upsertElements(m, [{ from: "Population", to: "Births Per Year", behavior: { polarity: 1 } }])).toThrow(/POSITIVE/);
+    expect(() => upsertElements(m, [{ from: "Population", to: "Births Per Year", behavior: { polarity: "NEUTRAL" } }])).not.toThrow();
   });
 });
