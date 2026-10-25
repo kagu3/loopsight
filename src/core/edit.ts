@@ -2,6 +2,7 @@ import type { ElementBehavior, ElementDisplay, ElementType, Equation, ModelEleme
 import { boxLayout, BOX_TYPES } from "./geometry.js";
 import { DELAY_MARK_TYPES } from "./delay.js";
 import { EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
+import { removeFromGroups, renameInGroups } from "./groups.js";
 
 export class EditError extends Error {
   override name = "EditError";
@@ -139,6 +140,7 @@ export function renameElement(model: ModelJSON, oldName: string, newName: string
       }
     }
   }
+  renameInGroups(model, from, newName);
 }
 
 /**
@@ -330,6 +332,7 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
       report.notes.push(`シナリオ "${s.name}" から "${key}" の値を消しました。`);
     }
   }
+  report.notes.push(...removeFromGroups(model, removedNames));
   return report;
 }
 

@@ -1,7 +1,7 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { ChangeEvent, ElementPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
-import { FetchError, fetchList, fetchModel, postEdit, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
+import type { ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
+import { FetchError, fetchList, fetchModel, postEdit, postGroups, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details, DelayToggle } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
@@ -17,6 +17,7 @@ import { countProblems, describeProblemCount, listProblems, stripCount } from ".
 import { Problems } from "./Problems.js";
 import { ModelTree } from "./ModelTree.js";
 import { folderKey, foldersOf, modelHash, modelTree } from "./modelList.js";
+import { GroupPanel } from "./GroupPanel.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
 import { clearValuePatches, findScenario, scenarioBadges } from "./scenarios.js";
 import { draggedResultsRatio, parseExpandedPane, parseResultsRatio, RESULTS_RATIO, type ExpandedPane } from "./split.js";
@@ -559,6 +560,16 @@ export function App() {
       }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
   );
+  /** 図のグループを足す・直す・消す（MCP の set_groups と同じ形） */
+  const editGroups = useCallback(
+    (patches: GroupPatch[], remove?: string[]): Promise<string | undefined> =>
+      enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        return applyWrite(await postGroups(d.name, d.version, patches, remove));
+      }, SKIPPED_MESSAGE),
+    [applyWrite, enqueueWrite],
+  );
   /** 左の欄で、シナリオの説明を直す */
   const saveScenarioDescription = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
   /**
@@ -981,6 +992,8 @@ export function App() {
             <p className="muted">図の要素を押すと、式などをここに出します。「編集」で直せます。</p>
           )}
         </section>
+
+        {data && <GroupPanel model={data.model} selected={selectedEl?.name} onSave={editGroups} />}
 
         {data && <Problems data={data} onSelect={selectElement} />}
 

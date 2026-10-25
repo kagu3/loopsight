@@ -51,6 +51,24 @@ afterEach(async () => {
 });
 
 describe("ビューアのサーバー", () => {
+  test("図のグループを足す・直す・消す（MCP の set_groups と同じ形）。元に戻せる", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const add = await post<EditResponse>("/api/models/pop/groups", { version: v0, groups: [{ name: "増える側", elements: ["Rate", "Births"] }] });
+    expect(add.status).toBe(200);
+    expect(add.body.model.model.groups).toEqual([{ name: "増える側", color: "yellow", elements: ["Rate", "Births"] }]);
+    expect(add.body.model.validation.ok).toBe(true);
+    const fix = await post<EditResponse>("/api/models/pop/groups", { version: add.body.model.version, groups: [{ name: "増える側", color: "green", remove_elements: ["Births"] }] });
+    expect(fix.body.model.model.groups).toEqual([{ name: "増える側", color: "green", elements: ["Rate"] }]);
+    const bad = await post<EditErrorResponse>("/api/models/pop/groups", { version: fix.body.model.version, groups: [{ name: "x", color: "red" }] });
+    expect(bad.status).toBe(400);
+    const notNames = await post<EditErrorResponse>("/api/models/pop/groups", { version: fix.body.model.version, groups: [{ name: "x", elements: [1] }] });
+    expect(notNames.status).toBe(400);
+    const remove = await post<EditResponse>("/api/models/pop/groups", { version: fix.body.model.version, groups: [], remove: ["増える側"] });
+    expect(remove.body.model.model.groups).toBeUndefined();
+    const undo = await post<EditResponse>("/api/models/pop/undo", { version: remove.body.model.version });
+    expect(undo.body.model.model.groups).toEqual([{ name: "増える側", color: "green", elements: ["Rate"] }]);
+  });
+
   test("モデルの一覧を返す", async () => {
     const { status, body } = await get<ModelListResponse>("/api/models");
     expect(status).toBe(200);

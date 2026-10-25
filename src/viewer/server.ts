@@ -13,6 +13,7 @@ import {
   removeElements,
   renamesSince,
   runScenarios,
+  setGroups,
   setScenarios,
   toGraph,
   upsertElements,
@@ -30,6 +31,7 @@ import {
   type EditErrorResponse,
   type EditRequest,
   type EditResponse,
+  type GroupsRequest,
   type ModelListResponse,
   type ModelResponse,
   type RemoveRequest,
@@ -41,7 +43,7 @@ import {
 import { watchTree } from "./watch.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
-// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios と同じ処理を通す）。
+// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups と同じ処理を通す）。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
 // 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
 
@@ -342,10 +344,10 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     current: await loadModelResponse(store, name, historyOf(name).length),
   });
 
-  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "remove" | "undo") => {
+  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "groups" | "remove" | "undo") => {
     try {
       checkWriteRequest(req);
-      const body = await readBody<EditRequest & ScenariosRequest & RemoveRequest & UndoRequest>(req);
+      const body = await readBody<EditRequest & ScenariosRequest & GroupsRequest & RemoveRequest & UndoRequest>(req);
       if (typeof body?.version !== "string") throw new HttpError(400, "version がありません。");
       const result = await serial(name, async (): Promise<[number, EditResponse | EditErrorResponse]> => {
         const current = await store.readVersioned(name);
@@ -378,6 +380,27 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
           }
           if (body.scenarios.length === 0 && !body.remove?.length) throw new HttpError(400, "scenarios か remove を指定してください。");
           const report = setScenarios(current.model, body.scenarios, { remove: body.remove });
+          const version = await store.writeVersioned(name, current.model);
+          hist.push({ before: current.text, after: version, renamed: [] });
+          if (hist.length > HISTORY_LIMIT) hist.shift();
+          const model = await modelResponse(store, name, current.model, version, hist.length);
+          return [200, { report, model }];
+        }
+        if (action === "groups") {
+          if (!Array.isArray(body.groups)) throw new HttpError(400, "groups がありません。");
+          if (!body.groups.every((g) => g && typeof g === "object" && !Array.isArray(g) && typeof g.name === "string")) {
+            throw new HttpError(400, "groups の中身は、name のあるグループの変更（オブジェクト）にしてください。");
+          }
+          const names = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((n) => typeof n === "string"));
+          const text = (v: unknown) => v === undefined || typeof v === "string";
+          if (!body.groups.every((g) => names(g.elements) && names(g.add_elements) && names(g.remove_elements) && text(g.rename_to) && text(g.color))) {
+            throw new HttpError(400, "elements・add_elements・remove_elements は要素の名前の並び、rename_to と color は文字にしてください。");
+          }
+          if (body.remove !== undefined && !(Array.isArray(body.remove) && body.remove.every((r) => typeof r === "string"))) {
+            throw new HttpError(400, "remove は消すグループの名前の並びにしてください。");
+          }
+          if (body.groups.length === 0 && !body.remove?.length) throw new HttpError(400, "groups か remove を指定してください。");
+          const report = setGroups(current.model, body.groups, { remove: body.remove });
           const version = await store.writeVersioned(name, current.model);
           hist.push({ before: current.text, after: version, renamed: [] });
           if (hist.length > HISTORY_LIMIT) hist.shift();
@@ -438,9 +461,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     }
     // モデル名はフォルダを含む（ブルックスの法則/brooks_law）。画面は名前を encodeURIComponent で送る（/ は %2F）が、/ のままでも読む。
     // 書き込みは、デコードする前のパスの終わりで見分ける（%2F で送られた名前の中の「/edit」などと取り違えないように）
-    const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|remove|undo)$/);
+    const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|groups|remove|undo)$/);
     if (write) {
-      await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as "edit" | "scenarios" | "remove" | "undo");
+      await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as "edit" | "scenarios" | "groups" | "remove" | "undo");
       return;
     }
     if (p.startsWith("/api/models/")) {

@@ -25,6 +25,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ElementPatch } from "../../src/viewer/api.js";
 import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
+import { groupAreas, type GroupArea } from "../../src/core/groups.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { delayMarkPath } from "../../src/core/delay.js";
 import type { NodeValue } from "./diagramValues.js";
@@ -42,6 +43,8 @@ import { BASELINE_NAME, nameKey, type ScenarioBadge } from "./scenarios.js";
 // リンクは、要素の縁からドラッグして別の要素の上で離すか、[＋線] を押してから元の要素 → 先の要素の順に押して引く。
 // フローの端は、端の近くの丸（つまみ）をドラッグして、ストックの上で離すとそのストックに、何もないところで離すとそこに置いた雲につなぎ替える。
 // 遅れの印（display.delay）のあるリンクとフローは、線の途中に ‖ を描く（フローは弁から行き先までの線の真ん中、リンクは曲線の真ん中。極性の文字は線の終わり近くなので重ならない）。
+// グループ（モデルの groups）があれば、属する要素をまとめて薄い色の長方形で囲み（要素や線の後ろに描く）、図の下に凡例を出す。
+// 囲みは押せない（下の背景を押したことになる）。要素を動かすと、囲みも付いてくる。
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
@@ -74,6 +77,9 @@ type EdgeData = {
 };
 type ModelNodeT = Node<NodeData, "model">;
 type ModelEdgeT = Edge<EdgeData, "floating">;
+/** グループの囲み。dimmed：ループを見せている・要素を選んでいるとき（ほかの要素と同じく薄くする） */
+type GroupNodeT = Node<{ area: GroupArea; dimmed: boolean }, "groupArea">;
+type DiagramNodeT = ModelNodeT | GroupNodeT;
 
 const hidden = { opacity: 0, pointerEvents: "none" as const };
 /** リンクを引き始める縁（上下左右の細い帯）。React Flow の接続の口（Handle）にして、引いている線の描画や離した先の判定に使う */
@@ -283,7 +289,31 @@ function DelayMark({ at, dir, data }: { at: [number, number]; dir: [number, numb
   );
 }
 
-const nodeTypes = { model: ModelNode };
+/** グループの囲み。名前は左上の隅に出す */
+function GroupAreaNode({ data }: NodeProps<GroupNodeT>) {
+  const { area, dimmed } = data;
+  return (
+    <div className={`group-area group-${area.color} ${dimmed ? "is-dimmed" : ""}`} style={{ width: area.width, height: area.height }}>
+      <span className="group-area-name">{area.name}</span>
+    </div>
+  );
+}
+
+/** 凡例（グループの色と名前の一覧）。グループから作るので、色を変えても直し忘れない */
+function GroupLegend({ areas }: { areas: GroupArea[] }) {
+  return (
+    <Panel position="bottom-center" className="group-legend" aria-label="グループの凡例">
+      {areas.map((a) => (
+        <span key={a.name} className="group-legend-item">
+          <span className={`group-swatch group-${a.color}`} aria-hidden />
+          {a.name}
+        </span>
+      ))}
+    </Panel>
+  );
+}
+
+const nodeTypes = { model: ModelNode, groupArea: GroupAreaNode };
 const edgeTypes = { floating: FloatingEdge };
 
 export interface DiagramProps {
@@ -545,7 +575,33 @@ export function Diagram(props: DiagramProps) {
     [graph, selected, loop, linkEdge],
   );
 
-  const nodes = useMemo<ModelNodeT[]>(
+  // グループの囲み。動かしている要素にも付いていくよう、いまの位置（placed）から決める
+  const areas = useMemo(() => groupAreas(placed, graph.groups), [placed, graph.groups]);
+  const groupNodes = useMemo<GroupNodeT[]>(
+    () =>
+      areas.map((area) => ({
+        id: `group:${area.name.toLowerCase()}`,
+        type: "groupArea",
+        position: { x: area.x, y: area.y },
+        width: area.width,
+        height: area.height,
+        data: { area, dimmed: !!focus },
+        // 要素と線の後ろに描き、押せないようにする
+        zIndex: -1,
+        selectable: false,
+        draggable: false,
+        connectable: false,
+        focusable: false,
+        style: { pointerEvents: "none" },
+      })),
+    [areas, focus],
+  );
+
+  // 表示範囲を合わせるときに、全体を入れるなら囲みも入れる（端の囲みやグループの名前が切れないように）
+  const groupIdKey = groupNodes.map((n) => n.id).join("|");
+  const groupIds = useMemo(() => (groupIdKey ? groupIdKey.split("|") : []), [groupIdKey]);
+
+  const modelNodes = useMemo<ModelNodeT[]>(
     () =>
       placed.map((g) => {
         const isLinkFrom = placing === "LINK" && !!g.element && !!linkFrom && nameKey(g.element) === nameKey(linkFrom);
@@ -577,8 +633,9 @@ export function Diagram(props: DiagramProps) {
       }),
     [placed, selected, changed, values, focus, scenario, editable, placing, linkFrom, dropTarget, liveValues],
   );
+  const nodes = useMemo<DiagramNodeT[]>(() => (groupNodes.length ? [...groupNodes, ...modelNodes] : modelNodes), [groupNodes, modelNodes]);
 
-  const onNodesChange = useCallback((changes: NodeChange<ModelNodeT>[]) => {
+  const onNodesChange = useCallback((changes: NodeChange<DiagramNodeT>[]) => {
     const updates = changes.filter((c) => c.type === "position" && c.position);
     if (!updates.length) return;
     setMoved((prev) => {
@@ -590,7 +647,7 @@ export function Diagram(props: DiagramProps) {
 
   // 離したら位置を保存する
   const onNodeDragStop = useCallback(
-    async (_: unknown, _node: ModelNodeT, dragged: ModelNodeT[]) => {
+    async (_: unknown, _node: DiagramNodeT, dragged: DiagramNodeT[]) => {
       // 座標のない要素を仮に並べているときは、見えている配置をまとめて保存する（座標のない要素を残さない）。
       // 左や上にはみ出したときも、全体をずらしてまとめて保存する
       const shifted = shiftIntoView(placedRef.current);
@@ -651,7 +708,8 @@ export function Diagram(props: DiagramProps) {
     [editable, elementOf, onLink],
   );
   /** 要素を押した。[＋線] の間は、元の要素 → 先の要素の順に選ぶ（雲は選べない）。それ以外は要素を選ぶ */
-  const onNodeClick = (n: ModelNodeT) => {
+  const onNodeClick = (n: DiagramNodeT) => {
+    if (n.type !== "model") return;
     const element = n.data.g.element;
     if (placing !== "LINK" || !editable) return onSelect(element);
     if (!element) return;
@@ -687,7 +745,7 @@ export function Diagram(props: DiagramProps) {
       elementsSelectable
       fitView
       // 画像にする図は全体を 1 枚に収める。ビューアでは名前が読める大きさより縮めない
-      fitViewOptions={props.embed ? (props.loop ? EMBED_LOOP_FIT : EMBED_FIT) : VIEWER_FIT}
+      fitViewOptions={props.embed ? (props.loop ? (areas.length ? EMBED_LOOP_LEGEND_FIT : EMBED_LOOP_FIT) : areas.length ? EMBED_LEGEND_FIT : EMBED_FIT) : VIEWER_FIT}
       minZoom={0.1}
       proOptions={{ hideAttribution: true }}
       onNodeClick={(_, n) => onNodeClick(n)}
@@ -722,6 +780,8 @@ export function Diagram(props: DiagramProps) {
         nodes={graph.nodes}
         embed={props.embed}
         badge={!!props.loop}
+        legend={areas.length > 0}
+        groupIds={groupIds}
         keepView={props.keepView}
         holdView={props.holdView}
         toolsSpace={!!props.valueTools?.on}
@@ -736,6 +796,7 @@ export function Diagram(props: DiagramProps) {
         </ViewportPortal>
       )}
       {props.loop && <LoopBadge loop={props.loop} />}
+      {areas.length > 0 && <GroupLegend areas={areas} />}
       {props.onEditableChange && (
         <EditTools
           editable={!!editable}
@@ -1042,6 +1103,10 @@ const EMBED_FIT = { padding: 0.04, maxZoom: 1.5 };
 /** ループの札（左上）の分だけ、上を空ける。図だけの表示で、札が図に重ならないように */
 const BADGE_SPACE = "76px" as const;
 const EMBED_LOOP_FIT = { padding: { top: BADGE_SPACE, bottom: 0.04, x: 0.04 }, maxZoom: 1.5 };
+/** グループの凡例（下の真ん中）の分だけ、下を空ける。図だけの表示で、凡例が図に重ならないように */
+const LEGEND_SPACE = "48px" as const;
+const EMBED_LEGEND_FIT = { padding: { top: 0.04, bottom: LEGEND_SPACE, x: 0.04 }, maxZoom: 1.5 };
+const EMBED_LOOP_LEGEND_FIT = { padding: { top: BADGE_SPACE, bottom: LEGEND_SPACE, x: 0.04 }, maxZoom: 1.5 };
 const VIEWER_FIT = { padding: FIT_PADDING, maxZoom: 1.5, minZoom: MIN_FIT_ZOOM };
 /**
  * 「値を表示」がオンの間は、右上の道具（シナリオの選択を出すと横に長くなる）の分だけ上を空ける。
@@ -1077,7 +1142,7 @@ const liveOf = (live: NodeValues, element: string) => {
   return v && { v, unit: live.unit };
 };
 
-const miniMapColor = (n: ModelNodeT) => (n.data.g.kind === "STOCK" ? "var(--stock-border)" : "var(--link)");
+const miniMapColor = (n: DiagramNodeT) => (n.type !== "model" ? "transparent" : n.data.g.kind === "STOCK" ? "var(--stock-border)" : "var(--link)");
 
 /**
  * 表示範囲を合わせ直す。別のモデルを開いたとき、配置を切り替えたとき、要素が増減したとき、図の欄の大きさが変わったとき。
@@ -1093,6 +1158,8 @@ function FitOnChange({
   nodes,
   embed,
   badge,
+  legend,
+  groupIds,
   keepView,
   holdView,
   toolsSpace,
@@ -1102,6 +1169,10 @@ function FitOnChange({
   nodes: GraphNode[];
   embed?: boolean;
   badge?: boolean;
+  /** 図の下にグループの凡例を出している（図だけの表示では、その分だけ下を空ける） */
+  legend?: boolean;
+  /** グループの囲みのノードの ID。全体を入れるときは、囲みも入れる */
+  groupIds?: string[];
   keepView?: boolean;
   holdView?: boolean;
   toolsSpace?: boolean;
@@ -1119,6 +1190,8 @@ function FitOnChange({
   const fitLater = useRef(false);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+  const groupIdsRef = useRef(groupIds);
+  groupIdsRef.current = groupIds;
   useEffect(() => {
     const prev = last.current;
     last.current = { view, layoutKey, modelName };
@@ -1135,15 +1208,16 @@ function FitOnChange({
     fitLater.current = !visible;
     if (!visible) return;
     if (embed) {
-      const padding = badge ? { top: BADGE_SPACE, bottom: FIT_PADDING, x: FIT_PADDING } : FIT_PADDING;
+      const padding = badge || legend ? { top: badge ? BADGE_SPACE : FIT_PADDING, bottom: legend ? LEGEND_SPACE : FIT_PADDING, x: FIT_PADDING } : FIT_PADDING;
       requestAnimationFrame(() => flow.fitView({ padding, maxZoom: 1.5, duration: 200 }));
       return;
     }
     // 全体が名前の読める大きさで入らなければ、ストックが入るように合わせる
     const fit = fitTargets(nodesRef.current, width, height, FIT_PADDING);
     const targets = fit.nodes.map((n) => ({ id: n.id }));
+    if (fit.nodes === nodesRef.current) targets.push(...(groupIdsRef.current ?? []).map((id) => ({ id })));
     const padding = toolsSpace ? VIEWER_TOOLS_PADDING : FIT_PADDING;
     requestAnimationFrame(() => flow.fitView({ nodes: targets, padding, maxZoom: fit.maxZoom, minZoom: MIN_FIT_ZOOM, duration: 200 }));
-  }, [view, layoutKey, modelName, keepView, holdView, domNode, flow, embed, badge, width, height, toolsSpace]);
+  }, [view, layoutKey, modelName, keepView, holdView, domNode, flow, embed, badge, legend, width, height, toolsSpace]);
   return null;
 }

@@ -6,10 +6,12 @@
 // - リンクがフローの名前の上を通るところ
 // - 1 か所に集まる線：1 つの要素にほぼ同じ向きでつながる線（重なって見分けにくい）と、
 //   1 つの弁に集まる多くのリンク（リンクは弁の中心につなぐので、1 点に集まる）
+// - グループの囲みどうしの重なりと、グループに属さない要素が囲みの中に入っているところ
 // 線の形は画面と同じにする（フローは直線、リンクは linkControlPoint で曲げた 2 次ベジェ曲線）。
 import { toGraph, type Graph, type GraphEdge, type GraphNode } from "./diagram.js";
 import { flowLabelRect, linkControlPoint, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
-import type { ModelJSON, Point } from "./modeljson.js";
+import { areasOverlap, checkGroups, groupAreas, type GroupColor } from "./groups.js";
+import { nameKey, type ModelJSON, type Point } from "./modeljson.js";
 
 export interface DiagramPosition {
   /** 要素の名前。雲は「<フロー名> の出元 / 行き先」 */
@@ -35,6 +37,10 @@ export interface DiagramCheck {
   lines_through_labels: string[];
   /** 1 か所に集まる線（ほぼ同じ向きでつながる線と、1 つの弁に集まる多くのリンク） */
   converging_lines: string[];
+  /** グループの囲みどうしの重なり、グループに属さない要素が囲みの中に入っているところ、groups の書き方の誤り */
+  group_issues: string[];
+  /** グループの囲み（グループがあるときだけ）。位置と大きさは属する要素から決まる */
+  groups?: { name: string; color: GroupColor; elements: string[]; area: { x: number; y: number; width: number; height: number } }[];
   /** いまの位置（直すときは upsert_elements の display で変える） */
   positions: DiagramPosition[];
 }
@@ -192,6 +198,25 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
     }
   }
 
+  // グループの囲み
+  const areas = groupAreas(graph.nodes, graph.groups);
+  const groupIssues = checkGroups(model);
+  for (let i = 0; i < areas.length; i++) {
+    for (let j = i + 1; j < areas.length; j++) {
+      if (areasOverlap(areas[i]!, areas[j]!)) groupIssues.push(`グループ ${areas[i]!.name} と グループ ${areas[j]!.name} の囲みが重なる`);
+    }
+  }
+  const grouped = new Set(areas.flatMap((a) => a.nodes));
+  const groupOfFlow = new Map((graph.groups ?? []).flatMap((g) => g.elements.map((e) => [nameKey(e), g.name] as const)));
+  for (const a of areas) {
+    for (const n of graph.nodes) {
+      if (grouped.has(n.id)) continue;
+      // 雲は、フローと同じグループの囲みに入っていてよい
+      if (n.kind === "CLOUD" && n.cloudOf && groupOfFlow.get(nameKey(n.cloudOf.flow)) === a.name) continue;
+      if (areasOverlap(a, n)) groupIssues.push(`${nameOf(n)}（どのグループにも属さない）が グループ ${a.name} の囲みの中に入っている`);
+    }
+  }
+
   const positions: DiagramPosition[] = boxes.map((n) =>
     n.kind === "CLOUD"
       ? { name: nameOf(n), type: "CLOUD", coordinates: center(n).map(Math.round) as [number, number] }
@@ -213,6 +238,17 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
     crossings: { count, examples },
     lines_through_labels: throughLabels.slice(0, MAX_EXAMPLES),
     converging_lines: converging.slice(0, MAX_EXAMPLES),
+    group_issues: groupIssues.slice(0, MAX_EXAMPLES),
+    ...(areas.length
+      ? {
+          groups: areas.map((a) => ({
+            name: a.name,
+            color: a.color,
+            elements: graph.groups!.find((g) => g.name === a.name)!.elements,
+            area: { x: Math.round(a.x), y: Math.round(a.y), width: Math.round(a.width), height: Math.round(a.height) },
+          })),
+        }
+      : {}),
     positions,
   };
 }

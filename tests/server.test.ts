@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、20 個のツールが見える", async () => {
+  test("クライアントから接続でき、21 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     // スライドの機能は削除したので、説明文にも出さない
@@ -71,6 +71,7 @@ describe("MCP server", () => {
         "remove_folder",
         "remove_model",
         "run_simulation",
+        "set_groups",
         "set_scenarios",
         "set_simulation",
         "sweep_parameter",
@@ -307,6 +308,41 @@ describe("MCP server", () => {
     // reset で並べ直すと重なりはなくなる
     const reset = await call("layout_model", { model: "sir", reset: true });
     expect(reset.diagram.overlaps).toEqual([]);
+  });
+
+  test("set_groups でグループを保存し、layout_model で集めて並べ、view_diagram でグループの確認を返す", async () => {
+    await call("create_model", { model: "sir" });
+    await call("upsert_elements", { model: "sir", elements: SIR });
+    const saved = await call("set_groups", {
+      model: "sir",
+      groups: [
+        { name: "うつる側", color: "pink", elements: ["Susceptible", "Infection", "Contact Rate"] },
+        { name: "治る側", elements: ["Recovered", "Recovery", "Recovery Rate"] },
+      ],
+    });
+    expect(saved.groups).toEqual([
+      { name: "うつる側", color: "pink", elements: ["Susceptible", "Infection", "Contact Rate"] },
+      { name: "治る側", color: "yellow", elements: ["Recovered", "Recovery", "Recovery Rate"] },
+    ]);
+    expect(saved.next_step).toMatch(/view_diagram/);
+    expect(await callError("set_groups", { model: "sir", groups: [{ name: "x", color: "red" }] })).toMatch(/color|red/);
+    expect(await callError("set_groups", { model: "sir", groups: [{ name: "x", elements: ["Nope"] }] })).toMatch(/見つかりません/);
+    expect(await callError("set_groups", { model: "sir" })).toMatch(/groups か remove/);
+
+    const laid = await call("layout_model", { model: "sir", reset: true });
+    expect(laid.diagram.group_issues.filter((s: string) => s.includes("囲みが重なる"))).toEqual([]);
+    const check = await call("view_diagram", { model: "sir", image: false });
+    expect(check.groups.map((g: { name: string }) => g.name)).toEqual(["うつる側", "治る側"]);
+    // グループがあっても実行できる
+    expect((await call("validate_model", { model: "sir" })).ok).toBe(true);
+    expect((await call("get_model", { model: "sir" })).groups).toHaveLength(2);
+
+    // 要素の名前を変えると、グループの中身も変わる
+    await call("upsert_elements", { model: "sir", elements: [{ name: "Recovered", rename_to: "回復した人" }] });
+    const renamed = await call("set_groups", { model: "sir", groups: [{ name: "治る側", color: "teal" }] });
+    expect(renamed.groups[1]).toEqual({ name: "治る側", color: "teal", elements: ["回復した人", "Recovery", "Recovery Rate"] });
+    const removed = await call("set_groups", { model: "sir", remove: ["うつる側", "治る側"] });
+    expect(removed.groups).toEqual([]);
   });
 
   test("view_diagram は図を PNG で返す（ブラウザと画面のビルドがあるとき）", async () => {

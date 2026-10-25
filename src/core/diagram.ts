@@ -8,6 +8,7 @@
 // - 座標はモデルにあればそれを使う。ない要素があれば、layout_model と同じ簡易レイアウト（layoutModel）で並べる
 import { layoutModel } from "./layout.js";
 import { boxLayout, BOX_TYPES } from "./geometry.js";
+import { graphGroups, type GraphGroup } from "./groups.js";
 export { LINK_BEND, linkControlPoint } from "./geometry.js";
 import { hasDelayMark } from "./delay.js";
 import { isEmphasized, sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
@@ -59,6 +60,8 @@ export interface GraphEdge {
 export interface Graph {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** グループ（属する要素をまとめて背景の色で囲む。囲みの位置は groupAreas で、描くときのノードの位置から決める） */
+  groups?: GraphGroup[];
   /** モデルに座標のない要素があり、簡易レイアウトで並べたか（ファイルには保存していない） */
   missingCoordinates: boolean;
 }
@@ -191,7 +194,8 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
     const [bx, by] = center(b);
     node.labelSide = Math.abs(by - ay) > Math.abs(bx - ax) ? "right" : "below";
   }
-  return { nodes, edges };
+  const groups = graphGroups(model);
+  return groups.length ? { nodes, edges, groups } : { nodes, edges };
 }
 
 /** 弁は両端の中心を結ぶ線の真ん中に置く */

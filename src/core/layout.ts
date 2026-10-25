@@ -1,15 +1,20 @@
 import type { ModelElement, ModelJSON, Point } from "./modeljson.js";
 import { isEmphasized, nameKey, sameName } from "./modeljson.js";
 import { boxLayout, BOX_TYPES, flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
+import { GROUP_LABEL_HEIGHT, GROUP_PADDING, graphGroups } from "./groups.js";
 
 // 簡易レイアウト：図にしたとき要素が重ならない程度に座標を付ける（layout_model と、ビューアの仮の並び）。
 // ストックを横一列に並べ（フローの流れ順）、変数はつながる要素の近くに、
 // リンクの線が雲やほかの要素を横切らないように置く。
+// グループ（groups.ts）があれば、同じグループの要素が近くに集まるように並べる（ストックはグループごとに続けて並べ、
+// 変数は自分のグループの近くに、ほかのグループの囲みに入らないように置く）。
 
 const STOCK_GAP = 300;
 const MARGIN = 20;
 // 変数の箱とフローやリンクの線とのすき間
 const LINE_GAP = 30;
+// グループの違うストックのあいだに足すすき間（囲みどうしが重ならないように）
+const GROUP_GAP = 100;
 
 function hasCoordinates(el: ModelElement): boolean {
   const c = el.display?.coordinates;
@@ -63,13 +68,22 @@ export function layoutModel(model: ModelJSON): string[] {
   };
   const bottom = () => (occupied.length ? Math.max(...occupied.map((o) => o.y + o.h)) : 0);
 
-  // 1. ストック
+  // 要素名（nameKey）→ 属するグループの名前（nameKey）
+  const groups = graphGroups(model);
+  const groupOf = new Map(groups.flatMap((g) => g.elements.map((e) => [nameKey(e), nameKey(g.name)] as const)));
+  const groupKey = (el: ModelElement) => groupOf.get(nameKey(el.name ?? ""));
+
+  // 1. ストック。同じグループのストックは続けて並べ、グループが変わるところはすき間を広げる
   const flows = model.elements.filter((e) => e.type === "FLOW");
-  const newStocks = orderStocks(model, flows).filter((s) => !rects.has(nameKey(s.name!)));
+  const newStocks = byGroup(
+    orderStocks(model, flows).filter((s) => !rects.has(nameKey(s.name!))),
+    groupKey,
+  );
   const rowY = occupied.length ? bottom() + 260 : 260;
   let x = 100;
-  for (const s of newStocks) {
+  for (const [i, s] of newStocks.entries()) {
     const [w, h] = sizeOf(s);
+    if (i > 0 && groupKey(s) !== groupKey(newStocks[i - 1]!)) x += GROUP_GAP;
     let r = { x, y: rowY, w, h };
     while (!isFree(r)) r = { ...r, x: r.x + STOCK_GAP };
     place(s, r);
@@ -117,6 +131,28 @@ export function layoutModel(model: ModelJSON): string[] {
     if (a && b) return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     return a ?? b;
   };
+
+  /** グループの囲みのおおよその範囲（いま位置の決まっている要素から。フローは中点） */
+  const groupArea = (key: string): Rect | undefined => {
+    const parts: Rect[] = [];
+    for (const g of groups) {
+      if (nameKey(g.name) !== key) continue;
+      for (const e of g.elements) {
+        const r = rects.get(nameKey(e));
+        const f = r ? undefined : flows.find((x) => sameName(x.name, e));
+        const mid = f ? flowMid(f) : undefined;
+        if (r) parts.push(r);
+        else if (mid) parts.push({ x: mid[0], y: mid[1], w: 0, h: 0 });
+      }
+    }
+    if (!parts.length) return undefined;
+    const x0 = Math.min(...parts.map((r) => r.x)) - GROUP_PADDING;
+    const y0 = Math.min(...parts.map((r) => r.y)) - GROUP_PADDING - GROUP_LABEL_HEIGHT;
+    const x1 = Math.max(...parts.map((r) => r.x + r.w)) + GROUP_PADDING;
+    const y1 = Math.max(...parts.map((r) => r.y + r.h)) + GROUP_PADDING;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  };
+  const groupKeys = [...new Set(groups.map((g) => nameKey(g.name)))];
 
   const positionOf = (name: string): Point | undefined => {
     const r = rects.get(nameKey(name));
@@ -174,18 +210,24 @@ export function layoutModel(model: ModelJSON): string[] {
         continue;
       }
       const [w, h] = sizeOf(el);
-      const r = findSpot(targets, w, h, { occupied, segments, stockTop });
+      // グループに属する変数は、自分のグループの近くに寄せ、ほかのグループの囲みには入れない。属さない変数は、どの囲みにも入れない
+      const own = groupKey(el);
+      const ownArea = own ? groupArea(own) : undefined;
+      const avoid = groupKeys.filter((k) => k !== own).flatMap((k) => groupArea(k) ?? []);
+      const r = findSpot(targets, w, h, { occupied, segments, stockTop, avoid, pull: ownArea && center(ownArea) });
       place(el, r);
       // 引いたリンクの線も、あとで置く変数の邪魔にならないように覚えておく
       for (const t of targets) segments.push(...linkSegments(center(r), t.point));
       progressed = true;
     }
     if (!progressed) {
-      // どこにもつながっていない要素は下にまとめて並べる
+      // どこにもつながっていない要素は下にまとめて並べる（同じグループは続けて並べる）
       let y = bottom() + 120;
       let px = 100;
-      for (const el of next) {
+      const rest = byGroup(next, groupKey);
+      for (const [i, el] of rest.entries()) {
         const [w, h] = sizeOf(el);
+        if (i > 0 && groupKey(el) !== groupKey(rest[i - 1]!)) px += GROUP_GAP;
         let r = { x: px, y, w, h };
         while (!isFree(r)) r = { ...r, x: r.x + w + 40 };
         place(el, r);
@@ -231,11 +273,14 @@ function findSpot(
   targets: Target[],
   w: number,
   h: number,
-  env: { occupied: Rect[]; segments: Segment[]; stockTop: number },
+  env: { occupied: Rect[]; segments: Segment[]; stockTop: number; avoid?: Rect[]; pull?: Point },
 ): Rect {
-  const ax = targets.reduce((s, t) => s + t.point[0], 0) / targets.length;
-  const ay = targets.reduce((s, t) => s + t.point[1], 0) / targets.length;
-  const { occupied, segments, stockTop } = env;
+  const { occupied, segments, stockTop, avoid = [], pull } = env;
+  // つながる先の真ん中。自分のグループがあれば、そのグループの真ん中とのあいだに寄せる
+  const tx = targets.reduce((s, t) => s + t.point[0], 0) / targets.length;
+  const ty = targets.reduce((s, t) => s + t.point[1], 0) / targets.length;
+  const ax = pull ? (tx + pull[0]) / 2 : tx;
+  const ay = pull ? (ty + pull[1]) / 2 : ty;
   // ストックの行の上下の段と、つながる先と同じ高さ（フローの横）。上端より上（負の座標）には置かない
   const ys = [ay - h / 2, stockTop - 150 - h, stockTop - 260 - h, stockTop + 200, stockTop + 310, stockTop - 370 - h, stockTop + 420]
     .map(Math.round)
@@ -246,10 +291,14 @@ function findSpot(
     const padded = { x: r.x - LINE_GAP, y: r.y - LINE_GAP, w: r.w + 2 * LINE_GAP, h: r.h + 2 * LINE_GAP };
     return !segments.some(([a, b]) => segmentHitsRect(a, b, padded));
   };
-  /** ここに置いたとき、リンクの線がほかの要素の上を通る数（リンクは画面と同じく少し曲げて描くので、その曲線で数える） */
+  /**
+   * ここに置いたとき、リンクの線がほかの要素の上を通る数（リンクは画面と同じく少し曲げて描くので、その曲線で数える）。
+   * ほかのグループの囲みに入るところは、線が 2 本通るのと同じだけ避ける
+   */
   const hits = (r: Rect) => {
     const c = center(r);
-    let n = 0;
+    const padded = { x: r.x - GROUP_PADDING, y: r.y - GROUP_PADDING - GROUP_LABEL_HEIGHT, w: r.w + 2 * GROUP_PADDING, h: r.h + 2 * GROUP_PADDING + GROUP_LABEL_HEIGHT };
+    let n = 2 * avoid.filter((a) => overlaps(a, padded)).length;
     for (const t of targets) {
       const segs = linkSegments(c, t.point);
       n += occupied.filter((o) => o !== t.rect && segs.some(([p, q]) => segmentHitsRect(p, q, o))).length;
@@ -280,6 +329,21 @@ function findSpot(
 }
 
 type Segment = [Point, Point];
+
+/** 同じグループの要素が続くように並べ替える（グループの順と、グループの中の順は元の並びのまま。グループのない要素はそのまま） */
+function byGroup(items: ModelElement[], groupKey: (el: ModelElement) => string | undefined): ModelElement[] {
+  const out: ModelElement[] = [];
+  const done = new Set<string>();
+  for (const el of items) {
+    const key = groupKey(el);
+    if (key === undefined) out.push(el);
+    else if (!done.has(key)) {
+      done.add(key);
+      out.push(...items.filter((x) => groupKey(x) === key));
+    }
+  }
+  return out;
+}
 
 
 /** ストックをフローの流れ順に並べる（つながりごとにまとめる） */
