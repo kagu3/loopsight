@@ -76,7 +76,6 @@ describe("MCP server", () => {
         "set_groups",
         "set_scenarios",
         "set_simulation",
-        "sweep_parameter",
         "upsert_elements",
         "validate_model",
         "view_diagram",
@@ -116,21 +115,17 @@ describe("MCP server", () => {
     const full = await call<ModelJSON>("get_model", { model: "sir", format: "full" });
     expect(full.elements.find((e) => e.name === "Contact Rate")!.behavior!.value).toBe(0.4);
 
-    const sweep = await call("sweep_parameter", { model: "sir", parameter: "Contact Rate", from: 0.1, to: 0.5, steps: 3, elements: ["Infected"] });
-    expect(sweep.rows.map((r: any) => r.scenario)).toEqual(["Contact Rate = 0.1", "Contact Rate = 0.3", "Contact Rate = 0.5"]);
-    const peaks = sweep.rows.map((r: any) => r.results.Infected.max);
+    // 値を振るときは、overrides を変えて何回か実行する
+    const peaks: number[] = [];
+    for (const v of [0.1, 0.3, 0.5]) {
+      const r = await call("run_simulation", { model: "sir", overrides: { "Contact Rate": v }, elements: ["Infected"], samples: 0 });
+      peaks.push(r.results.Infected.max);
+    }
     expect(peaks[0]).toBeLessThan(peaks[1]);
     expect(peaks[1]).toBeLessThan(peaks[2]);
 
-    const scen = await call("sweep_parameter", {
-      model: "sir",
-      scenarios: [
-        { name: "対策なし", overrides: {} },
-        { name: "対策あり", overrides: { "Contact Rate": 0.2, "Recovery Rate": 0.15 } },
-      ],
-      elements: ["Infected", "Recovered"],
-    });
-    expect(scen.rows).toHaveLength(2);
+    // 保存したシナリオがなければ、scenarios: true はエラー
+    expect(await callError("run_simulation", { model: "sir", scenarios: true })).toMatch(/set_scenarios/);
   });
 
   test("名前を変えて、消して、設定を変える", async () => {
@@ -170,13 +165,23 @@ describe("MCP server", () => {
     expect(peaks[1]).toBeLessThan(peaks[0]);
     expect(peaks[2]).toBeLessThan(peaks[0]);
 
-    // 保存したシナリオは sweep_parameter でも「元のモデル」と並べて比べられる
-    const sweep = await call("sweep_parameter", { model: "s", overrides: { "Recovery Rate": 0.3 }, elements: ["Infected"] });
-    expect(sweep.rows.map((r: any) => r.scenario)).toEqual(["元のモデル", "外出を控える", "早く治す"]);
-    // 「元のモデル」には overrides を当てない
-    expect(sweep.rows[0].overrides).toEqual({});
-    expect(sweep.rows[0].results.Infected.max).toBe(peaks[0]);
-    expect(sweep.rows[1].overrides).toEqual({ "Contact Rate": 0.2, "Recovery Rate": 0.3 });
+    // 保存したシナリオは run_simulation の scenarios: true でも「元のモデル」と並べて読める（set_scenarios の比較と同じ値）
+    const compared = await call("run_simulation", { model: "s", scenarios: true, elements: ["Infected"], samples: 0 });
+    expect(compared).toMatchObject({ targets: ["Infected"], time_units: saved.comparison.time_units });
+    expect(compared.rows).toEqual(saved.comparison.rows);
+    // シナリオなしの run_simulation の結果とも同じ値
+    const plain = await call("run_simulation", { model: "s", elements: ["Infected"], samples: 0 });
+    expect(compared.rows[0].results).toEqual(plain.results);
+    // overrides は各シナリオにだけ当て、「元のモデル」には当てない
+    const withOv = await call("run_simulation", { model: "s", scenarios: true, overrides: { "Recovery Rate": 0.3 }, elements: ["Infected"] });
+    expect(withOv.rows.map((r: any) => r.scenario)).toEqual(["元のモデル", "外出を控える", "早く治す"]);
+    expect(withOv.rows[0].overrides).toEqual({});
+    expect(withOv.rows[0].results.Infected.max).toBe(peaks[0]);
+    expect(withOv.rows[0].results.Infected.series).toHaveLength(11);
+    expect(withOv.rows[1].overrides).toEqual({ "Contact Rate": 0.2, "Recovery Rate": 0.3 });
+    expect(await callError("run_simulation", { model: "s", scenarios: true, csv: true })).toMatch(/csv/);
+    // overrides の要素名の間違いは、行ごとの error ではなく全体のエラーにする（候補つき）
+    expect(await callError("run_simulation", { model: "s", scenarios: true, overrides: { "Recovery Rat": 0.3 } })).toMatch(/見つかりません[\s\S]*もしかして[\s\S]*Recovery Rate/);
 
     await call("upsert_elements", { model: "s", elements: [{ name: "Contact Rate", rename_to: "接触率" }] });
     const renamed = await call("set_scenarios", { model: "s", scenarios: [{ name: "早く治す", rename_to: "治療を早める" }] });

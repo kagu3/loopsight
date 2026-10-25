@@ -9,8 +9,6 @@ import {
   runToCSV,
   sampleIndices,
   summarizeRun,
-  sweepParameter,
-  sweepValues,
   upsertElements,
   withBaseline,
   type ModelJSON,
@@ -66,9 +64,9 @@ describe("実行と要約", () => {
     }
   });
 
-  test("見つからないパラメータや要素は候補を示す", () => {
+  test("見つからない上書きの要素は候補を示す", () => {
     try {
-      sweepParameter(growth(), "Rat", [1, 2]);
+      runModel(growth(), { overrides: { Rat: 1 } });
       expect.unreachable();
     } catch (e) {
       const issue = (e as ModelError).issues[0]!;
@@ -113,14 +111,32 @@ describe("CSV", () => {
 });
 
 describe("比較", () => {
-  test("パラメータを振ると値ごとの結果が並ぶ", () => {
-    const c = sweepParameter(growth(), "rate", sweepValues({ from: 0, to: 0.2, steps: 3 }), { targets: ["pop"] });
-    expect(c.targets).toEqual(["Pop"]);
-    expect(c.rows.map((r) => r.scenario)).toEqual(["Rate = 0", "Rate = 0.1", "Rate = 0.2"]);
-    const finals = c.rows.map((r) => r.results.Pop!.final as number);
-    expect(finals[0]).toBe(100);
-    expect(finals[1]).toBeLessThan(finals[2]!);
-    expect(c.rows[0]!.results.Pop!.series).toBeUndefined();
+  test("実行できないシナリオは、keepErrors なら行の error に理由を入れる", () => {
+    const m = growth();
+    m.scenarios = [
+      { name: "fast", values: { Rate: 0.2 } },
+      { name: "broken", values: { Rate: "[Nope]" } },
+    ];
+    const scenarios = withBaseline(modelScenarios(m));
+    expect(() => compareScenarios(m, scenarios)).toThrow(/broken/);
+    const c = compareScenarios(m, scenarios, { targets: ["pop"], keepErrors: true });
+    expect(c.rows.map((r) => r.scenario)).toEqual(["元のモデル", "fast", "broken"]);
+    expect(c.rows[1]!.results!.Pop!.final).toBeCloseTo(100 * 1.2 ** 10, 2);
+    expect(c.rows[1]!.results!.Pop!.series).toBeUndefined();
+    expect(c.rows[2]!.results).toBeUndefined();
+    expect(c.rows[2]!.error).toMatch(/実行できません/);
+    expect(c.rows[2]!.issues![0]!.message).toMatch(/\[Nope\]/);
+    // ビューアのシナリオの比較（runScenarios）と同じ値になる
+    const viewer = runScenarios(m);
+    expect(c.rows[0]!.results).toEqual(summarizeRun(viewer.baseline, ["Pop"], 0).results);
+    expect(c.rows[1]!.results).toEqual(summarizeRun(viewer.scenarios[0]!.data!, ["Pop"], 0).results);
+    expect(c.rows[2]!.error).toBe(viewer.scenarios[1]!.error!.message);
+    // 上限の 200 通りは、先頭の基準を除いて数える
+    const many = withBaseline([...Array(200).keys()].map((i) => ({ name: `s${i}`, overrides: { Rate: i / 1000 } })));
+    expect(compareScenarios(m, many, { targets: ["pop"] }).rows).toHaveLength(201);
+    expect(() => compareScenarios(m, [...many, { name: "over", overrides: {} }])).toThrow(/200 通り/);
+    // 先頭（比べる基準）の失敗は、keepErrors でも例外にする
+    expect(() => compareScenarios(m, [{ name: "base", overrides: { Rate: "[Nope]" } }, ...scenarios], { keepErrors: true })).toThrow(ModelError);
   });
 
   test("シナリオ比較では複数の値をまとめて変えられる", () => {
@@ -130,8 +146,8 @@ describe("比較", () => {
       { name: "small", values: { Pop: 10, Rate: 0.2 } },
     ];
     const c = compareScenarios(m, modelScenarios(m), { samples: 2 });
-    expect(c.rows[1]!.results.Pop!.initial).toBe(10);
-    expect(c.rows[1]!.results.Pop!.series).toHaveLength(2);
+    expect(c.rows[1]!.results!.Pop!.initial).toBe(10);
+    expect(c.rows[1]!.results!.Pop!.series).toHaveLength(2);
   });
 
   test("「元のモデル」と保存したシナリオの全時系列をまとめて返す", () => {
@@ -155,10 +171,5 @@ describe("比較", () => {
     expect(limited[1]).toMatchObject({ name: "broken", skipped: true });
     expect(limited[1]!.data).toBeUndefined();
     expect(limited[1]!.error).toBeUndefined();
-  });
-
-  test("値の指定がなければエラー", () => {
-    expect(() => sweepValues({})).toThrow(ModelError);
-    expect(sweepValues({ values: [1, 3] })).toEqual([1, 3]);
   });
 });
