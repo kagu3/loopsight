@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import type { ElementPatch, ModelElement } from "../../src/viewer/api.js";
+import { hasDelayMark } from "../../src/core/delay.js";
 import { formOf, patchOf, type Form } from "./editing.js";
 
 // 選んだ要素の詳しい情報と、その編集（E1）。「編集」の中で名前も変えられる（E3）。
 // 編集は MCP の upsert_elements と同じ形（変えた項目だけ）でサーバーに送る。
 // 図の箱になる要素は、「図で強調する」で強調の印（display.emphasis）を付け外しできる（押すとすぐ保存する）。
+// フローと、選んだリンク（App.tsx）には、遅れの印（‖）を付け外しするチェックを出す（押すとすぐ保存する。MCP の display.delay と同じ）。
 
 const TYPE_LABEL: Record<string, string> = {
   STOCK: "ストック",
@@ -200,6 +202,31 @@ export function Details({ el, value, onSave }: DetailsProps) {
         </label>
       )}
       {error && <p className="form-error">{error}</p>}
+      {el.type === "FLOW" && <DelayToggle key={el.name} on={hasDelayMark(el)} onChange={(on) => onSave({ name: el.name, display: { delay: on } })} />}
     </div>
+  );
+}
+
+/**
+ * 遅れの印（‖）を付け外しするチェック。押すとすぐ保存する。
+ * 印は図の見た目だけで、シミュレーションには影響しないことを添える
+ */
+export function DelayToggle({ on, onChange }: { on: boolean; onChange(on: boolean): Promise<string | undefined> }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const toggle = async (next: boolean) => {
+    setSaving(true);
+    const err = await onChange(next);
+    setSaving(false);
+    setError(err);
+  };
+  return (
+    <span className="delay-toggle">
+      <label className="check" title="図の線の途中に ‖ を描いて、時間がたってから効くことを見せます。見た目だけで、シミュレーションには影響しません（実際の遅れは式の Delay などで表します）">
+        <input type="checkbox" checked={on} disabled={saving} onChange={(e) => void toggle(e.target.checked)} />
+        遅れの印（‖）を付ける
+      </label>
+      {error && <span className="form-error">{error}</span>}
+    </span>
   );
 }

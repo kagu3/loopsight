@@ -44,6 +44,7 @@ import {
   summarizeRun,
   sweepParameter,
   sweepValues,
+  unmarkedDelays,
   upsertElements,
   validateModel,
   withBaseline,
@@ -98,15 +99,30 @@ const elementPatch = z.object({
       "表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる。" +
         "emphasis: true で図の要素を強調する（箱・名前の文字・枠の太さをまとめて大きく描く。size を指定した要素はその大きさを基準に大きくする）。false でふつうに戻す。" +
         "強調できるのはストック、変数、コンバーター、状態。付け外ししても箱の真ん中の位置は変わらない（coordinates も一緒に指定したときはそれに従う）。シミュレーションには影響しない。" +
-        "emphasis はループサイト独自の項目で、Insight Maker などほかのツールは読み込めないことがあるので、ほかのツールに渡すときは強調を外す",
+        "emphasis はループサイト独自の項目で、Insight Maker などほかのツールは読み込めないことがあるので、ほかのツールに渡すときは強調を外す / " +
+        "LINK と FLOW: delay（true で遅れの印 ‖ を図の線の途中に描く。false か null で外す。見た目だけで、シミュレーションには影響しない。実際の遅れは式の Delay や Smooth などで表す）",
     ),
 });
 
 // ---- 共通の処理 ----
 
+/** view_diagram の、遅れの印の確認。式で遅れて効くのに印のないリンクがなければ何も足さない */
+function unmarkedDelaysCheck(m: ModelJSON): { unmarked_delays?: { links: string[]; hint: string } } {
+  const links = unmarkedDelays(m).map((l) => `${l.from} → ${l.to}`);
+  if (!links.length) return {};
+  return {
+    unmarked_delays: {
+      links,
+      hint:
+        "先の要素の式が、元の要素を Delay や Smooth などの時間をまたぐ関数に渡しているのに、遅れの印のないリンクです。" +
+        "図で「時間がたってから効く」ことを見せたいなら、upsert_elements で [{type:'LINK', from:'元', to:'先', display:{delay:true}}] を付けます（印は見た目だけ）。",
+    },
+  };
+}
+
 /** ループのつながりを 1 行ずつの文にする（例: "採用 → 新人 (+, フロー)"） */
 const VIA_LABEL: Record<LoopStep["via"], string> = { link: "", flow: ", フロー", reference: ", フローの式の参照" };
-const stepText = (s: LoopStep) => `${s.from} → ${s.to} (${s.polarity}${VIA_LABEL[s.via]})`;
+const stepText = (s: LoopStep) => `${s.from} → ${s.to} (${s.polarity}${VIA_LABEL[s.via]}${s.delay ? ", 遅れ ‖" : ""})`;
 
 const isPrimitive = (v: unknown) => v === null || typeof v !== "object";
 
@@ -199,7 +215,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
 4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
-5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる
+5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている
 
 式の書き方: 足し算などの演算子、[Stock] のような参照、{5 Meters} のような単位つきの数、IfThenElse(cond, a, b)、Years()、Rand() などの関数が使えます。
@@ -412,7 +428,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "位置は upsert_elements の display で直す（ストックや変数は display.coordinates が左上、雲はフローの display.from_coordinates / to_coordinates が中心）。" +
         "強調した要素（display.emphasis）は大きく描き、重なりなどの確認もその大きさで行う（positions の size も大きくしたもの）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
-        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。",
+        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。" +
+        "遅れの印（display.delay）のあるリンクやフローは、線の途中に ‖ を描く。先の要素の式が元の要素を Delay や Smooth などの時間をまたぐ関数に渡しているのに印のないリンクがあれば、unmarked_delays で知らせる（自動では付けない）。",
       inputSchema: {
         model: modelName,
         image: z.boolean().optional().describe("画像を付ける（既定は true）。一覧だけでよければ false"),
@@ -444,6 +461,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         how_to_move:
           "upsert_elements で [{name:'要素名', display:{coordinates:[x, y]}}]（左上）。雲は [{name:'フロー名', display:{from_coordinates:[x, y]}}]（中心、行き先なら to_coordinates）。y は下向き",
         ...checkDiagram(m),
+        ...unmarkedDelaysCheck(m),
       };
       if (a.image === false) return check;
       let png: Buffer;
@@ -491,6 +509,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "R か B かはリンクの極性（behavior.polarity）で決める。フローは行き先のストックを増やし（+）、出元のストックを減らす（-）。- が偶数個なら R、奇数個なら B。" +
         "極性が決まっていないつながり（polarity のないリンクや、フローの式がリンクなしで自分のストックを見ているところ）があれば kind は unknown にし、undetermined に挙げる。" +
         "ループは短い順。elements はつながる順で、最後の要素は最初の要素につながる。name（R1、B2 など）は返したループの中での通し番号で、element や max_length を変えると変わる。" +
+        "遅れの印（display.delay）のあるリンクやフローを通るループには、delays にそのつながりを挙げる（遅れのある釣り合わせるループ（B）は、行き過ぎて振れやすい）。" +
         "view_diagram の loop に elements を渡すと、そのループを目立たせた図を見られる。",
       inputSchema: {
         model: modelName,
@@ -513,7 +532,8 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         count: { R: loops.filter((l) => l.kind === "R").length, B: loops.filter((l) => l.kind === "B").length, unknown: loops.filter((l) => l.kind === "unknown").length },
         loops: loops.map((l) => {
           const u = undetermined(l.steps);
-          return { name: l.name, kind: l.kind, elements: l.elements, steps: l.steps.map(stepText), ...(u.length ? { undetermined: u } : {}) };
+          const delays = l.steps.filter((s) => s.delay).map(stepText);
+          return { name: l.name, kind: l.kind, elements: l.elements, steps: l.steps.map(stepText), ...(u.length ? { undetermined: u } : {}), ...(delays.length ? { delays } : {}) };
         }),
         ...(truncated
           ? {

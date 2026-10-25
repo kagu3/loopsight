@@ -6,6 +6,7 @@
 
 import type { ModelElement, ModelJSON } from "../../src/viewer/api.js";
 import { referencesIn } from "../../src/core/modeljson.js";
+import { TIME_FUNCTIONS } from "../../src/core/delay.js";
 import { formatValue } from "./format.js";
 import { nameKey } from "./scenarios.js";
 
@@ -42,16 +43,6 @@ export interface FormulaView {
   /** 添える一言（ストックに出入りするフローがないときなど） */
   note?: string;
 }
-
-/**
- * 時間をまたぐ関数（Insight Maker の関数）。1 つ目の引数は、過去の値を使うので、いまの値を入れない。
- * 名前は大文字と小文字を区別しない
- */
-const TIME_FUNCTIONS = new Set(
-  ["Delay", "Delay1", "Delay3", "DelayN", "Smooth", "SmoothN", "Trend", "Forecast", "Fix", "PastValues", "PastMax", "PastMin", "PastMedian", "PastMean", "PastStdDev", "PastCorrelation"].map(
-    (f) => f.toLowerCase(),
-  ),
-);
 
 /** 下の行をそろえて出せる、式の片の数の上限。これより長いと、横に長くなりすぎるので一覧にする */
 const ALIGN_LIMIT = 24;

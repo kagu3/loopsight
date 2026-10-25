@@ -102,8 +102,10 @@ export function isConnector(type: ElementType): boolean {
 /**
  * ループサイト独自の display の項目。シミュレーションのエンジン（simulation の loadModelJSON）は知らない項目をエラーにするので、
  * 実行するときは engineModel で取り除いてから渡す
+ * - emphasis：図で強調して大きく描く。箱になる要素に付ける（isEmphasized）
+ * - delay：遅れの印（‖）。リンクとフローに付ける（delay.ts）
  */
-export const LOOPSIGHT_DISPLAY_KEYS: readonly string[] = ["emphasis"];
+export const LOOPSIGHT_DISPLAY_KEYS: readonly string[] = ["emphasis", "delay"];
 
 /** エンジンに渡すモデル。ループサイト独自の display の項目を取り除いたコピー（なければそのまま返す） */
 export function engineModel(model: ModelJSON): ModelJSON {
