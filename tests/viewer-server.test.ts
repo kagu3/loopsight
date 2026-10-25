@@ -8,7 +8,7 @@ import { startViewer, type Viewer } from "../src/viewer/server.js";
 import { watchTree } from "../src/viewer/watch.js";
 import { reconnectPatches } from "../web/src/editing.js";
 import { cellPatchOf, clearValuePatches, newScenarioPatchOf } from "../web/src/scenarios.js";
-import { tempDir } from "./helpers.js";
+import { loadSample, tempDir, UNSUPPORTED_SAMPLE } from "./helpers.js";
 
 let dir: string;
 let viewer: Viewer;
@@ -118,6 +118,16 @@ describe("ビューアのサーバー", () => {
     const { body } = await get<ModelResponse>("/api/models/broken");
     expect(body.validation.ok).toBe(false);
     expect(body.run).toBeUndefined();
+  });
+
+  test("状態（STATE）か遷移（TRANSITION）を含むモデルは、そのモデルだけを読めないと返す（一覧とほかのモデルは出す）", async () => {
+    await new ModelStore(dir).write("bath", loadSample(UNSUPPORTED_SAMPLE));
+    const { status, body } = await get<{ error: string }>("/api/models/bath");
+    expect(status).toBe(404);
+    expect(body.error).toMatch(/対応していない要素があります: STATE "[^"]+"/);
+    expect(body.error).toMatch(/システムダイナミクスのモデル/);
+    expect((await get<ModelListResponse>("/api/models")).body.models.map((m) => m.name)).toEqual(["bath", "pop"]);
+    expect((await get<ModelResponse>("/api/models/pop")).body.validation.ok).toBe(true);
   });
 
   test("ないモデルや作業フォルダの外は 404", async () => {

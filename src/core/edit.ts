@@ -2,7 +2,7 @@ import type { Annotation, ElementBehavior, ElementDisplay, ElementType, Equation
 import { bounds, toGraph } from "./diagram.js";
 import { ANNOTATION_MAX_WIDTH, ANNOTATION_MIN_WIDTH, boxLayout, BOX_TYPES } from "./geometry.js";
 import { DELAY_MARK_TYPES } from "./delay.js";
-import { annotationsOf, EDITABLE_TYPES, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
+import { annotationsOf, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 import { removeFromGroups, renameInGroups } from "./groups.js";
 
 export class EditError extends Error {
@@ -59,7 +59,7 @@ function mergeObject<T extends object>(base: T | undefined, patch: Record<string
 }
 
 /**
- * display.emphasis（図で強調する）を確かめる。強調できるのは図の箱（ストック・変数・コンバーター・状態）だけ。
+ * display.emphasis（図で強調する）を確かめる。強調できるのは図の箱（ストック・変数・コンバーター）だけ。
  * false（ふつう）は項目を消す（ふつうの要素には何も書かない）
  */
 function emphasisPatch(el: ModelElement, display: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -67,7 +67,7 @@ function emphasisPatch(el: ModelElement, display: Record<string, unknown> | unde
   if (emphasis === undefined || emphasis === null) return display;
   if (typeof emphasis !== "boolean") throw new EditError(`${describe(el)} の display.emphasis は true（強調）か false（ふつう）で指定してください。`);
   if (emphasis && !BOX_TYPES.has(el.type)) {
-    throw new EditError(`${describe(el)} は強調できません。強調できるのは図の箱になる要素（ストック、変数、コンバーター、状態）だけです。`);
+    throw new EditError(`${describe(el)} は強調できません。強調できるのは図の箱になる要素（ストック、変数、コンバーター）だけです。`);
   }
   return emphasis ? display : { ...display, emphasis: null };
 }
@@ -77,7 +77,7 @@ function applyPatch(el: ModelElement, p: ElementPatch): void {
     if (p.description === null || p.description === "") delete el.description;
     else el.description = p.description;
   }
-  if (el.type !== "STOCK" && el.type !== "VARIABLE" && el.type !== "CONVERTER" && el.type !== "STATE") {
+  if (el.type !== "STOCK" && el.type !== "VARIABLE" && el.type !== "CONVERTER") {
     if (p.from !== undefined) el.from = p.from;
     if (p.to !== undefined) el.to = p.to;
   }
@@ -159,10 +159,7 @@ function checkDelay(type: ElementType, p: ElementPatch): void {
 
 function checkNewElement(p: ElementPatch): ElementType {
   if (!p.type) throw new EditError(`新しい要素 ${p.name ? `"${p.name}" ` : ""}には type が必要です。`);
-  if (!ELEMENT_TYPES.includes(p.type)) throw new EditError(`不明な要素の種類 "${p.type}"。`);
-  if (!(EDITABLE_TYPES as readonly string[]).includes(p.type)) {
-    throw new EditError(`${p.type} は段階 1 では追加できません（追加できるのは ${EDITABLE_TYPES.join(", ")}）。`);
-  }
+  if (!ELEMENT_TYPES.includes(p.type)) throw new EditError(`不明な要素の種類 "${p.type}"（追加できるのは ${ELEMENT_TYPES.join(", ")}）。`);
   return p.type;
 }
 
@@ -293,7 +290,7 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
       if (removed.has(el)) continue;
       const touches = removedNames.some((n) => sameName(el.from, n) || sameName(el.to, n));
       if (!touches) continue;
-      if (el.type === "LINK" || (options.cascadeFlows && (el.type === "FLOW" || el.type === "TRANSITION"))) {
+      if (el.type === "LINK" || (options.cascadeFlows && el.type === "FLOW")) {
         removeOne(el);
         changed = true;
       }
@@ -341,7 +338,7 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
 export const BASELINE_SCENARIO = "元のモデル";
 
 /** シナリオで値を変えられる要素の種類（実行時の上書きと同じ） */
-const SCENARIO_TYPES: readonly ElementType[] = ["STOCK", "VARIABLE", "FLOW", "STATE", "TRANSITION"];
+const SCENARIO_TYPES: readonly ElementType[] = ["STOCK", "VARIABLE", "FLOW"];
 
 /** set_scenarios の 1 件分。values は既存の値に重ねる（null を入れるとその要素の値を消す） */
 export interface ScenarioPatch {

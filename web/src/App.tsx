@@ -987,10 +987,9 @@ export function App() {
   const selectedLinkEl = selectedLink && data ? findLink(data.model, selectedLink.from, selectedLink.to) : undefined;
   // 選んでいる注釈（AI などが消していれば、ない）
   const selectedNoteEl = selectedNote !== undefined && data ? annotationsOf(data.model).find((a) => sameName(a.id, selectedNote)) : undefined;
-  // 編集モードで消せる要素（足せる種類と同じく、状態と遷移は消さない）か、リンク。
+  // 編集モードで消せる要素か、リンク。
   // シナリオの編集欄を開いている間は、左に出ていない要素を消さないよう、消せないことにする
-  const removableName =
-    editMode && !scenario && selectedEl && selectedEl.type !== "STATE" && selectedEl.type !== "TRANSITION" ? selectedEl.name : undefined;
+  const removableName = editMode && !scenario && selectedEl ? selectedEl.name : undefined;
   // 先の要素の式が使っているなど、消せないリンクの理由（左の欄に出し、「削除」は押せなくする）
   const linkLocked = selectedLinkEl && data ? linkRemoveProblem(data.model, selectedLinkEl.from!, selectedLinkEl.to!) : undefined;
   const [linkFrom, linkTo] = editMode && !scenario && selectedLinkEl && !linkLocked ? [selectedLinkEl.from!, selectedLinkEl.to!] : [];

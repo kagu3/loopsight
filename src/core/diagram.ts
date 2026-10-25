@@ -1,7 +1,7 @@
 // ModelJSON を図のノードと線にする。ビューアの画面と、MCP の view_diagram（図の確認）の両方で使う。
 // React にも Node にも依存しない。
 //
-// - ストック、変数、コンバーター、状態は箱のノード
+// - ストック、変数、コンバーターは箱のノード
 // - フローは真ん中に「弁」のノードを置き、出元 → 弁 → 行き先の 2 本の線にする（リンクが弁につながれるように）
 // - モデルの外の端は雲のノード
 // - 遅れの印（display.delay）のあるリンクは、その線に delay を付ける。フローは行き先の側の線（弁 → 行き先）に付ける
@@ -14,7 +14,7 @@ export { LINK_BEND, linkControlPoint } from "./geometry.js";
 import { hasDelayMark } from "./delay.js";
 import { annotationsOf, isEmphasized, sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
 
-export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "STATE" | "VALVE" | "CLOUD" | "NOTE";
+export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "VALVE" | "CLOUD" | "NOTE";
 export type Shape = "rect" | "ellipse";
 
 export interface GraphNode {
@@ -43,7 +43,7 @@ export interface GraphNode {
   labelSide?: "below" | "right";
 }
 
-export type EdgeKind = "flow" | "transition" | "link";
+export type EdgeKind = "flow" | "link";
 
 export interface GraphEdge {
   id: string;
@@ -91,7 +91,7 @@ const center = (n: GraphNode): [number, number] => [n.x + n.width / 2, n.y + n.h
 export function needsLayout(model: ModelJSON): boolean {
   for (const el of model.elements) {
     if (BOX_TYPES.has(el.type) && el.name && !hasCoordinates(el)) return true;
-    if ((el.type === "FLOW" || el.type === "TRANSITION") && el.name) {
+    if (el.type === "FLOW" && el.name) {
       if (!el.from && !el.display?.from_coordinates) return true;
       if (!el.to && !el.display?.to_coordinates) return true;
     }
@@ -138,11 +138,10 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
     byName.set(el.name.toLowerCase(), node);
   }
 
-  // フローと遷移：両端（ストックか雲）と弁
-  const connectors = model.elements.filter((e) => (e.type === "FLOW" || e.type === "TRANSITION") && e.name);
+  // フロー：両端（ストックか雲）と弁
+  const flows = model.elements.filter((e) => e.type === "FLOW" && e.name);
   const valves: { node: GraphNode; a: GraphNode; b: GraphNode }[] = [];
-  for (const f of connectors) {
-    const kind: EdgeKind = f.type === "FLOW" ? "flow" : "transition";
+  for (const f of flows) {
     const end = (which: "from" | "to"): GraphNode => {
       const name = f[which];
       const found = name ? byName.get(name.toLowerCase()) : undefined;
@@ -170,8 +169,8 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
     nodes.push(valve);
     byName.set(f.name!.toLowerCase(), valve);
     valves.push({ node: valve, a, b });
-    edges.push({ id: `${valve.id}:in`, kind, source: a.id, target: valve.id, arrow: false, element: f.name! });
-    edges.push({ id: `${valve.id}:out`, kind, source: valve.id, target: b.id, arrow: true, element: f.name!, ...(hasDelayMark(f) ? { delay: true as const } : {}) });
+    edges.push({ id: `${valve.id}:in`, kind: "flow", source: a.id, target: valve.id, arrow: false, element: f.name! });
+    edges.push({ id: `${valve.id}:out`, kind: "flow", source: valve.id, target: b.id, arrow: true, element: f.name!, ...(hasDelayMark(f) ? { delay: true as const } : {}) });
   }
 
   // リンク

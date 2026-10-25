@@ -2,7 +2,7 @@ import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import type { ModelJSON } from "./modeljson.js";
+import { unsupportedElementsMessage, type ModelJSON } from "./modeljson.js";
 import { renameDataHeader } from "./data.js";
 
 export class StoreError extends Error {
@@ -459,6 +459,9 @@ export class ModelStore {
       if (!json || typeof json !== "object" || !Array.isArray(json.elements)) {
         throw new Error("elements 配列がありません");
       }
+      // 状態や遷移を含むモデルは、このモデルだけをエラーにする（一覧やほかのモデルには響かない）
+      const unsupported = unsupportedElementsMessage(json.elements);
+      if (unsupported) throw new Error(unsupported);
       return { model: json, version: versionOf(text), text };
     } catch (e) {
       throw new StoreError(`${file} を ModelJSON として読めません: ${(e as Error).message}`);

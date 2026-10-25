@@ -247,17 +247,6 @@ export function layoutModel(model: ModelJSON): string[] {
     pending = next;
   }
 
-  // 4. 状態は一番下の行
-  let sx = 100;
-  const sy = bottom() + 140;
-  for (const el of nodes.filter((e) => e.type === "STATE" && !rects.has(nameKey(e.name!)))) {
-    const [w, h] = sizeOf(el);
-    let r = { x: sx, y: sy, w, h };
-    while (!isFree(r)) r = { ...r, x: r.x + 160 };
-    place(el, r);
-    sx = r.x + 160;
-  }
-
   return placed;
 }
 

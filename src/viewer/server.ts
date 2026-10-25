@@ -174,7 +174,7 @@ function keepCloudsInPlace(model: ModelJSON): () => void {
   /** フローの端の中心（つながる先の箱か、雲） */
   const endCenter = (el: ModelElement, end: "from" | "to", name: string | null | undefined) =>
     (name ? centers.get(name.toLowerCase()) : undefined) ?? clouds.get(`${el.name!.toLowerCase()}:${end}`);
-  const ends = model.elements.filter((e) => e.type === "FLOW" || e.type === "TRANSITION").map((el) => ({ el, from: el.from, to: el.to }));
+  const ends = model.elements.filter((e) => e.type === "FLOW").map((el) => ({ el, from: el.from, to: el.to }));
   return () => {
     const placed: { el: ModelElement; end: "from" | "to"; at: [number, number]; toward?: [number, number] }[] = [];
     for (const { el, ...before } of ends) {

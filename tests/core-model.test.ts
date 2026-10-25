@@ -2,6 +2,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { toModelJSON } from "simulation";
 import {
+  ImportError,
   ModelStore,
   StoreError,
   buildModel,
@@ -17,7 +18,7 @@ import {
   validateModel,
   type ModelJSON,
 } from "../src/core/index.js";
-import { loadSample, sampleNames, sortedElements, tempDir } from "./helpers.js";
+import { loadSample, sampleNames, sortedElements, tempDir, UNSUPPORTED_SAMPLE } from "./helpers.js";
 
 describe("ModelJSON の往復", () => {
   test.each(sampleNames())("%s: 保存 → 読み込み → エンジン → ModelJSON で一致する", async (name) => {
@@ -79,6 +80,25 @@ describe("ModelJSON の取り込み", () => {
     expect(() => importModelText("hello")).toThrow(/ModelJSON/);
     expect(() => importModelText("<InsightMakerModel></InsightMakerModel>")).toThrow(/ModelJSON/);
     expect(() => importModelText('{"name":"x"}')).toThrow(/elements/);
+  });
+
+  test("状態（STATE）か遷移（TRANSITION）を含むモデルは、どの要素かと理由を書いて断る", () => {
+    const text = JSON.stringify(loadSample(UNSUPPORTED_SAMPLE));
+    expect(() => importModelText(text)).toThrow(ImportError);
+    expect(() => importModelText(text)).toThrow(/対応していない要素があります: STATE "[^"]+"、.*TRANSITION "[^"]+"/);
+    expect(() => importModelText(text)).toThrow(/システムダイナミクスのモデル.*だけを扱う/);
+    // 名前のない要素も、種類で書く
+    expect(() => importModelText('{"elements":[{"type":"TRANSITION"}]}')).toThrow(/名前のない TRANSITION/);
+  });
+
+  test("作業フォルダの状態や遷移を含むモデルは、そのモデルだけが読めない（一覧とほかのモデルは読める）", async () => {
+    const store = new ModelStore(await tempDir());
+    await store.write("bath", loadSample(UNSUPPORTED_SAMPLE));
+    await store.write("ok", { ...emptyModel("OK"), elements: [{ type: "VARIABLE", name: "x", behavior: { value: 1 } }] });
+    await expect(store.read("bath")).rejects.toThrow(StoreError);
+    await expect(store.read("bath")).rejects.toThrow(/対応していない要素があります: STATE/);
+    expect((await store.list()).map((m) => m.name)).toEqual(["bath", "ok"]);
+    expect((await store.read("ok")).name).toBe("OK");
   });
 });
 
@@ -152,7 +172,7 @@ describe("要素の編集", () => {
   test("種類の変更と、追加できない種類は断る", () => {
     const m = sir();
     expect(() => upsertElements(m, [{ type: "STOCK", name: "Beta" }])).toThrow(/種類/);
-    expect(() => upsertElements(m, [{ type: "STATE", name: "On" }])).toThrow(/段階 1/);
+    expect(() => upsertElements(m, [{ type: "STATE" as never, name: "On" }])).toThrow(/不明な要素の種類/);
     expect(() => upsertElements(m, [{ name: "New" }])).toThrow(/type が必要/);
   });
 
