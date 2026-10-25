@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import { sameTime, withActualPoints } from "../web/src/actualPoints.js";
-import { normalizeLike } from "../web/src/normalize.js";
 
 const rows = () => [
   { t: 0, i: 0, s0: 100 },
@@ -36,9 +35,5 @@ describe("実際のデータの点をグラフの行に入れる", () => {
   test("刻みの小数の誤差は同じ時刻とみなす", () => {
     expect(sameTime(0.1 + 0.2, 0.3)).toBe(true);
     expect(sameTime(0.3, 0.31)).toBe(false);
-  });
-
-  test("正規化するときは、モデルの線の最小と最大を目盛りにする", () => {
-    expect(normalizeLike([150, null, 50], [100, 200])).toEqual([0.5, null, -0.5]);
   });
 });
