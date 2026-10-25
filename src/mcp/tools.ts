@@ -18,6 +18,7 @@ import {
   ModelStore,
   StoreError,
   TIME_UNITS,
+  applyOverrides,
   checkModelName,
   checkActualData,
   checkDiagram,
@@ -45,8 +46,6 @@ import {
   staticCheck,
   summarizeModel,
   summarizeRun,
-  sweepParameter,
-  sweepValues,
   unmarkedDelays,
   upsertElements,
   validateModel,
@@ -220,7 +219,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 1. create_model か import_model でモデルを用意する
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
-4. run_simulation で実行し、sweep_parameter で感度分析やシナリオ比較をする。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
+4. run_simulation で実行する。値を振って調べる（感度分析）ときや、いくつかの値をまとめて変えて比べるときは、run_simulation の overrides を変えて何回か実行する。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。保存したシナリオは run_simulation の scenarios: true で「元のモデル」と並べて読める。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている。要素の補足や図の読み方は、set_annotations で説明する箱の近くに注釈（文字だけのもの）として置ける
    要素が多いときは、set_groups で意味のまとまり（「お店側」「お客側」など）をグループにする。図では属する要素が薄い色の背景で囲まれ、凡例が出る。layout_model は同じグループの要素を近くに集めて並べる
@@ -850,7 +849,10 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       title: "実行する",
       description:
         "モデルを実行して、要素ごとに初期値・最終値・最小・最大とその時刻、間引いた時系列を返す。overrides と simulation で一時的に値を変えられる（ファイルは変わらない）。" +
-        "csv: true で全データを作業フォルダの output/ に CSV で保存する。",
+        "値を振って調べる（感度分析）ときは、overrides を変えて何回か実行する。" +
+        "csv: true で全データを作業フォルダの output/ に CSV で保存する。" +
+        `scenarios: true で、モデルに保存したシナリオ（set_scenarios）も実行し、「${BASELINE_SCENARIO}」と各シナリオの結果を rows に並べて返す（ビューアのシナリオの比較と同じ値）。` +
+        `このとき overrides は各シナリオにだけ当て、「${BASELINE_SCENARIO}」には当てない。実行できないシナリオは、その行の error と issues に理由を入れる。`,
       inputSchema: {
         model: modelName,
         elements: targets,
@@ -859,6 +861,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         simulation: simulation.optional().describe("一時的に変えるシミュレーション設定"),
         csv: z.boolean().optional().describe("全データを CSV に保存する"),
         csv_path: z.string().optional().describe("CSV の保存先（作業フォルダからの相対パス）。指定すると csv: true と同じ"),
+        scenarios: z.boolean().optional().describe(`保存したシナリオも実行して「${BASELINE_SCENARIO}」と並べる（csv とは一緒に使えない）`),
       },
       annotations: { readOnlyHint: false },
     },
@@ -871,8 +874,10 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         simulation?: z.infer<typeof simulation>;
         csv?: boolean;
         csv_path?: string;
+        scenarios?: boolean;
       }) => {
         const m = await store.read(a.model);
+        if (a.scenarios) return compareSaved(m, a);
         const names = resolveTargets(m, a.elements);
         const data = runModel(m, { overrides: a.overrides, simulation: a.simulation });
         const summary: Record<string, unknown> = { model: a.model, ...summarizeRun(data, names, a.samples ?? 11) };
@@ -890,65 +895,33 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     ),
   );
 
-  server.registerTool(
-    "sweep_parameter",
-    {
-      title: "パラメータを振って比較する",
-      description:
-        "感度分析とシナリオ比較。次のどれかを指定する: " +
-        "(1) parameter と values（または from, to, steps）で 1 つの値を振る、" +
-        "(2) scenarios で複数の値をまとめて変えた組を比べる、" +
-        `(3) どちらもなければモデルに保存されたシナリオ（set_scenarios）を「${BASELINE_SCENARIO}」と並べて比べる（overrides は各シナリオにだけ当て、「${BASELINE_SCENARIO}」には当てない）。` +
-        "結果は組ごとに、指定した要素の初期値・最終値・最小・最大を返す。",
-      inputSchema: {
-        model: modelName,
-        parameter: z.string().optional().describe("振る要素の名前（STOCK なら初期値、VARIABLE と FLOW なら値）"),
-        values: z.array(equation).optional().describe("試す値の一覧"),
-        from: z.number().optional(),
-        to: z.number().optional(),
-        steps: z.number().int().optional().describe("from から to を何点に分けるか（既定 5）"),
-        scenarios: z
-          .array(z.object({ name: z.string(), overrides: z.record(z.string(), equation) }))
-          .optional()
-          .describe("[{name:'高成長', overrides:{'Birth Rate':0.05}}, ...]"),
-        overrides: overrides.optional().describe("すべての組に共通で当てる上書き（保存したシナリオと比べるときの「元のモデル」には当てない）"),
-        elements: targets,
-        samples: z.number().int().min(0).max(50).optional().describe("組ごとに返す時系列の点数（既定 0）"),
-        simulation: simulation.optional(),
-      },
-      annotations: { readOnlyHint: true },
+  /** run_simulation の scenarios: true。「元のモデル」と保存したシナリオを並べる（set_scenarios の comparison と同じ形） */
+  function compareSaved(
+    m: ModelJSON,
+    a: {
+      model: string;
+      elements?: string[];
+      samples?: number;
+      overrides?: Record<string, string | number | boolean>;
+      simulation?: z.infer<typeof simulation>;
+      csv?: boolean;
+      csv_path?: string;
     },
-    handle(
-      async (a: {
-        model: string;
-        parameter?: string;
-        values?: (string | number | boolean)[];
-        from?: number;
-        to?: number;
-        steps?: number;
-        scenarios?: { name: string; overrides: Record<string, string | number | boolean> }[];
-        overrides?: Record<string, string | number | boolean>;
-        elements?: string[];
-        samples?: number;
-        simulation?: z.infer<typeof simulation>;
-      }) => {
-        const m = await store.read(a.model);
-        const opts = { targets: a.elements, samples: a.samples, simulation: a.simulation };
-        if (a.parameter) {
-          const values = a.values?.length ? a.values : sweepValues({ from: a.from, to: a.to, steps: a.steps });
-          return { model: a.model, parameter: a.parameter, ...sweepParameter(m, a.parameter, values, { ...opts, baseOverrides: a.overrides }) };
-        }
-        const fromModel = !a.scenarios?.length;
-        const scenarios = fromModel ? modelScenarios(m) : a.scenarios!;
-        if (!scenarios.length) {
-          throw new ModelError("比べるものがありません。parameter か scenarios を指定してください（モデルにもシナリオが保存されていません）。", []);
-        }
-        const withBase = scenarios.map((s) => ({ name: s.name, overrides: { ...(a.overrides ?? {}), ...s.overrides } }));
-        // 保存したシナリオと比べるときの「元のモデル」は、名前どおり何も変えない（overrides も当てない）
-        return { model: a.model, ...compareScenarios(m, fromModel ? withBaseline(withBase) : withBase, opts) };
-      },
-    ),
-  );
+  ): Record<string, unknown> {
+    if (a.csv || a.csv_path) throw new ModelError("csv と scenarios は一緒に使えません。CSV がほしいときは scenarios を外して実行してください。", []);
+    const saved = modelScenarios(m);
+    if (!saved.length) throw new ModelError("モデルにシナリオが保存されていません。set_scenarios で保存してください。", []);
+    // 渡された overrides の要素名の間違いは、シナリオごとの失敗ではないので、全体をエラーにする（候補つき）
+    if (a.overrides) applyOverrides(m, { overrides: a.overrides });
+    // 「元のモデル」は名前どおり何も変えない（overrides も当てない）
+    const scenarios = withBaseline(saved.map((s) => ({ name: s.name, overrides: { ...(a.overrides ?? {}), ...s.overrides } })));
+    const comparison = compareScenarios(m, scenarios, { targets: a.elements, samples: a.samples ?? 11, simulation: a.simulation, keepErrors: true });
+    const out: Record<string, unknown> = { model: a.model, ...comparison };
+    if (a.overrides) out.overrides = a.overrides;
+    const { warnings } = staticCheck(m);
+    if (warnings.length) out.warnings = warnings;
+    return out;
+  }
 
   server.registerTool(
     "import_data",

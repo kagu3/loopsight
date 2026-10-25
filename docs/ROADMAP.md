@@ -58,7 +58,7 @@
 | `set_simulation` | 開始時刻、期間、刻み幅、解法、時間単位を設定する |
 | `validate_model` | エラーと警告を返す |
 | `run_simulation` | 実行して要約を返す。必要なら CSV に保存する |
-| `sweep_parameter` | パラメータを振って、指定した要素の結果を比較する |
+| ~~`sweep_parameter`~~ | ~~パラメータを振って、指定した要素の結果を比較する~~（`run_simulation` の `overrides` で足りるので削除。保存したシナリオの比較は `run_simulation` の `scenarios: true` に移した） |
 
 #### M4. 簡易レイアウト
 - 座標がない要素に、重ならない程度の座標を付ける（ストックを横に並べ、変数をその周りに置く程度）

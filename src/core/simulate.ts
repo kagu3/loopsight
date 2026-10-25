@@ -2,7 +2,7 @@ import { Link } from "simulation";
 import type { Equation, ModelElement, ModelJSON, SimulationSettings } from "./modeljson.js";
 import { clone, didYouMean, findElement } from "./modeljson.js";
 import { BASELINE_SCENARIO, checkSimulation } from "./edit.js";
-import { ModelError, buildModel, staticCheck, toModelError } from "./validate.js";
+import { ModelError, buildModel, staticCheck, toModelError, type Issue } from "./validate.js";
 
 /** 実行 1 回分の全データ */
 export interface RunData {
@@ -214,7 +214,10 @@ export interface ScenarioInput {
 export interface ComparisonRow {
   scenario: string;
   overrides: Record<string, Equation>;
-  results: Record<string, SeriesSummary>;
+  /** 実行できなかったとき（keepErrors）は results の代わりに error（と、あれば要素ごとの issues）が入る */
+  results?: Record<string, SeriesSummary>;
+  error?: string;
+  issues?: Issue[];
 }
 
 export interface Comparison {
@@ -223,50 +226,38 @@ export interface Comparison {
   rows: ComparisonRow[];
 }
 
-/** 複数のシナリオを実行して、指定した要素の結果を並べる */
+/**
+ * 複数のシナリオを実行して、指定した要素の結果を並べる。
+ * 実行できないシナリオがあれば例外にする。keepErrors を付けると、2 つ目からのシナリオの失敗は
+ * 例外にせず、その行の error に理由を入れる（先頭は比べる基準なので、いつも例外にする）。
+ */
 export function compareScenarios(
   model: ModelJSON,
   scenarios: ScenarioInput[],
-  options: { targets?: string[]; samples?: number; simulation?: SimulationSettings } = {},
+  options: { targets?: string[]; samples?: number; simulation?: SimulationSettings; keepErrors?: boolean } = {},
 ): Comparison {
   if (!scenarios.length) throw new ModelError("比較するシナリオがありません。", []);
-  if (scenarios.length > 200) throw new ModelError("一度に比較できるのは 200 通りまでです。", []);
+  // 上限は、先頭（比べる基準。ふつうは「元のモデル」）を除いて数える
+  if (scenarios.length - 1 > 200) throw new ModelError("一度に比較できるのは、先頭の基準のほかに 200 通りまでです。", []);
   const targets = resolveTargets(model, options.targets);
   let timeUnits = "";
-  const rows = scenarios.map((sc) => {
+  const rows = scenarios.map((sc, i): ComparisonRow => {
     let data: RunData;
     try {
       data = runModel(model, { overrides: sc.overrides, simulation: options.simulation });
     } catch (e) {
       const err = toModelError(e);
+      if (options.keepErrors && i > 0) {
+        const row: ComparisonRow = { scenario: sc.name, overrides: sc.overrides, error: err.message };
+        if (err.issues.length) row.issues = err.issues;
+        return row;
+      }
       throw new ModelError(`シナリオ "${sc.name}" の実行でエラーが出ました。${err.message}`, err.issues);
     }
     timeUnits = data.timeUnits;
     return { scenario: sc.name, overrides: sc.overrides, results: summarizeRun(data, targets, options.samples ?? 0).results };
   });
   return { targets, time_units: timeUnits, rows };
-}
-
-/** 値の並びを作る：values をそのまま使うか、from〜to を steps 等分する */
-export function sweepValues(spec: { values?: number[]; from?: number; to?: number; steps?: number }): number[] {
-  if (spec.values?.length) return spec.values;
-  if (spec.from === undefined || spec.to === undefined) throw new ModelError("values か、from と to を指定してください。", []);
-  const steps = spec.steps ?? 5;
-  if (!(steps >= 2 && steps <= 200)) throw new ModelError("steps は 2〜200 にしてください。", []);
-  return [...Array(steps).keys()].map((i) => round(spec.from! + ((spec.to! - spec.from!) * i) / (steps - 1)) as number);
-}
-
-/** 1 つのパラメータを振って比較する */
-export function sweepParameter(
-  model: ModelJSON,
-  parameter: string,
-  values: Equation[],
-  options: { targets?: string[]; samples?: number; simulation?: SimulationSettings; baseOverrides?: Record<string, Equation> } = {},
-): Comparison {
-  const el = findElement(model, parameter);
-  if (!el) throw new ModelError(`パラメータ "${parameter}" が見つかりません。`, [notFound(parameter, valueNames(model), "振れる要素（STOCK、VARIABLE、FLOW）")]);
-  const scenarios = values.map((v) => ({ name: `${el.name} = ${v}`, overrides: { ...(options.baseOverrides ?? {}), [el.name!]: v } }));
-  return compareScenarios(model, scenarios, options);
 }
 
 /** モデルに保存されているシナリオ（ModelJSON の scenarios）を比較用の形にする */
