@@ -6,6 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, SERVER_NAME } from "../src/mcp/server.js";
 import { type ModelJSON } from "../src/core/index.js";
 import { FIXTURES_DIR, SAMPLES_DIR, tempDir, UNSUPPORTED_SAMPLE } from "./helpers.js";
+import { listLoops } from "../web/src/loopList.js";
 
 let client: Client;
 let dir: string;
@@ -417,6 +418,32 @@ describe("MCP server", () => {
     expect(view.loop).toMatchObject({ name: "採用で人数をそろえる", kind: "B", elements: ["新人", "全員の人数", "採用"] });
     expect(await callError("view_diagram", { model: "brooks", image: false, loop: { elements: ["新人", "採用"] } })).toMatch(/ループになっていません/);
     expect(await callError("find_loops", { model: "brooks", element: "新入" })).toMatch(/"新入.*見つかりません。もしかして.*新人/);
+  });
+
+  test("ビューアの「ループ」の一覧は、find_loops と同じループを同じ順・同じ名前で出す（極性を変えたあとも）", async () => {
+    await call("import_model", { path: path.join(FIXTURES_DIR, "brooks_law.json"), model: "brooks" });
+    const same = async () => {
+      const ai = await call("find_loops", { model: "brooks" });
+      const m = await call<ModelJSON>("get_model", { model: "brooks", format: "full" });
+      const viewer = listLoops(m);
+      expect(viewer.loops.map((l) => ({ name: l.name, kind: l.kind, elements: l.elements, delay: l.delay }))).toEqual(
+        ai.loops.map((l: { name: string; kind: string; elements: string[]; delays?: string[] }) => ({ name: l.name, kind: l.kind, elements: l.elements, delay: !!l.delays })),
+      );
+      expect(ai.truncated).toBeUndefined();
+      expect(viewer.truncated).toBe(false);
+      return viewer;
+    };
+    expect((await same()).loops.every((l) => l.kind === "unknown")).toBe(true);
+    await call("upsert_elements", {
+      model: "brooks",
+      elements: [
+        { type: "LINK", from: "新人", to: "全員の人数", behavior: { polarity: "POSITIVE" } },
+        { type: "LINK", from: "全員の人数", to: "採用", behavior: { polarity: "NEGATIVE" }, display: { delay: true } },
+      ],
+    });
+    const after = await same();
+    // 図で目立たせるもの（view_diagram・export_diagram の loop に find_loops の name を渡したときと同じ）
+    expect(after.loops.find((l) => l.kind === "B")).toMatchObject({ delay: true, view: { name: "B1", kind: "B", elements: ["新人", "全員の人数", "採用"] } });
   });
 
   test("export_diagram は図だけを SVG と PNG で exports/<モデル名>/ に書き出す（ブラウザと画面のビルドがあるとき）", async () => {
