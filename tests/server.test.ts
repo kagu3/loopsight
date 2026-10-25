@@ -49,7 +49,7 @@ const SIR = [
 ];
 
 describe("MCP server", () => {
-  test("クライアントから接続でき、21 個のツールが見える", async () => {
+  test("クライアントから接続でき、22 個のツールが見える", async () => {
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     expect(client.getInstructions()).toMatch(/ModelJSON/);
     // スライドの機能は削除したので、説明文にも出さない
@@ -71,6 +71,7 @@ describe("MCP server", () => {
         "remove_folder",
         "remove_model",
         "run_simulation",
+        "set_annotations",
         "set_groups",
         "set_scenarios",
         "set_simulation",
@@ -424,6 +425,56 @@ describe("MCP server", () => {
     expect(run.error).toBeUndefined();
 
     expect(await callError("upsert_elements", { model: "bullwhip", elements: [{ name: "小売の在庫", display: { delay: true } }] })).toMatch(/LINK と FLOW だけ/);
+  });
+});
+
+describe("図の注釈", () => {
+  test("set_annotations で足す・直す・消す。要素ではなく、検証と実行はそのまま通る。重なりは diagram_issues で知らせる", async () => {
+    await call("create_model", { model: "sir", simulation: { time_length: 20, time_units: "DAYS" } });
+    await call("upsert_elements", { model: "sir", elements: SIR });
+    await call("layout_model", { model: "sir" });
+    const stock = (await call("view_diagram", { model: "sir", image: false })).positions.find((p: { name: string }) => p.name === "Infected");
+
+    const added = await call("set_annotations", {
+      model: "sir",
+      annotations: [{ text: "感染した人は、やがて回復する" }, { id: "重なり", text: "Infected の上", coordinates: stock.coordinates }],
+    });
+    expect(added.changes.added).toEqual(["注釈1", "重なり"]);
+    expect(added.annotations.map((a: { name: string }) => a.name)).toEqual(["注釈1", "重なり"]);
+    expect(added.diagram_issues.some((t: string) => t.includes("Infected") && t.includes("注釈 重なり"))).toBe(true);
+    expect(added.diagram_issues.some((t: string) => t.includes("注釈 注釈1"))).toBe(false);
+
+    // 要素の一覧には出ず、要約には別に出る。検証と実行は通る
+    const summary = await call("get_model", { model: "sir" });
+    expect(summary.counts).not.toHaveProperty("NOTE");
+    expect(summary.annotations).toEqual([
+      { id: "注釈1", text: "感染した人は、やがて回復する" },
+      { id: "重なり", text: "Infected の上" },
+    ]);
+    expect((await call("validate_model", { model: "sir" })).ok).toBe(true);
+    expect((await call("run_simulation", { model: "sir" })).time_units).toBeDefined();
+
+    // view_diagram の位置と重なりにも出る
+    const view = await call("view_diagram", { model: "sir", image: false });
+    expect(view.positions).toContainEqual(expect.objectContaining({ name: "重なり", type: "NOTE", coordinates: stock.coordinates }));
+    expect(view.overlaps.some((t: string) => t.includes("注釈 重なり"))).toBe(true);
+
+    // layout_model は注釈を動かさない
+    await call("layout_model", { model: "sir", reset: true });
+    const again = await call("get_model", { model: "sir", format: "full" });
+    expect(again.annotations.find((a: { id: string }) => a.id === "重なり").coordinates).toEqual(stock.coordinates);
+
+    const moved = await call("set_annotations", { model: "sir", annotations: [{ id: "重なり", coordinates: [3000, 3000] }] });
+    expect(moved.changes.updated).toEqual(["重なり"]);
+    // 離れたところへ動かした注釈は、もう重ならない（並べ直した要素と注釈1 の線の重なりは、ここでは見ない）
+    expect((moved.diagram_issues ?? []).filter((t: string) => t.includes("注釈 重なり"))).toEqual([]);
+
+    const removed = await call("set_annotations", { model: "sir", remove: ["注釈1", "重なり"] });
+    expect(removed.changes.removed).toEqual(["注釈1", "重なり"]);
+    expect((await call("get_model", { model: "sir", format: "full" })).annotations).toBeUndefined();
+
+    expect(await callError("set_annotations", { model: "sir" })).toMatch(/annotations か remove/);
+    expect(await callError("set_annotations", { model: "sir", annotations: [{ id: "ない" }] })).toMatch(/text が必要/);
   });
 });
 

@@ -92,6 +92,21 @@ export interface ElementGroup {
   elements: string[];
 }
 
+/**
+ * 図の注釈（どこにもつながらない、文字だけのもの）。シミュレーションの要素ではないので elements に入れず、
+ * scenarios と同じく、ループサイト独自の項目としてモデルの annotations に保存する（Insight Maker に読み込ませると消える）
+ */
+export interface Annotation {
+  /** 注釈を見分ける名前（MCP の set_annotations で直す・消すときに使う） */
+  id: string;
+  /** 文字。改行で行を分けられる。幅（width）で折り返す */
+  text: string;
+  /** 左上の座標 */
+  coordinates: Point;
+  /** 折り返す幅（なければ ANNOTATION_WIDTH） */
+  width?: number;
+}
+
 export interface ModelJSON {
   engine?: "SIMULATION_PACKAGE";
   name?: string;
@@ -102,6 +117,7 @@ export interface ModelJSON {
   visualizations?: Visualization[];
   scenarios?: Scenario[];
   groups?: ElementGroup[];
+  annotations?: Annotation[];
   engine_settings?: { units?: { name: string; base?: string; factor?: number }[]; globals?: string };
   [key: string]: unknown;
 }
@@ -119,12 +135,12 @@ export function isConnector(type: ElementType): boolean {
 export const LOOPSIGHT_DISPLAY_KEYS: readonly string[] = ["emphasis", "delay"];
 
 /**
- * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の図のグループ（groups）を取り除いたコピー（なければそのまま返す）
+ * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の図のグループ（groups）・図の注釈（annotations）を取り除いたコピー（なければそのまま返す）
  */
 export function engineModel(model: ModelJSON): ModelJSON {
   const has = (el: ModelElement) => !!el.display && LOOPSIGHT_DISPLAY_KEYS.some((k) => k in el.display!);
-  const { groups: _groups, ...rest } = model;
-  if (!model.elements.some(has)) return "groups" in model ? rest : model;
+  const { groups: _groups, annotations: _annotations, ...rest } = model;
+  if (!model.elements.some(has)) return "groups" in model || "annotations" in model ? rest : model;
   return {
     ...rest,
     elements: model.elements.map((el) => {
@@ -139,6 +155,20 @@ export function engineModel(model: ModelJSON): ModelJSON {
 /** 図で強調する要素か（display.emphasis） */
 export function isEmphasized(el: ModelElement): boolean {
   return el.display?.emphasis === true;
+}
+
+/** モデルの注釈のうち、図に描けるもの（id、文字、座標がそろっているもの）。手で書き換えて壊れたものは飛ばす */
+export function annotationsOf(model: ModelJSON): Annotation[] {
+  if (!Array.isArray(model.annotations)) return [];
+  return model.annotations.filter(
+    (a) =>
+      !!a &&
+      typeof a.id === "string" &&
+      typeof a.text === "string" &&
+      Array.isArray(a.coordinates) &&
+      a.coordinates.length === 2 &&
+      a.coordinates.every((v) => typeof v === "number" && Number.isFinite(v)),
+  );
 }
 
 /** 名前の比較キー。Insight Maker の名前は大文字小文字を区別しない。 */

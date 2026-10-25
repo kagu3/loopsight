@@ -191,3 +191,66 @@ function plainBoxLayout(type: string, name: string, size?: Point): { size: Point
   const w = ellipse ? text / ellipseRatio(lines.length * LABEL_LINE, h) : text;
   return { size: [Math.max(minW, Math.ceil(w)), h], lines, fits: true };
 }
+
+// 注釈の文字（画面の .node-note と同じ 13px。行の高さは 1.4 倍）
+const NOTE_FONT = 13;
+const NOTE_LINE = NOTE_FONT * 1.4;
+/** 注釈の文字のまわりのすき間（内側の余白と枠の線） */
+const NOTE_PAD = 7;
+/** 注釈を折り返す幅の既定と、決められる範囲 */
+export const ANNOTATION_WIDTH = 200;
+export const ANNOTATION_MIN_WIDTH = 60;
+export const ANNOTATION_MAX_WIDTH = 800;
+/** 行の頭に来ないようにする文字（前の行の終わりに付ける） */
+const NO_LINE_START = "、。，．,.)）」』】ー・！？!?";
+
+/**
+ * 注釈の 1 文字の幅のおおよそ。textWidth より、英大文字（とくに W や M）を広めに見積もる（枠からはみ出さないように）。
+ * 箱の名前の幅（textWidth）は図の配置に使っているので、変えない
+ */
+function noteCharWidth(ch: string, fontSize: number): number {
+  if ("WMmw@".includes(ch)) return fontSize * 0.9;
+  if (ch >= "A" && ch <= "Z") return fontSize * 0.72;
+  return textWidth(ch, fontSize);
+}
+
+/**
+ * 1 行の文字を、maxWidth に収まるように何行かに分ける。
+ * 英数字の言葉は途中で分けない（空白で分ける）。句読点や閉じかっこは行の頭に来ないよう、前の行に付ける
+ */
+function wrapLine(line: string, maxWidth: number, fontSize: number): string[] {
+  const chars = [...line];
+  const out: string[] = [];
+  let start = 0;
+  let width = 0;
+  for (let i = 0; i < chars.length; i++) {
+    const w = noteCharWidth(chars[i]!, fontSize);
+    if (width + w <= maxWidth || i === start || NO_LINE_START.includes(chars[i]!)) {
+      width += w;
+      continue;
+    }
+    // 英数字の言葉の途中なら、その言葉の前の空白で分ける（行の中に空白がなければ、ここで分ける）
+    let cut = i;
+    if (/[\x21-\x7e]/.test(chars[i]!) && /[\x21-\x7e]/.test(chars[i - 1]!)) {
+      const space = chars.lastIndexOf(" ", i - 1);
+      if (space > start) cut = space + 1;
+    }
+    out.push(chars.slice(start, cut).join("").trimEnd());
+    start = cut;
+    while (start < chars.length && chars[start] === " ") start++;
+    i = start - 1;
+    width = 0;
+  }
+  out.push(chars.slice(start).join("").trimEnd());
+  return out;
+}
+
+/**
+ * 注釈の大きさと行。幅は width（なければ ANNOTATION_WIDTH）に決め、文字はその幅で折り返す。改行はそのまま行を分ける。
+ * 図への変換（diagram.ts）と図の確認で同じものを使い、画面は行をそのまま描く（重なりの確認と見た目を合わせるため）
+ */
+export function annotationLayout(text: string, width?: number): { size: Point; lines: string[] } {
+  const w = Math.min(ANNOTATION_MAX_WIDTH, Math.max(ANNOTATION_MIN_WIDTH, Math.round(width ?? ANNOTATION_WIDTH)));
+  const lines = text.split(/\r?\n/).flatMap((line) => wrapLine(line, w - 2 * NOTE_PAD, NOTE_FONT));
+  return { size: [w, Math.ceil(lines.length * NOTE_LINE + 2 * NOTE_PAD)], lines };
+}

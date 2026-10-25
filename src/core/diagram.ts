@@ -5,23 +5,24 @@
 // - フローは真ん中に「弁」のノードを置き、出元 → 弁 → 行き先の 2 本の線にする（リンクが弁につながれるように）
 // - モデルの外の端は雲のノード
 // - 遅れの印（display.delay）のあるリンクは、その線に delay を付ける。フローは行き先の側の線（弁 → 行き先）に付ける
+// - 注釈（モデルの annotations）は、どこにもつながらない文字だけのノード
 // - 座標はモデルにあればそれを使う。ない要素があれば、layout_model と同じ簡易レイアウト（layoutModel）で並べる
 import { layoutModel } from "./layout.js";
-import { boxLayout, BOX_TYPES } from "./geometry.js";
+import { annotationLayout, boxLayout, BOX_TYPES } from "./geometry.js";
 import { graphGroups, type GraphGroup } from "./groups.js";
 export { LINK_BEND, linkControlPoint } from "./geometry.js";
 import { hasDelayMark } from "./delay.js";
-import { isEmphasized, sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
+import { annotationsOf, isEmphasized, sameName, type ModelElement, type ModelJSON } from "./modeljson.js";
 
-export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "STATE" | "VALVE" | "CLOUD";
+export type NodeKind = "STOCK" | "VARIABLE" | "CONVERTER" | "STATE" | "VALVE" | "CLOUD" | "NOTE";
 export type Shape = "rect" | "ellipse";
 
 export interface GraphNode {
   id: string;
   kind: NodeKind;
-  /** 表示名。雲は空 */
+  /** 表示名。雲は空。注釈は文字 */
   label: string;
-  /** 箱に描く名前の行（長い名前は 2 行に分ける）。箱のほかはなし */
+  /** 箱に描く名前の行（長い名前は 2 行に分ける）と、注釈の文字の行（幅で折り返す）。ほかはなし */
   lines?: string[];
   /** 名前が、モデルで決まった大きさ（display.size）の箱に入りきらないか。画面は箱の中で折り返して描く */
   wrapLabel?: boolean;
@@ -34,6 +35,8 @@ export interface GraphNode {
   width: number;
   height: number;
   shape: Shape;
+  /** 注釈なら、その id（位置を保存するときに使う） */
+  note?: string;
   /** 雲なら、どのフローのどちらの端か（位置を保存するときに使う） */
   cloudOf?: { flow: string; end: "from" | "to" };
   /** 弁の名前を出す側。フローが縦向きなら右、横向きなら下（線に重ならないように） */
@@ -75,6 +78,7 @@ const SIZE = {
 export const elementId = (name: string) => `el:${name.toLowerCase()}`;
 const valveId = (name: string) => `valve:${name.toLowerCase()}`;
 const cloudId = (name: string, end: "from" | "to") => `cloud:${name.toLowerCase()}:${end}`;
+export const noteId = (id: string) => `note:${id.toLowerCase()}`;
 
 function hasCoordinates(el: ModelElement): boolean {
   const c = el.display?.coordinates;
@@ -194,6 +198,12 @@ function build(model: ModelJSON): Omit<Graph, "missingCoordinates"> {
     const [bx, by] = center(b);
     node.labelSide = Math.abs(by - ay) > Math.abs(bx - ax) ? "right" : "below";
   }
+
+  // 注釈。どこにもつながらないので、線はない
+  for (const a of annotationsOf(model)) {
+    const { size: [w, h], lines } = annotationLayout(a.text, a.width);
+    nodes.push({ id: noteId(a.id), kind: "NOTE", label: a.text, lines, note: a.id, x: a.coordinates[0], y: a.coordinates[1], width: w, height: h, shape: "rect" });
+  }
   const groups = graphGroups(model);
   return groups.length ? { nodes, edges, groups } : { nodes, edges };
 }
@@ -294,6 +304,15 @@ export function positionPatches(
     }
   }
   return out;
+}
+
+/**
+ * 表示している注釈の位置を、モデルに保存する形（set_annotations の注釈の変更）にする。ids を渡すとそのノードだけ、渡さなければすべて
+ */
+export function annotationPatches(nodes: GraphNode[], ids?: Set<string>): { id: string; coordinates: [number, number] }[] {
+  return nodes
+    .filter((n) => n.kind === "NOTE" && n.note !== undefined && (!ids || ids.has(n.id)))
+    .map((n) => ({ id: n.note!, coordinates: [Math.round(n.x), Math.round(n.y)] }));
 }
 
 /**

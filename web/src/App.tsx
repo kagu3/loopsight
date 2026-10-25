@@ -1,21 +1,22 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
+import type { AnnotationPatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch } from "../../src/viewer/api.js";
 import { FetchError, fetchList, fetchModel, postEdit, postGroups, postRemove, postScenarios, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details, DelayToggle } from "./Details.js";
-import { Diagram, type LinkEnds, type NodeValues, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
+import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
 import { nodeValues, peakIndex, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
 import { formulaView } from "./formulaValues.js";
 import { InfoTip } from "./InfoTip.js";
-import { addElementPatches, linkProblem, linkRemoveProblem, reconnectPatches, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
+import { addElementPatches, addNotePatches, linkProblem, linkRemoveProblem, reconnectChanges, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
-import { findLink, sameName } from "../../src/core/modeljson.js";
+import { annotationsOf, findLink, sameName } from "../../src/core/modeljson.js";
 import { hasDelayMark } from "../../src/core/delay.js";
 import { countProblems, describeProblemCount, listProblems, stripCount } from "./problemList.js";
 import { Problems } from "./Problems.js";
 import { ModelTree } from "./ModelTree.js";
+import { NoteDetails } from "./NoteDetails.js";
 import { folderKey, foldersOf, modelHash, modelTree } from "./modelList.js";
 import { GroupPanel } from "./GroupPanel.js";
 import { ScenarioEditor } from "./ScenarioEditor.js";
@@ -25,7 +26,7 @@ import { draggedResultsRatio, parseExpandedPane, parseResultsRatio, RESULTS_RATI
 // 画面全体：左にモデル一覧と選んだ要素の詳しい情報、右に図とグラフ。
 // サーバーからの変更の知らせ（Server-Sent Events）で、開いているモデルを取り直す。
 // 画面からの編集（式などの変更、位置の変更、シナリオの変更、元に戻す）はサーバーに送り、同じファイルに書き戻す。
-// 図の形を変える操作（配置のドラッグ、要素を足す・消す、線を引く・消す）は、図の左上の「図を編集」をオンにしたときだけできる。
+// 図の形を変える操作（配置のドラッグ、要素や注釈を足す・消す、線を引く・消す）は、図の左上の「図を編集」をオンにしたときだけできる。
 // 値（詳細欄の「編集」）やシナリオは、「図を編集」に関係なく、いつでも直せる（入力欄に打ち込む操作で、元に戻すでも戻せるため）。
 
 const nameFromHash = () => decodeURIComponent(location.hash.replace(/^#/, ""));
@@ -208,6 +209,8 @@ export function App() {
   const [selected, setSelected] = useState<string>();
   // 図で線を押して選んだリンク。要素を選ぶと外す
   const [selectedLink, setSelectedLink] = useState<LinkEnds>();
+  // 図で押して選んだ注釈の id。要素やリンクを選ぶと外す
+  const [selectedNote, setSelectedNote] = useState<string>();
   // 左の欄で説明を直しているシナリオ（名前・値・足す・消すは、シナリオの中身の表で直す）。
   // id は欄を開いた回ごとの番号。表で名前を変えても同じ欄のまま（書きかけの説明を残す）にするため、欄の key に使う
   const [scenario, setScenario] = useState<{ name: string; id: number }>();
@@ -481,6 +484,7 @@ export function App() {
     setData(undefined);
     setSelected(undefined);
     setSelectedLink(undefined);
+    setSelectedNote(undefined);
     setScenario(undefined);
     setHoveredScenario(undefined);
     setValuesScenario(undefined);
@@ -540,12 +544,13 @@ export function App() {
     [loadModel],
   );
 
+  /** 要素を直す。notes（注釈の変更）があれば、同じ 1 回の保存で変える */
   const edit = useCallback(
-    (elements: ElementPatch[]): Promise<string | undefined> =>
+    (elements: ElementPatch[], notes?: AnnotationPatch[]): Promise<string | undefined> =>
       enqueueWrite<string | undefined>(async () => {
         const d = dataRef.current;
         if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
-        return applyWrite(await postEdit(d.name, d.version, elements));
+        return applyWrite(await postEdit(d.name, d.version, elements, notes));
       }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
   );
@@ -649,12 +654,21 @@ export function App() {
     setScenario(undefined);
     setSelected(name);
     setSelectedLink(undefined);
+    setSelectedNote(undefined);
   }, []);
   /** 図で線を押してリンクを選ぶ。要素を選んだときと同じく、シナリオの編集欄を閉じる */
   const selectLink = useCallback((link: LinkEnds) => {
     setScenario(undefined);
     setSelected(undefined);
     setSelectedLink(link);
+    setSelectedNote(undefined);
+  }, []);
+  /** 図で注釈を押して選ぶ。要素を選んだときと同じく、シナリオの編集欄を閉じる */
+  const selectNote = useCallback((id: string) => {
+    setScenario(undefined);
+    setSelected(undefined);
+    setSelectedLink(undefined);
+    setSelectedNote(id);
   }, []);
 
   const undo = useCallback(
@@ -700,8 +714,8 @@ export function App() {
         const d = dataRef.current;
         if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
         // 仮の名前は、順番が来たときの最新の内容で決める（前の書き込みで足した名前と重ねない）
-        const { name, patches } = addElementPatches(d.model, toGraph(d.model), type, at);
-        const result = await postEdit(d.name, d.version, patches);
+        const { name, patches, notes } = addElementPatches(d.model, toGraph(d.model), type, at);
+        const result = await postEdit(d.name, d.version, patches, notes);
         const err = applyWrite(result);
         if (!err && result.ok) {
           added = name;
@@ -776,10 +790,10 @@ export function App() {
         const d = dataRef.current;
         if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
         // 順番が来たときの最新の内容で確かめる
-        const patches = reconnectPatches(d.model, toGraph(d.model), flow, end, to);
-        if (typeof patches === "string") return patches;
-        if (!patches.length) return undefined;
-        const result = await postEdit(d.name, d.version, patches);
+        const changes = reconnectChanges(d.model, toGraph(d.model), flow, end, to);
+        if (typeof changes === "string") return changes;
+        if (!changes.elements.length && !changes.notes.length) return undefined;
+        const result = await postEdit(d.name, d.version, changes.elements, changes.notes);
         const err = applyWrite(result);
         // 雲が増えたり減ったりしても、図の見る場所は動かさない
         if (!err && result.ok) setKeepView(result.data.model.version);
@@ -811,10 +825,55 @@ export function App() {
     [applyWrite, enqueueWrite],
   );
 
-  /** 図で動かした位置を保存する */
+  /**
+   * 編集モードで、図の at（図の座標）に注釈を足し、足した注釈を選ぶ。文字は仮の文字で、詳細欄の「編集」で直す
+   */
+  const addNote = useCallback(
+    async (at: { x: number; y: number }) => {
+      const model = currentRef.current;
+      let added: string | undefined;
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // id は、順番が来たときの最新の内容で決める（前の書き込みで足した id と重ねない）
+        const { id, elements, notes } = addNotePatches(d.model, toGraph(d.model), at);
+        const result = await postEdit(d.name, d.version, elements, notes);
+        const err = applyWrite(result);
+        if (!err && result.ok) {
+          added = id;
+          setKeepView(result.data.model.version);
+        }
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+      else if (added && currentRef.current === model) selectNote(added);
+    },
+    [applyWrite, enqueueWrite, selectNote],
+  );
+
+  /** 編集モードで、注釈を消す */
+  const removeNote = useCallback(
+    async (id: string) => {
+      const err = await enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        // 続けて消そうとしたときは、先に消えているので何もしない
+        if (!annotationsOf(d.model).some((a) => sameName(a.id, id))) return undefined;
+        const result = await postRemove(d.name, d.version, [], [id]);
+        const err = applyWrite(result);
+        if (!err && result.ok) setKeepView(result.data.model.version);
+        return err;
+      }, SKIPPED_MESSAGE);
+      if (err) setNotice(err);
+      else setSelectedNote((n) => (n !== undefined && sameName(n, id) ? undefined : n));
+    },
+    [applyWrite, enqueueWrite],
+  );
+
+  /** 図で動かした位置（要素と注釈）を保存する */
   const move = useCallback(
-    async (patches: ElementPatch[]) => {
-      const err = await edit(patches);
+    async (patches: ElementPatch[], notes?: AnnotationPatch[]) => {
+      const err = await edit(patches, notes);
       if (err) setNotice(err);
       return err;
     },
@@ -887,6 +946,8 @@ export function App() {
   const selectedEl = selected ? data?.model.elements.find((e) => e.name && e.name.toLowerCase() === selected.toLowerCase()) : undefined;
   // 選んでいるリンク（AI などが消していれば、ない）
   const selectedLinkEl = selectedLink && data ? findLink(data.model, selectedLink.from, selectedLink.to) : undefined;
+  // 選んでいる注釈（AI などが消していれば、ない）
+  const selectedNoteEl = selectedNote !== undefined && data ? annotationsOf(data.model).find((a) => sameName(a.id, selectedNote)) : undefined;
   // 編集モードで消せる要素（足せる種類と同じく、状態と遷移は消さない）か、リンク。
   // シナリオの編集欄を開いている間は、左に出ていない要素を消さないよう、消せないことにする
   const removableName =
@@ -894,14 +955,23 @@ export function App() {
   // 先の要素の式が使っているなど、消せないリンクの理由（左の欄に出し、「削除」は押せなくする）
   const linkLocked = selectedLinkEl && data ? linkRemoveProblem(data.model, selectedLinkEl.from!, selectedLinkEl.to!) : undefined;
   const [linkFrom, linkTo] = editMode && !scenario && selectedLinkEl && !linkLocked ? [selectedLinkEl.from!, selectedLinkEl.to!] : [];
-  const removable = useMemo(
-    () => (removableName ? { label: removableName, link: false } : linkFrom && linkTo ? { label: `${linkFrom} → ${linkTo}`, link: true } : undefined),
-    [removableName, linkFrom, linkTo],
+  const removableNote = editMode && !scenario ? selectedNoteEl?.id : undefined;
+  const removable = useMemo<Removable | undefined>(
+    () =>
+      removableName
+        ? { label: removableName, link: false }
+        : linkFrom && linkTo
+          ? { label: `${linkFrom} → ${linkTo}`, link: true }
+          : removableNote !== undefined
+            ? { label: removableNote, link: false, note: true }
+            : undefined,
+    [removableName, linkFrom, linkTo, removableNote],
   );
   const removeSelected = useCallback(() => {
     if (removableName) void removeElement(removableName);
     else if (linkFrom && linkTo) void removeLink({ from: linkFrom, to: linkTo });
-  }, [removableName, linkFrom, linkTo, removeElement, removeLink]);
+    else if (removableNote !== undefined) void removeNote(removableNote);
+  }, [removableName, linkFrom, linkTo, removableNote, removeElement, removeLink, removeNote]);
 
   // 編集モードで要素かリンクを選んでいるときは、Delete キーで消す。
   // 文字を消すつもりで押されやすい Backspace は使わない。押しっぱなしの繰り返しは無視する。
@@ -960,7 +1030,7 @@ export function App() {
         </header>
 
         <section className="panel">
-          <h2>{scenario ? "シナリオ" : selectedLink ? "選んだ線" : "選んだ要素"}</h2>
+          <h2>{scenario ? "シナリオ" : selectedLink ? "選んだ線" : selectedNote !== undefined ? "選んだ注釈" : "選んだ要素"}</h2>
           {scenario && data ? (
             <ScenarioEditor
               key={scenario.id}
@@ -986,6 +1056,10 @@ export function App() {
             </p>
           ) : selectedLink && data ? (
             <p className="muted">選んでいたリンクが見つかりません。消された可能性があります。</p>
+          ) : selectedNoteEl ? (
+            <NoteDetails note={selectedNoteEl} editMode={editMode} onSave={(patch) => edit([], [patch])} />
+          ) : selectedNote !== undefined && data ? (
+            <p className="muted">選んでいた注釈「{selectedNote}」が見つかりません。消された可能性があります。</p>
           ) : selected && data ? (
             <p className="muted">選んでいた「{selected}」が見つかりません。名前が変わったか、消された可能性があります。図で選び直してください。</p>
           ) : (
@@ -1095,6 +1169,9 @@ export function App() {
                   keepView={data.version === keepView}
                   holdView={resizing || switchingPane}
                   onAdd={addElement}
+                  onAddNote={addNote}
+                  selectedNote={selectedNote}
+                  onSelectNote={selectNote}
                   selectedLink={selectedLink}
                   onSelectLink={selectLink}
                   onLink={addLink}

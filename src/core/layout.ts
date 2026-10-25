@@ -1,11 +1,11 @@
 import type { ModelElement, ModelJSON, Point } from "./modeljson.js";
-import { isEmphasized, nameKey, sameName } from "./modeljson.js";
-import { boxLayout, BOX_TYPES, flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
+import { annotationsOf, isEmphasized, nameKey, sameName } from "./modeljson.js";
+import { annotationLayout, boxLayout, BOX_TYPES, flowLabelRect, linkSegments, segmentHitsRect, type Rect } from "./geometry.js";
 import { GROUP_LABEL_HEIGHT, GROUP_PADDING, graphGroups } from "./groups.js";
 
 // 簡易レイアウト：図にしたとき要素が重ならない程度に座標を付ける（layout_model と、ビューアの仮の並び）。
 // ストックを横一列に並べ（フローの流れ順）、変数はつながる要素の近くに、
-// リンクの線が雲やほかの要素を横切らないように置く。
+// リンクの線が雲やほかの要素を横切らないように置く。注釈は動かさない（箱は注釈を避けて置く。雲やフローの線・名前は避けない）。
 // グループ（groups.ts）があれば、同じグループの要素が近くに集まるように並べる（ストックはグループごとに続けて並べ、
 // 変数は自分のグループの近くに、ほかのグループの囲みに入らないように置く）。
 
@@ -58,8 +58,13 @@ export function layoutModel(model: ModelJSON): string[] {
       rects.set(nameKey(el.name!), r);
     }
   }
+  // 注釈は動かさず、箱を注釈に重ならないところに置く（雲やフローの線・名前は避けない）。並べる段（ストックの行など）は要素だけから決めるので、occupied には入れない
+  const notes: Rect[] = annotationsOf(model).map((a) => {
+    const [w, h] = annotationLayout(a.text, a.width).size;
+    return { x: a.coordinates[0], y: a.coordinates[1], w, h };
+  });
 
-  const isFree = (r: Rect) => !occupied.some((o) => overlaps(o, r));
+  const isFree = (r: Rect) => !occupied.some((o) => overlaps(o, r)) && !notes.some((o) => overlaps(o, r));
   const place = (el: ModelElement, r: Rect) => {
     el.display = { ...(el.display ?? {}), coordinates: [Math.round(r.x), Math.round(r.y)] };
     occupied.push(r);
@@ -214,7 +219,7 @@ export function layoutModel(model: ModelJSON): string[] {
       const own = groupKey(el);
       const ownArea = own ? groupArea(own) : undefined;
       const avoid = groupKeys.filter((k) => k !== own).flatMap((k) => groupArea(k) ?? []);
-      const r = findSpot(targets, w, h, { occupied, segments, stockTop, avoid, pull: ownArea && center(ownArea) });
+      const r = findSpot(targets, w, h, { occupied: [...occupied, ...notes], segments, stockTop, avoid, pull: ownArea && center(ownArea) });
       place(el, r);
       // 引いたリンクの線も、あとで置く変数の邪魔にならないように覚えておく
       for (const t of targets) segments.push(...linkSegments(center(r), t.point));

@@ -1,7 +1,7 @@
 // 図の見やすさを数字で確かめる。AI が配置を直すときの手がかり（MCP の view_diagram が返す）。
 //
-// - 箱どうし（雲も含む）の重なりと、フローの名前と箱の重なり
-// - 線（フロー、リンク）が、つながっていない箱や雲の上を通っているところ
+// - 箱どうし（雲と注釈も含む）の重なりと、フローの名前と箱の重なり
+// - 線（フロー、リンク）が、つながっていない箱や雲、注釈の上を通っているところ
 // - 線どうしの交差
 // - リンクがフローの名前の上を通るところ
 // - 1 か所に集まる線：1 つの要素にほぼ同じ向きでつながる線（重なって見分けにくい）と、
@@ -14,10 +14,10 @@ import { areasOverlap, checkGroups, groupAreas, type GroupColor } from "./groups
 import { nameKey, type ModelJSON, type Point } from "./modeljson.js";
 
 export interface DiagramPosition {
-  /** 要素の名前。雲は「<フロー名> の出元 / 行き先」 */
+  /** 要素の名前。雲は「<フロー名> の出元 / 行き先」、注釈は id */
   name: string;
   type: string;
-  /** 箱は左上の座標、雲は中心の座標（ModelJSON の display と同じ） */
+  /** 箱と注釈は左上の座標、雲は中心の座標（ModelJSON の display、注釈の coordinates と同じ） */
   coordinates: [number, number];
   size?: [number, number];
   /** 強調した要素か（大きさは強調で大きくしたもの） */
@@ -65,6 +65,10 @@ const MANY_LINKS_TO_VALVE = 5;
 function nameOf(n: GraphNode): string {
   if (n.kind === "CLOUD" && n.cloudOf) return `雲（${n.cloudOf.flow} の${n.cloudOf.end === "from" ? "出元" : "行き先"}）`;
   if (n.kind === "VALVE") return `フロー ${n.label} の弁`;
+  if (n.kind === "NOTE") {
+    const text = n.label.replace(/\s+/g, " ");
+    return `注釈 ${n.note}（${[...text].length > 12 ? `${[...text].slice(0, 12).join("")}…` : text}）`;
+  }
   return n.label;
 }
 
@@ -211,6 +215,8 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
   for (const a of areas) {
     for (const n of graph.nodes) {
       if (grouped.has(n.id)) continue;
+      // 注釈はグループに属さないものなので、囲みの中に置いてもよい
+      if (n.kind === "NOTE") continue;
       // 雲は、フローと同じグループの囲みに入っていてよい
       if (n.kind === "CLOUD" && n.cloudOf && groupOfFlow.get(nameKey(n.cloudOf.flow)) === a.name) continue;
       if (areasOverlap(a, n)) groupIssues.push(`${nameOf(n)}（どのグループにも属さない）が グループ ${a.name} の囲みの中に入っている`);
@@ -220,7 +226,9 @@ export function checkDiagram(model: ModelJSON): DiagramCheck {
   const positions: DiagramPosition[] = boxes.map((n) =>
     n.kind === "CLOUD"
       ? { name: nameOf(n), type: "CLOUD", coordinates: center(n).map(Math.round) as [number, number] }
-      : { name: n.label, type: n.kind, coordinates: [Math.round(n.x), Math.round(n.y)], size: [n.width, n.height], ...(n.emphasis ? { emphasis: true } : {}) },
+      : n.kind === "NOTE"
+        ? { name: n.note!, type: "NOTE", coordinates: [Math.round(n.x), Math.round(n.y)], size: [n.width, n.height] }
+        : { name: n.label, type: n.kind, coordinates: [Math.round(n.x), Math.round(n.y)], size: [n.width, n.height], ...(n.emphasis ? { emphasis: true } : {}) },
   );
 
   const xs = graph.nodes.map((n) => n.x);

@@ -23,8 +23,8 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ElementPatch } from "../../src/viewer/api.js";
-import { borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
+import type { AnnotationPatch, ElementPatch } from "../../src/viewer/api.js";
+import { annotationPatches, borderPoint, connectedTo, fitTargets, linkControlPoint, loopFocus, MIN_FIT_ZOOM, positionPatches, shiftIntoView, type Graph, type GraphEdge, type GraphNode } from "../../src/core/diagram.js";
 import { groupAreas, type GroupArea } from "../../src/core/groups.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
 import { delayMarkPath } from "../../src/core/delay.js";
@@ -45,6 +45,7 @@ import { BASELINE_NAME, nameKey, type ScenarioBadge } from "./scenarios.js";
 // 遅れの印（display.delay）のあるリンクとフローは、線の途中に ‖ を描く（フローは弁から行き先までの線の真ん中、リンクは曲線の真ん中。極性の文字は線の終わり近くなので重ならない）。
 // グループ（モデルの groups）があれば、属する要素をまとめて薄い色の長方形で囲み（要素や線の後ろに描く）、図の下に凡例を出す。
 // 囲みは押せない（下の背景を押したことになる）。要素を動かすと、囲みも付いてくる。
+// 注釈（どこにもつながらない文字だけのもの）も、編集モードで足す・動かす・消すことができる。文字は詳細欄の「編集」で直す。
 
 // dimmed：要素を選んでいるとき、それにつながらないもの（薄くする）。ループを見せているときは、ループにないもの
 // inLoop：ループを見せているとき、ループの線（太くする）
@@ -116,6 +117,18 @@ function ModelNode({ data }: NodeProps<ModelNodeT>) {
   ].join(" ");
   // リンクを引いている間だけ、要素全体を離す先にする（ふだんは要素を押す・動かすのを邪魔しない）
   const connecting = useConnection((c) => c.inProgress);
+  if (g.kind === "NOTE") {
+    // 注釈は文字だけ。行は core（annotationLayout）で決めてあるので、折り返さずにそのまま描く。つなぐ口は付けない
+    return (
+      <div className={cls} style={{ width: g.width, height: g.height }}>
+        {(g.lines ?? [g.label]).map((line, i) => (
+          <span key={i} className="note-line">
+            {line || "\u00a0"}
+          </span>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className={cls} style={{ width: g.width, height: g.height }} title={badge?.title ?? g.element}>
       {/* 札は要素の上に出す。マウスは通す（札の下の要素や背景を押せるように）。全文は要素のツールチップで出す */}
@@ -324,8 +337,8 @@ export interface DiagramProps {
   changed: Set<string>;
   values: Record<string, string>;
   onSelect(element: string | undefined): void;
-  /** 動かした位置を保存する。失敗したらその文を返す */
-  onMove(patches: ElementPatch[]): Promise<string | undefined>;
+  /** 動かした位置を保存する（要素と注釈。同じ 1 回の保存にする）。失敗したらその文を返す */
+  onMove(patches: ElementPatch[], notes?: AnnotationPatch[]): Promise<string | undefined>;
   /** 図だけを見せる表示（MCP の view_diagram が画像にする）。操作の道具を出さない */
   embed?: boolean;
   /**
@@ -346,6 +359,12 @@ export interface DiagramProps {
   holdView?: boolean;
   /** 編集モードで、図の at（図の座標）に要素を足す */
   onAdd?(type: NewElementType, at: Pos): void;
+  /** 編集モードで、図の at（図の座標）に注釈を足す。渡したときだけ「＋注釈」を出す */
+  onAddNote?(at: Pos): void;
+  /** 選んでいる注釈の id */
+  selectedNote?: string;
+  /** 図で注釈を押した */
+  onSelectNote?(id: string): void;
   /** 選んでいるリンク（図で線を押したとき）。選んだ要素と同じく、両端の要素とその線のほかを薄くする */
   selectedLink?: LinkEnds;
   onSelectLink?(link: LinkEnds): void;
@@ -353,8 +372,8 @@ export interface DiagramProps {
   onLink?(from: string, to: string): void;
   /** 編集モードで、フローの端をつなぎ替える。to はストックの名前か、雲を置く図の座標。つなげるかどうかは呼ぶ側で確かめる */
   onReconnect?(flow: string, end: FlowEnd, to: string | Pos): void;
-  /** 編集モードで消せる、選んでいる要素の名前かリンク（label は「A → B」）。なければ「削除」を押せない */
-  removable?: { label: string; link: boolean };
+  /** 編集モードで消せる、選んでいる要素の名前かリンク（label は「A → B」）か注釈。なければ「削除」を押せない */
+  removable?: Removable;
   onRemove?(): void;
   /** 「値を表示」がオンのときの、要素に出す値。あれば、ストックの最後の値（values）は出さない */
   liveValues?: NodeValues;
@@ -398,6 +417,12 @@ export interface ValueTools {
   caption: string;
 }
 
+/** 編集モードで消せるもの。link はリンク、note は注釈 */
+export type Removable = { label: string; link: boolean; note?: boolean };
+
+/** 置こうとしているもの。要素の種類か、線（リンク）か、注釈 */
+type Placing = NewElementType | "LINK" | "NOTE";
+
 /** リンクの両端の要素名 */
 export type LinkEnds = { from: string; to: string };
 
@@ -415,10 +440,10 @@ export function Diagram(props: DiagramProps) {
   const flow = useReactFlow();
   // 足そうとしている要素の種類（ボタンを押してから、図の置きたい場所を押すまで）。LINK は [＋線] を押してから、元と先の要素を押すまで。
   // 編集モードを終えたり、別のモデルを開いたりしたらやめる
-  const [placing, setPlacingState] = useState<NewElementType | "LINK">();
+  const [placing, setPlacingState] = useState<Placing>();
   // [＋線] で先に押した元の要素
   const [linkFrom, setLinkFrom] = useState<string>();
-  const setPlacing = useCallback((p: NewElementType | "LINK" | undefined) => {
+  const setPlacing = useCallback((p: Placing | undefined) => {
     setPlacingState(p);
     setLinkFrom(undefined);
   }, []);
@@ -613,10 +638,13 @@ export function Diagram(props: DiagramProps) {
           height: g.height,
           data: {
             g,
-            selected: !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(),
+            selected:
+              g.kind === "NOTE"
+                ? !!g.note && !!props.selectedNote && nameKey(g.note) === nameKey(props.selectedNote)
+                : !!g.element && !!selected && g.element.toLowerCase() === selected.toLowerCase(),
             changed: !!g.element && changed.has(g.element.toLowerCase()),
-            // [＋線] で元に選んだ要素は、薄くしない
-            dimmed: !!focus && !focus.nodes.has(g.id) && !isLinkFrom,
+            // [＋線] で元に選んだ要素は、薄くしない。注釈は図の説明なので、ループを見せているときも薄くしない（読めるように）
+            dimmed: !!focus && !focus.nodes.has(g.id) && !isLinkFrom && g.kind !== "NOTE",
             // 「値を表示」がオンのときは、ストックの最後の値を出さない（同じところに値が 2 つ並ばないように）
             value: g.kind === "STOCK" && g.element && !liveValues ? values[g.element] : undefined,
             live: liveValues && g.element && LIVE_KINDS.has(g.kind) ? liveOf(liveValues, g.element) : undefined,
@@ -631,7 +659,7 @@ export function Diagram(props: DiagramProps) {
           connectable: !!editable && !!g.element,
         };
       }),
-    [placed, selected, changed, values, focus, scenario, editable, placing, linkFrom, dropTarget, liveValues],
+    [placed, selected, props.selectedNote, changed, values, focus, scenario, editable, placing, linkFrom, dropTarget, liveValues],
   );
   const nodes = useMemo<DiagramNodeT[]>(() => (groupNodes.length ? [...groupNodes, ...modelNodes] : modelNodes), [groupNodes, modelNodes]);
 
@@ -653,10 +681,12 @@ export function Diagram(props: DiagramProps) {
       const shifted = shiftIntoView(placedRef.current);
       const ids = graph.missingCoordinates || shifted ? undefined : new Set(dragged.map((n) => n.id));
       const patches = positionPatches(shifted ?? placedRef.current, ids);
-      if (!patches.length) return;
+      // 注釈は、動かしたものだけ（全体をずらしたときはすべて）
+      const notes = annotationPatches(shifted ?? placedRef.current, shifted ? undefined : new Set(dragged.map((n) => n.id)));
+      if (!patches.length && !notes.length) return;
       pendingSaves.current++;
       try {
-        await onMove(patches);
+        await onMove(patches, notes);
       } finally {
         pendingSaves.current--;
         // 保存がすべて終わったら、図の位置（保存した位置か、失敗なら元の位置）に任せる
@@ -707,11 +737,18 @@ export function Diagram(props: DiagramProps) {
     },
     [editable, elementOf, onLink],
   );
-  /** 要素を押した。[＋線] の間は、元の要素 → 先の要素の順に選ぶ（雲は選べない）。それ以外は要素を選ぶ */
+  /** 置く場所を選んでいる間に、図の at を押した。要素か注釈を足す */
+  const placeAt = (p: NewElementType | "NOTE", at: Pos) => {
+    setPlacing(undefined);
+    if (p === "NOTE") props.onAddNote?.(at);
+    else props.onAdd?.(p, at);
+  };
+  /** 要素を押した。[＋線] の間は、元の要素 → 先の要素の順に選ぶ（雲と注釈は選べない）。それ以外は要素か注釈を選ぶ */
   const onNodeClick = (n: DiagramNodeT) => {
     if (n.type !== "model") return;
     const element = n.data.g.element;
-    if (placing !== "LINK" || !editable) return onSelect(element);
+    const note = n.data.g.note;
+    if (placing !== "LINK" || !editable) return note !== undefined && props.onSelectNote ? props.onSelectNote(note) : onSelect(element);
     if (!element) return;
     if (!linkFrom) return setLinkFrom(element);
     setPlacing(undefined);
@@ -757,10 +794,7 @@ export function Diagram(props: DiagramProps) {
           : (ev, e) => {
               if (placing === "LINK" && editable) return;
               // 置く場所を選んでいる間は、線の上を押しても、そこに置く（何もないところを押したときと同じ）
-              if (placing && placing !== "LINK" && editable) {
-                setPlacing(undefined);
-                return props.onAdd?.(placing, flow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY }));
-              }
+              if (placing && placing !== "LINK" && editable) return placeAt(placing, flow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY }));
               const g = e.data?.g;
               if (g?.kind !== "link") return onSelect(g?.element);
               const [from, to] = [elementOf(g.source), elementOf(g.target)];
@@ -770,8 +804,8 @@ export function Diagram(props: DiagramProps) {
       onPaneClick={(e) => {
         // 線の両端を選んでいる間に何もないところを押したら、線を引くのをやめる
         if (!placing || !editable) return onSelect(undefined);
-        setPlacing(undefined);
-        if (placing !== "LINK") props.onAdd?.(placing, flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+        if (placing !== "LINK") placeAt(placing, flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+        else setPlacing(undefined);
       }}
     >
       <FitOnChange
@@ -804,6 +838,7 @@ export function Diagram(props: DiagramProps) {
           placing={placing}
           linkFrom={linkFrom}
           onPlace={setPlacing}
+          canAddNote={!!props.onAddNote}
           removable={props.removable}
           onRemove={props.onRemove}
         />
@@ -834,15 +869,17 @@ function EditTools({
   placing,
   linkFrom,
   onPlace,
+  canAddNote,
   removable,
   onRemove,
 }: {
   editable: boolean;
   onEditableChange(on: boolean): void;
-  placing?: NewElementType | "LINK";
+  placing?: Placing;
   linkFrom?: string;
-  onPlace(type: NewElementType | "LINK" | undefined): void;
-  removable?: { label: string; link: boolean };
+  onPlace(type: Placing | undefined): void;
+  canAddNote: boolean;
+  removable?: Removable;
   onRemove?(): void;
 }) {
   const hint =
@@ -860,7 +897,7 @@ function EditTools({
         title={
           editable
             ? "図の編集を終えます。オンの間は、要素をドラッグで動かしたり、要素の縁からドラッグして別の要素の上で離し、線（リンク）を引いたりできます"
-            : "図の形を変えられるようにします（要素を動かす・足す・消す、線を引く、フローの端をつなぎ替える）。値やシナリオは、オフのままでもいつでも直せます"
+            : "図の形を変えられるようにします（要素や注釈を動かす・足す・消す、線を引く、フローの端をつなぎ替える）。値やシナリオは、オフのままでもいつでも直せます"
         }
       >
         ✎ 図を編集
@@ -886,6 +923,16 @@ function EditTools({
           >
             ＋線
           </button>
+          {canAddNote && (
+            <button
+              className={`edit-tool ${placing === "NOTE" ? "on" : ""}`}
+              aria-pressed={placing === "NOTE"}
+              onClick={() => onPlace(placing === "NOTE" ? undefined : "NOTE")}
+              title="注釈（どこにもつながらない文字だけのもの）を足します。押してから、図の置きたい場所を押します。文字は左の「編集」で直します"
+            >
+              ＋注釈
+            </button>
+          )}
           <button
             className="edit-tool danger"
             disabled={!removable}
@@ -894,8 +941,10 @@ function EditTools({
               removable
                 ? removable.link
                   ? `リンク「${removable.label}」を消します（Delete キー）`
-                  : `「${removable.label}」を消します（つながるリンクも消えます。Delete キー）`
-                : "図で要素か線（リンク）を選ぶと、消せます"
+                  : removable.note
+                    ? `注釈「${removable.label}」を消します（Delete キー）`
+                    : `「${removable.label}」を消します（つながるリンクも消えます。Delete キー）`
+                : "図で要素か線（リンク）、注釈を選ぶと、消せます"
             }
           >
             削除
@@ -1142,7 +1191,8 @@ const liveOf = (live: NodeValues, element: string) => {
   return v && { v, unit: live.unit };
 };
 
-const miniMapColor = (n: DiagramNodeT) => (n.type !== "model" ? "transparent" : n.data.g.kind === "STOCK" ? "var(--stock-border)" : "var(--link)");
+const miniMapColor = (n: DiagramNodeT) =>
+  n.type !== "model" ? "transparent" : n.data.g.kind === "STOCK" ? "var(--stock-border)" : n.data.g.kind === "NOTE" ? "var(--note-border)" : "var(--link)";
 
 /**
  * 表示範囲を合わせ直す。別のモデルを開いたとき、配置を切り替えたとき、要素が増減したとき、図の欄の大きさが変わったとき。
