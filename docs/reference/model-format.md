@@ -150,7 +150,7 @@ models/
 
 ## 起動引数と環境変数
 
-MCP サーバー（`node dist/mcp/index.js`）とビューア（`npm run viewer`、`node dist/viewer/index.js`）を起動するときに指定できるもの。起動引数が環境変数より先に効く。
+MCP サーバー（`loopsight`）とビューア（`loopsight-viewer`）を起動するときに指定できるもの。起動引数が環境変数より先に効く。起動引数は、`npx -y loopsight --models-dir ~/loopsight-models` のようにコマンドのあとに書く（入れ方は [はじめての手順](../getting-started.md)）。
 
 | 名前 | 種類 | 使うもの | 意味 | 既定 |
 |---|---|---|---|---|
@@ -160,6 +160,6 @@ MCP サーバー（`node dist/mcp/index.js`）とビューア（`npm run viewer`
 | `LOOPSIGHT_VIEWER_PORT` | 環境変数 | ビューア | ビューアのポート | 5180 |
 | `BROWSER_PATH` | 環境変数 | MCP サーバー、画像を撮るスクリプト | 図を画像にするとき（`view_diagram`、`export_diagram`、`npm run screenshots`）に使う Edge か Chrome の場所 | 決まった場所から Edge か Chrome を探す |
 
-npm のスクリプトに起動引数を渡すときは、`npm run viewer -- --port 5181` のように `--` のあとに書く。
+clone して `npm run viewer` で起動するときは、`npm run viewer -- --port 5181` のように `--` のあとに書く（[開発に参加する](../../CONTRIBUTING.md)）。
 
 起動引数や環境変数を足したら、この表にも書く。書き忘れると `npm test` が落ちる（一覧は `src/core/options.ts`）。

@@ -1,10 +1,10 @@
 # 開発に参加する
 
-loopsight の開発の始め方と、変更するときに守ってほしい決まりをまとめる。使い方は [README.md](README.md) を見る。
+loopsight の開発の始め方と、変更するときに守ってほしい決まりをまとめる。npm で入れて使う方法は [はじめての手順](docs/getting-started.md) を見る。
 
 ## 開発の始め方
 
-Node.js 20 以上が必要。
+Node.js 22 以上が必要。
 
 ```bash
 git clone https://github.com/kagu3/loopsight.git
@@ -19,11 +19,27 @@ npm run build
 npm test          # テスト（vitest）
 npm run typecheck # 型チェック
 npm run build     # dist/ にビルド（サーバーと画面）
+npm run viewer    # ビルドしたビューアを起動する（http://localhost:5180/）
 npm run dev:web   # 画面の開発用サーバー（/api は npm run viewer に回す）
-npm run screenshots # docs/VIEWER.md のスクリーンショットを撮り直す（先に npm run build。Edge か Chrome が必要）
+npm run screenshots # docs/viewer.md のスクリーンショットを撮り直す（先に npm run build。Edge か Chrome が必要）
+npm run docs      # MCP のツールの定義から docs/reference/tools.md を作り直す
 ```
 
+`npm run viewer` に起動引数を渡すときは、`npm run viewer -- --port 5181` のように `--` のあとに書く。
+
 テストの一部はビルドした画面（`dist/web`）を使う。先に `npm run build` をしてから `npm test` を実行する。
+
+### clone したもので MCP サーバーを使う
+
+このリポジトリで Claude Code のセッションを始めると、ルートの [.mcp.json](.mcp.json) で、ビルドした MCP サーバー（`dist/mcp/index.js`）が使われる。先に `npm run build` をしておく。最初に、プロジェクトの MCP サーバーを使ってよいか聞かれるので許可する。モデルはリポジトリの `models/` に保存される（git の管理外）。
+
+このリポジトリ以外のフォルダで Claude Code を起動して、clone したものを使うときは、絶対パスで登録する（Windows でも `node` は `cmd /c` で包まなくてよい）。
+
+```bash
+claude mcp add --scope user loopsight -- node /absolute/path/to/loopsight/dist/mcp/index.js --models-dir /absolute/path/to/models
+```
+
+npm で入れたものも `loopsight` の名前で登録しているときは、名前がぶつからないように、`loopsight-dev` のような別の名前で登録する。
 
 ### フォルダの役割
 

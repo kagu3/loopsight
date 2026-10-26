@@ -55,7 +55,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
 
-6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューア（npm run viewer）で同じ図を見ている。要素の補足や図の読み方は、set_annotations で説明する箱の近くに注釈（文字だけのもの）として置ける
+6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューアで同じ図を見ている（npx -y -p loopsight loopsight-viewer --models-dir <この作業フォルダ> で起動する。clone したものなら npm run viewer）。要素の補足や図の読み方は、set_annotations で説明する箱の近くに注釈（文字だけのもの）として置ける
 
    要素が多いときは、set_groups で意味のまとまり（「お店側」「お客側」など）をグループにする。図では属する要素が薄い色の背景で囲まれ、凡例が出る。layout_model は同じグループの要素を近くに集めて並べる
 
@@ -249,7 +249,7 @@ ModelJSON ファイルを取り込んで作業フォルダに保存する。path
 | `elements[].from` | 文字列 / null |  |  | FLOW の出元のストック（null はモデルの外）、LINK の始点 |
 | `elements[].to` | 文字列 / null |  |  | FLOW の行き先のストック（null はモデルの外）、LINK の終点 |
 | `elements[].behavior` | { 名前: なんでも } |  |  | 既存の値に重ねる（null でその項目を消す）。STOCK: initial_value, non_negative, units / VARIABLE: value, units / FLOW: value, non_negative, units / CONVERTER: input ("TIME" か "ELEMENT"), input_element, interpolation ("NONE" か "LINEAR"), data ([[入力, 出力], ...]), units / LINK: polarity ("POSITIVE" "NEGATIVE" "NEUTRAL") |
-| `elements[].display` | { 名前: なんでも } |  |  | 表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる。emphasis: true で図の要素を強調する（箱・名前の文字・枠の太さをまとめて大きく描く。size を指定した要素はその大きさを基準に大きくする）。false でふつうに戻す。強調できるのはストック、変数、コンバーター。付け外ししても箱の真ん中の位置は変わらない（coordinates も一緒に指定したときはそれに従う）。シミュレーションには影響しない。emphasis はループサイト独自の項目で、Insight Maker などほかのツールは読み込めないことがあるので、ほかのツールに渡すときは強調を外す / LINK と FLOW: delay（true で遅れの印 ‖ を図の線の途中に描く。false か null で外す。見た目だけで、シミュレーションには影響しない。実際の遅れは式の Delay や Smooth などで表す） |
+| `elements[].display` | { 名前: なんでも } |  |  | 表示。coordinates [x, y], size [幅, 高さ], interactive（スライダー）, interactive_min, interactive_max など。座標のない要素には layout_model で座標を付けられる。emphasis: true で図の要素を強調する（箱・名前の文字・枠の太さをまとめて大きく描く。size を指定した要素はその大きさを基準に大きくする）。false でふつうに戻す。強調できるのはストック、変数、コンバーター。付け外ししても箱の真ん中の位置は変わらない（coordinates も一緒に指定したときはそれに従う）。シミュレーションには影響しない。emphasis はループサイト独自の項目で、Insight Maker のエンジンは知らない項目をエラーにするので、ほかのツールに渡すときは強調を外す / LINK と FLOW: delay（true で遅れの印 ‖ を図の線の途中に描く。false か null で外す。見た目だけで、シミュレーションには影響しない。実際の遅れは式の Delay や Smooth などで表す） |
 | `auto_link` | true / false |  | `true` | 足りないリンクを自動で追加する（既定は true） |
 
 ## remove_elements
@@ -323,7 +323,7 @@ ModelJSON ファイルを取り込んで作業フォルダに保存する。path
 
 **図の注釈を置く**
 
-図に注釈（どこにもつながらない、文字だけのもの）を置いて保存する。要素の補足や「この図の読み方」を、説明する箱の近くに書くのに使う。注釈はシミュレーションの要素ではない（式から参照できず、ループや検証、グラフの要素の一覧には出ない）。モデルの annotations に保存し、Insight Maker に読み込ませると消える。id で既存の注釈を探し、あれば重ね、なければ足す（id を省くと「注釈1」のように付ける）。remove で消し、replace: true で今の注釈をすべて置き換える。文字は決まった幅（既定 200）で折り返し、改行（\n）で行を分けられる。coordinates は左上。新しい注釈で省くと、図の下に置く。ビューアの図と view_diagram の図の両方に出る（図の部品は共通）。layout_model は注釈を動かさない（箱は注釈を避けて置くが、雲やフローの線・名前は重なることがあるので、view_diagram で確かめて直す）。結果の diagram_issues に、注釈と要素・線の重なりを返す。view_diagram で図を見て、重なっていれば coordinates を直す。図の左上は、ループを目立たせる表示（view_diagram の loop）でループの名前の札に隠れることがあるので、左上の角は避ける。色の説明（凡例）は注釈で作らない。
+図に注釈（どこにもつながらない、文字だけのもの）を置いて保存する。要素の補足や「この図の読み方」を、説明する箱の近くに書くのに使う。注釈はシミュレーションの要素ではない（式から参照できず、ループや検証、グラフの要素の一覧には出ない）。モデルの annotations にループサイト独自の項目として保存する。Insight Maker のエンジンは知らない項目をエラーにするので、ほかのツールに渡すときは注釈を外す。id で既存の注釈を探し、あれば重ね、なければ足す（id を省くと「注釈1」のように付ける）。remove で消し、replace: true で今の注釈をすべて置き換える。文字は決まった幅（既定 200）で折り返し、改行（\n）で行を分けられる。coordinates は左上。新しい注釈で省くと、図の下に置く。ビューアの図と view_diagram の図の両方に出る（図の部品は共通）。layout_model は注釈を動かさない（箱は注釈を避けて置くが、雲やフローの線・名前は重なることがあるので、view_diagram で確かめて直す）。結果の diagram_issues に、注釈と要素・線の重なりを返す。view_diagram で図を見て、重なっていれば coordinates を直す。図の左上は、ループを目立たせる表示（view_diagram の loop）でループの名前の札に隠れることがあるので、左上の角は避ける。色の説明（凡例）は注釈で作らない。
 
 | 引数 | 型 | 必須 | 既定値 | 説明 |
 | --- | --- | :-: | --- | --- |
