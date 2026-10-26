@@ -96,7 +96,7 @@ export interface Scenario {
 }
 
 /**
- * 図のグループ（ループサイト独自。scenarios と同じくモデルに保存し、シミュレーションには使わない）。
+ * 図のグループ（ループサイト独自。モデルに保存し、シミュレーションには使わない）。
  * 属する要素を図で薄い色の長方形で囲み、凡例に出す。色は決まった一覧（groups.ts の GROUP_COLORS）から選ぶ
  */
 export interface ElementGroup {
@@ -107,7 +107,7 @@ export interface ElementGroup {
 
 /**
  * 図の注釈（どこにもつながらない、文字だけのもの）。シミュレーションの要素ではないので elements に入れず、
- * scenarios と同じく、ループサイト独自の項目としてモデルの annotations に保存する（Insight Maker に読み込ませると消える）
+ * ループサイト独自の項目としてモデルの annotations に保存する（エンジンの loadModelJSON は知らない項目としてエラーにする）
  */
 export interface Annotation {
   /** 注釈を見分ける名前（MCP の set_annotations で直す・消すときに使う） */
@@ -139,21 +139,79 @@ export function isConnector(type: ElementType): boolean {
   return type === "FLOW" || type === "LINK";
 }
 
+// ループサイトが ModelJSON に足した項目。シミュレーションのエンジン（simulation の loadModelJSON）は知らない項目をエラーにするので、
+// 実行するときは engineModel で取り除いてから渡す。
+// 項目を足したら、docs/reference/model-format.md の「loopsight が足した項目」の表にも書く（書き忘れると tests/docs-model-format.test.ts が落ちる）
+
+type ItemOf<K extends keyof ModelJSON> = NonNullable<ModelJSON[K]> extends readonly (infer T)[] ? T : never;
+
+/** 型に名前を書いた項目（[key: string] のような、どんな名前でもよい項目は除く） */
+type KnownKeys<T> = keyof { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
+
+/** ModelJSON の公式の最上位の項目 */
+const MODELJSON_TOP_KEYS = ["engine", "name", "description", "file_notes", "simulation", "elements", "visualizations", "scenarios", "engine_settings"] as const satisfies readonly (keyof ModelJSON)[];
+
+/** ModelJSON の型にある最上位の項目のうち、公式でないもの（ループサイト独自の項目） */
+type LoopsightModelKey = Exclude<KnownKeys<ModelJSON>, (typeof MODELJSON_TOP_KEYS)[number]>;
+
 /**
- * ループサイト独自の display の項目。シミュレーションのエンジン（simulation の loadModelJSON）は知らない項目をエラーにするので、
- * 実行するときは engineModel で取り除いてから渡す
+ * ループサイト独自の最上位の項目と、その 1 件ごとの項目。
+ * ModelJSON の型にある公式でない最上位の項目、それぞれの型（ElementGroup、Annotation）の項目と、過不足がないことを型で確かめる
+ * - groups：図のグループ（groups.ts）
+ * - annotations：図の注釈（annotationsOf、edit.ts の setAnnotations）
+ */
+const LOOPSIGHT_MODEL_ITEMS = {
+  groups: { name: true, color: true, elements: true },
+  annotations: { id: true, text: true, coordinates: true, width: true },
+} as const satisfies { [K in LoopsightModelKey]: Record<keyof ItemOf<K>, true> };
+
+/** ループサイト独自の最上位の項目 */
+export const LOOPSIGHT_MODEL_KEYS = Object.keys(LOOPSIGHT_MODEL_ITEMS) as readonly (keyof typeof LOOPSIGHT_MODEL_ITEMS)[];
+
+/**
+ * ループサイト独自の display の項目
  * - emphasis：図で強調して大きく描く。箱になる要素に付ける（isEmphasized）
  * - delay：遅れの印（‖）。リンクとフローに付ける（delay.ts）
  */
 export const LOOPSIGHT_DISPLAY_KEYS: readonly string[] = ["emphasis", "delay"];
 
 /**
- * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の図のグループ（groups）・図の注釈（annotations）を取り除いたコピー（なければそのまま返す）
+ * ループサイトが足した項目の場所の一覧（docs/reference/model-format.md の表と突き合わせる）。
+ * 書き方は、最上位が groups、その 1 件ごとの項目が groups[].name、要素の display の項目が elements[].display.emphasis
+ */
+export const LOOPSIGHT_FIELDS: readonly string[] = [
+  ...LOOPSIGHT_MODEL_KEYS.flatMap((k) => [k, ...Object.keys(LOOPSIGHT_MODEL_ITEMS[k]).map((f) => `${k}[].${f}`)]),
+  ...LOOPSIGHT_DISPLAY_KEYS.map((k) => `elements[].display.${k}`),
+];
+
+/**
+ * ループサイトが読み書きする、ModelJSON の公式の項目の場所（書き方は LOOPSIGHT_FIELDS と同じ）。
+ * 上の型（ModelJSON、ModelElement など）にある項目。docs/reference/model-format.md の「使う公式の項目」の表と突き合わせる
+ */
+export const MODELJSON_FIELDS: readonly string[] = [
+  "engine",
+  "name",
+  "description",
+  "file_notes",
+  ...(["algorithm", "time_start", "time_length", "time_step", "time_units"] satisfies (keyof SimulationSettings)[]).map((k) => `simulation.${k}`),
+  ...["type", "name", "description", "from", "to"].map((k) => `elements[].${k}`),
+  ...["initial_value", "value", "non_negative", "units", "input", "input_element", "interpolation", "data", "polarity"].map((k) => `elements[].behavior.${k}`),
+  ...["coordinates", "size", "from_coordinates", "to_coordinates", "interactive", "interactive_min", "interactive_max", "symbol"].map((k) => `elements[].display.${k}`),
+  ...(["type", "name", "elements"] satisfies (keyof Visualization)[]).map((k) => `visualizations[].${k}`),
+  ...(["name", "description", "values"] satisfies (keyof Scenario)[]).map((k) => `scenarios[].${k}`),
+  "engine_settings.units",
+  "engine_settings.globals",
+];
+
+/**
+ * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の項目（図のグループ groups・図の注釈 annotations）を取り除いたコピー（なければそのまま返す）
  */
 export function engineModel(model: ModelJSON): ModelJSON {
   const has = (el: ModelElement) => !!el.display && LOOPSIGHT_DISPLAY_KEYS.some((k) => k in el.display!);
-  const { groups: _groups, annotations: _annotations, ...rest } = model;
-  if (!model.elements.some(has)) return "groups" in model || "annotations" in model ? rest : model;
+  const hasTop = LOOPSIGHT_MODEL_KEYS.some((k) => k in model);
+  const rest: ModelJSON = hasTop ? { ...model } : model;
+  if (hasTop) for (const k of LOOPSIGHT_MODEL_KEYS) delete rest[k];
+  if (!model.elements.some(has)) return rest;
   return {
     ...rest,
     elements: model.elements.map((el) => {

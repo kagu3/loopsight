@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { ENV_VARS } from "../core/options.js";
 
 export class BrowserNotFoundError extends Error {
   override name = "BrowserNotFoundError";
@@ -16,7 +17,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Edge か Chrome の場所。環境変数 BROWSER_PATH があればそれを使う */
 export function findBrowser(): string {
   const candidates = [
-    process.env.BROWSER_PATH,
+    process.env[ENV_VARS.browserPath],
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
