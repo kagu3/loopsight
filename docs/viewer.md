@@ -26,23 +26,27 @@
 
 ## 起動のしかた
 
-初めて使うときと、プログラムを更新したあとは、ビルドしておきます。
+ターミナルでビューアを起動します。Node.js 22 以上が必要です（入れ方は [はじめての手順](getting-started.md)）。`--models-dir` には、MCP サーバーに渡したのと同じ作業フォルダを書きます。
+
+macOS、Linux、WSL：
 
 ```bash
-npm run build
+npx -y -p loopsight loopsight-viewer --models-dir ~/loopsight-models
 ```
 
-ビューアを起動します。
+Windows（PowerShell）：
 
-```bash
-npm run viewer
+```powershell
+npx.cmd -y -p loopsight loopsight-viewer --models-dir $HOME\loopsight-models
 ```
+
+`npm install -g loopsight` で入れたあとは、`loopsight-viewer --models-dir ...` だけで起動できます。リポジトリを clone して開発しているときは、`npm run build` のあと `npm run viewer` で起動します（[開発に参加する](../CONTRIBUTING.md)）。
 
 次のように表示されたら、ブラウザで http://localhost:5180/ を開きます。
 
 ```
 Loopsight ビューア: http://localhost:5180/
-作業フォルダ: C:\...\loopsight\models
+作業フォルダ: C:\Users\...\loopsight-models
 ```
 
 止めるときは、起動したターミナルで Ctrl+C を押します。
@@ -64,9 +68,19 @@ Loopsight ビューア: http://localhost:5180/
 
 作業フォルダの決め方は MCP サーバーと同じです。MCP サーバーと違うフォルダを見ていると、AI の変更が画面に出ません。
 
+macOS、Linux、WSL：
+
 ```bash
-npm run viewer -- --models-dir D:/work/models --port 5181
+npx -y -p loopsight loopsight-viewer --models-dir ~/work/models --port 5181
 ```
+
+Windows（PowerShell）：
+
+```powershell
+npx.cmd -y -p loopsight loopsight-viewer --models-dir D:\work\models --port 5181
+```
+
+`npm run viewer` で起動するときは、`npm run viewer -- --port 5181` のように `--` のあとに書きます。
 
 ビューアは自分の PC の中（`127.0.0.1`）でだけ動きます。ほかの PC やスマートフォンからは開けません。
 
@@ -590,12 +604,13 @@ AI が MCP でモデルを保存すると、すぐに画面が変わります。
 
 | 症状 | 確かめること |
 |---|---|
-| 「画面がビルドされていません」と出る | `npm run build` を実行してから、もう一度 `npm run viewer` を起動します |
+| 「画面がビルドされていません」と出る | clone して使っているときに出ます。`npm run build` を実行してから、もう一度 `npm run viewer` を起動します |
 | 「モデルがありません」と出る | 作業フォルダが合っているか、起動したときの表示で確かめます。MCP サーバーと同じフォルダを指定します |
 | 「ファイルが見つかりません」と出る | 開いているモデルのファイルが、エクスプローラーや AI に動かされたか消されました。左下の「モデル」の一覧から選び直します |
 | 左上が「未接続」になる | ビューアが止まっています。起動し直して、ブラウザを再読み込みします |
 | AI が変えたのに画面が変わらない | ビューアと MCP サーバーの作業フォルダが同じか確かめます。左上が「ライブ」か確かめます |
-| ポートが使われていて起動しない | `npm run viewer -- --port 5181` のように別のポートにします |
+| ポートが使われていて起動しない | ビューアがもう起動していれば、http://localhost:5180/ を開きます。別のポートで起動するときは、`--port 5181` を付けます |
+| PowerShell で「スクリプトの実行が無効」と出て `npx` が止まる | `npx` の代わりに `npx.cmd` と打ちます（[はじめての手順](getting-started.md#よくある失敗と直し方)） |
 | 図が画面からはみ出している | 左下の `⛶` を押すと、全体が入るように戻ります。大きな図は名前が読める大きさまでしか縮めないので、残りは右下のミニマップで動かして見ます |
 | 古い画面のまま | ブラウザを再読み込み（Ctrl+R）します |
 | 保存したら黄色の帯が出た | 画面より先に AI などがモデルを変えていました。最新の内容を確かめて、もう一度直します（[AI と同時に変えたとき](#ai-と同時に変えたとき)） |

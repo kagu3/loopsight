@@ -1,4 +1,4 @@
-// ビューアの使い方（docs/VIEWER.md）に載せるスクリーンショットを撮り直す。
+// ビューアの使い方（docs/viewer.md）に載せるスクリーンショットを撮り直す。
 //
 //   npm run build
 //   npm run screenshots
