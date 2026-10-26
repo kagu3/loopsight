@@ -22,7 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "screenshots": "node scripts/viewer-screenshots.mjs"
+    "screenshots": "node scripts/viewer-screenshots.mjs",
+    "docs": "npm run build:server && node scripts/tools-reference.mjs"
   },
   "repository": {
     "type": "git",
