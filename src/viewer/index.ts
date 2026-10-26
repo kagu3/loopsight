@@ -2,12 +2,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { resolveModelsDir } from "../core/index.js";
+import { DEFAULT_VIEWER_PORT, ENV_VARS, VIEWER_OPTIONS, resolveModelsDir } from "../core/index.js";
 import { startViewer } from "./server.js";
 
-const { values } = parseArgs({ options: { "models-dir": { type: "string" }, port: { type: "string" } }, strict: false });
+const { values } = parseArgs({ options: VIEWER_OPTIONS, strict: false });
 const modelsDir = resolveModelsDir(typeof values["models-dir"] === "string" ? values["models-dir"] : undefined);
-const port = typeof values.port === "string" ? Number(values.port) : Number(process.env.LOOPSIGHT_VIEWER_PORT ?? 5180);
+const port = typeof values.port === "string" ? Number(values.port) : Number(process.env[ENV_VARS.viewerPort] ?? DEFAULT_VIEWER_PORT);
 
 // ビルドした画面は dist/web にある（このファイルは dist/viewer/index.js）
 const staticDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../web");

@@ -14,3 +14,4 @@ export * from "./groups.js";
 export * from "./data.js";
 export * from "./loops.js";
 export * from "./delay.js";
+export * from "./options.js";
