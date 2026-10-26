@@ -158,26 +158,13 @@ npm run viewer
 
 ## 開発
 
-```bash
-npm test          # テスト（vitest）
-npm run typecheck # 型チェック
-npm run build     # dist/ にビルド（サーバーと画面）
-npm run dev:web   # 画面の開発用サーバー（/api は npm run viewer に回す）
-npm run screenshots # docs/VIEWER.md のスクリーンショットを撮り直す（先に npm run build。Edge か Chrome が必要）
-```
-
-- `src/core`：モデルの保持、変換、編集、検証、実行。MCP に依存しない（段階 2 の Web 画面でも使う）
-- `src/mcp`：中核部分を MCP ツールとして公開する薄い層
-- `src/viewer`：ビューアのサーバー（API、ファイルの監視、画面の配信）
-- `web`：ビューアの画面（React、React Flow、Recharts。Vite で `dist/web` にビルド）
+開発の始め方（テスト、型チェック、ビルド、画面の開発用サーバー、スクリーンショットの撮り直し）と、守ってほしい決まりは [CONTRIBUTING.md](CONTRIBUTING.md) にまとめている。
 
 ## ドキュメント
 
 - [ビューアの使い方](docs/VIEWER.md)：画面の見方と操作（スクリーンショットつき）
-- [人の確認が必要なこと](docs/HUMAN_CHECKS.md)：AI では確かめられないことと、人が決めること
-- [構想と前提](docs/VISION.md)：目指すもの、3 段階の構想、調査でわかった前提と制約
-- [ロードマップ](docs/ROADMAP.md)：段階 1（中核部分＋MCP）と段階 2（ビューア）の設計方針とマイルストーン
-- [後で直すか検討すること](docs/BACKLOG.md)：レビューで見つかったが、優先度が低く残した指摘の書き溜め
+- [開発に参加する](CONTRIBUTING.md)：開発の始め方と、守ってほしい決まり
+- 内部メモ（[docs/dev/](docs/dev/)）：構想、機能の案、後で直すか検討すること、人の確認が必要なこと。中身は CONTRIBUTING.md の「内部メモ」の節にある
 
 ## ライセンス
 
