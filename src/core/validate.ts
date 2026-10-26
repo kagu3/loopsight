@@ -211,7 +211,7 @@ export function toModelError(e: unknown): ModelError {
   const issue: Issue = { element: name, message: err.line ? `${message}（式の ${err.line} 行目）` : message };
   const unknownFn = /変数か関数 "(.+)" がありません/.exec(message);
   if (unknownFn) {
-    issue.hint = `関数名の綴りを確かめてください（大文字小文字も区別します）。要素を参照するなら [${unknownFn[1]}] のように角括弧で囲みます。`;
+    issue.hint = `関数名の綴りを確かめてください。要素を参照するなら [${unknownFn[1]}] のように角括弧で囲みます。`;
   } else if (/could not be found/.test(message)) {
     // 存在しない要素は実行前の確認で見つかるので、ここに来るのはリンクがない場合
     issue.hint = "参照している要素から、この要素へのリンクがあるか確かめてください。";
