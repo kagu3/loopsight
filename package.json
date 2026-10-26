@@ -3,19 +3,34 @@
   "version": "0.1.0",
   "description": "AI アシスタントと一緒にシステムダイナミクス（SD）のモデルを作り、動かし、確かめるための MCP サーバーとビューア",
   "license": "AGPL-3.0-or-later",
-  "private": true,
+  "keywords": [
+    "system-dynamics",
+    "simulation",
+    "insight-maker",
+    "causal-loop-diagram",
+    "stock-and-flow",
+    "mcp",
+    "model-context-protocol",
+    "claude"
+  ],
   "type": "module",
   "bin": {
     "loopsight": "dist/mcp/index.js",
     "loopsight-viewer": "dist/viewer/index.js"
   },
+  "files": [
+    "dist/",
+    "!dist/**/*.map",
+    "CHANGELOG.md"
+  ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && vite build --config web/vite.config.ts",
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build --config web/vite.config.ts",
+    "prepublishOnly": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && npm run build && npm run typecheck && npm test",
     "start": "node dist/mcp/index.js",
     "viewer": "node dist/viewer/index.js",
     "dev:web": "vite --config web/vite.config.ts",

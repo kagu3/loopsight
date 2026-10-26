@@ -17,7 +17,7 @@ try {
 } catch (e) {
   if ((e as NodeJS.ErrnoException).code === "EADDRINUSE") {
     console.error(`ポート ${port} はほかのプログラムが使っています。ビューアがもう起動しているなら、http://localhost:${port}/ を開いてください。`);
-    console.error(`別のポートで起動するには: npm run viewer -- --port ${port + 1}`);
+    console.error(`別のポートで起動するには、--port ${port + 1} を付けてください。`);
     process.exit(1);
   }
   throw e;
