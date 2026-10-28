@@ -137,7 +137,7 @@ try {
   // 実際のデータを点で重ねたところ（見本の CSV を MCP の import_data と同じ場所に置く。あとの場面に出ないよう、撮ったら消す）
   // ここでページを開き直すと、あとの「その場で反映」の場面で変更の知らせの接続が開かなくなる（同じサーバーへの接続が足りなくなるらしい）。# だけ変えてモデルを切り替える
   const dataFile = new core.ModelStore(modelsDir).dataPathOf("population");
-  writeFileSync(dataFile, readFileSync(path.join(root, "examples/population.data.csv")));
+  writeFileSync(dataFile, readFileSync(path.join(root, "tests/fixtures/population.data.csv")));
   await b.evaluate("location.hash = 'population'");
   await b.waitFor("document.querySelector('.legend-actual')");
   await sleep(700);

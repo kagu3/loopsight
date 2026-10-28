@@ -16,7 +16,6 @@ loopsight の文書の一覧。初めての人は、[はじめての手順](gett
 ### そのほか
 
 - [変更履歴](../CHANGELOG.md)：版ごとの主な変更
-- [例のモデル](../examples/)：[first-model.json](../examples/first-model.json)（はじめての手順で作るモデル）、[population.json](../examples/population.json)（シナリオを 2 つ保存した例）と [population.data.csv](../examples/population.data.csv)（その実際のデータ。`import_data` で取り込むと、ビューアのグラフに点で重なる）
 
 ## 開発する人向け
 
