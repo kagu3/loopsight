@@ -29,7 +29,7 @@ function model(): ModelJSON {
   return m;
 }
 
-const population = () => JSON.parse(readFileSync("examples/population.json", "utf8")) as ModelJSON;
+const population = () => JSON.parse(readFileSync("tests/fixtures/population.json", "utf8")) as ModelJSON;
 
 describe("注釈の文字の折り返し", () => {
   test("決まった幅で折り返し、改行はそのまま行を分ける", () => {
