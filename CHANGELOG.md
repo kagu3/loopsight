@@ -33,6 +33,10 @@
 - 図だけを SVG と PNG に書き出す
 - 画面で変えたことを「元に戻す」（Ctrl+Z）で戻す。画面より先に AI がモデルを変えていたら、黙って上書きせずに知らせる
 
+### sample のモデル
+
+- システム思考を学ぶための sample のモデルを `examples/` に置く（[examples/README.md](examples/README.md)）。sample の決まりを守っているかをテストで確かめる
+
 ### 必要なもの
 
 - Node.js 22 以上

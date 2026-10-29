@@ -1,7 +1,7 @@
 // 文書のリンク切れを見つける。
-// リポジトリ直下と docs/ の下の Markdown にある相対リンクと画像のパスが実際にあるか、
+// リポジトリ直下、docs/ と examples/ の下の Markdown にある相対リンクと画像のパスが実際にあるか、
 // 見出しへのリンク（#…）の見出しがあるかを確かめる。外のサイト（http など）へのリンクは確かめない（ネットにつながらないようにする）
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 
@@ -9,14 +9,14 @@ const ROOT = path.resolve(".");
 /** リポジトリからの相対パス（/ 区切り） */
 const rel = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
 
-/** 確かめる Markdown：リポジトリ直下の *.md と、docs/ の下の *.md（サブフォルダも） */
+/** 確かめる Markdown：リポジトリ直下の *.md と、docs/ と examples/ の下の *.md（サブフォルダも。フォルダがなければ飛ばす） */
 function markdownFiles(): string[] {
   const top = readdirSync(ROOT).filter((f) => f.endsWith(".md")).map((f) => path.join(ROOT, f));
   const walk = (dir: string): string[] =>
-    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    !existsSync(dir) ? [] : readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
       e.isDirectory() ? walk(path.join(dir, e.name)) : e.name.endsWith(".md") ? [path.join(dir, e.name)] : [],
     );
-  return [...top, ...walk(path.join(ROOT, "docs"))];
+  return [...top, ...walk(path.join(ROOT, "docs")), ...walk(path.join(ROOT, "examples"))];
 }
 
 /** コードのブロック（``` や ~~~ で囲んだところ）を空の行にする。行の番号は変えない */
@@ -116,7 +116,7 @@ describe("文書のリンク", () => {
 
   test("確かめる文書がある", () => {
     const names = files.map(rel);
-    expect(names).toEqual(expect.arrayContaining(["README.md", "CONTRIBUTING.md", "CHANGELOG.md", "docs/README.md", "docs/getting-started.md", "docs/viewer.md"]));
+    expect(names).toEqual(expect.arrayContaining(["README.md", "CONTRIBUTING.md", "CHANGELOG.md", "docs/README.md", "docs/getting-started.md", "docs/viewer.md", "examples/README.md"]));
   });
 
   test("相対リンク、画像のパス、見出しへのリンクが切れていない", () => {
@@ -134,6 +134,21 @@ describe("文書のリンク", () => {
     expect(brokenReason({ file, line: 1, target: "docs/viewer.md" })).toBeNull();
     expect(brokenReason({ file, line: 1, target: "docs/VIEWER.md" })).not.toBeNull();
     expect(brokenReason({ file, line: 1, target: "Docs/viewer.md" })).not.toBeNull();
+  });
+
+  test("日本語の名前のフォルダへのリンクも確かめる（examples/ の sample のフォルダ）", () => {
+    const file = path.join(ROOT, "examples", "README.md");
+    const name = `リンクの確認_${process.pid}`;
+    const dir = path.join(ROOT, "examples", name);
+    mkdirSync(dir, { recursive: true });
+    try {
+      expect(brokenReason({ file, line: 1, target: `${name}/` })).toBeNull();
+      expect(brokenReason({ file, line: 1, target: `${encodeURIComponent(name)}/` })).toBeNull();
+      expect(brokenReason({ file, line: 1, target: `${name}_ない/` })).not.toBeNull();
+      expect(linksOf(file, `- フォルダ：[${name}](${name}/)（model.json）\n`).map((l) => l.target)).toEqual([`${name}/`]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("脚注の定義（[^1]: …）はリンクとして拾わない。リンクの定義は拾う", () => {

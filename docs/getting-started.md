@@ -140,6 +140,7 @@ Claude Code に戻って、次のように頼みます。
 ## 次に読むもの
 
 - [ビューアの使い方](viewer.md)：画面の見方と、画面での直し方
+- [sample のモデル](../examples/README.md)：システム思考を学ぶための sample。npm パッケージには入っていないので、[GitHub のリポジトリ](https://github.com/kagu3/loopsight) から取る（「Code」→「Download ZIP」で落とせる）。`examples/` の中のフォルダを作業フォルダにコピーすると、ビューアで開ける
 - [ツールのリファレンス](reference/tools.md)：Claude が使う道具の一覧
 - [式の書き方](reference/formulas.md)：要素の式に使える演算子と関数
 - [モデルのファイルの形式](reference/model-format.md)：保存するファイルの中身と、作業フォルダの決まり
