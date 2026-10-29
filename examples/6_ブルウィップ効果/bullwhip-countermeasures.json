@@ -1,0 +1,1172 @@
+{
+  "engine": "SIMULATION_PACKAGE",
+  "name": "ブルウィップ効果の対策",
+  "simulation": {
+    "algorithm": "RK1",
+    "time_start": 0,
+    "time_length": 60,
+    "time_step": 1,
+    "time_units": "WEEKS"
+  },
+  "elements": [
+    {
+      "type": "VARIABLE",
+      "name": "消費者の需要",
+      "description": "お客が店で買う量。5 週目に 100 から 120 へ一度だけ上がり、あとは変わらない。単位：個/週",
+      "behavior": {
+        "value": "100 + Step(5, 20)"
+      },
+      "display": {
+        "coordinates": [
+          1170,
+          260
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "予測の期間",
+      "description": "受けた注文をならして需要を予測するときの期間。長いほど予測はゆっくり追いつく。単位：週",
+      "behavior": {
+        "value": 4
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 1,
+        "interactive_max": 12,
+        "coordinates": [
+          820,
+          -90
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "在庫の目安週数",
+      "description": "予測した需要の何週分の在庫を持ちたいか。単位：週",
+      "behavior": {
+        "value": 4
+      },
+      "display": {
+        "coordinates": [
+          860,
+          -210
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "在庫の調整時間",
+      "description": "在庫の不足を何週で埋めようとするか。人の判断の強さを表すつまみで、短いほど慌てて多く発注する。単位：週",
+      "behavior": {
+        "value": 2
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 1,
+        "interactive_max": 10,
+        "coordinates": [
+          -140,
+          1030
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "出荷の遅れ",
+      "description": "上流へ注文を出してから品物が届くまでの時間。単位：週",
+      "behavior": {
+        "value": 2
+      },
+      "display": {
+        "coordinates": [
+          1020,
+          1150
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "生産の遅れ",
+      "description": "工場が生産を指示してから品物ができあがるまでの時間。単位：週",
+      "behavior": {
+        "value": 3
+      },
+      "display": {
+        "coordinates": [
+          -160,
+          390
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "小売の在庫",
+      "behavior": {
+        "initial_value": 400,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          1160,
+          420
+        ]
+      },
+      "description": "店にある品物。卸からの出荷で増え、販売で減る。単位：個"
+    },
+    {
+      "type": "STOCK",
+      "name": "卸の在庫",
+      "behavior": {
+        "initial_value": 400,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          700,
+          420
+        ]
+      },
+      "description": "卸の倉庫にある品物。工場からの出荷で増え、小売への出荷で減る。単位：個"
+    },
+    {
+      "type": "STOCK",
+      "name": "工場の在庫",
+      "behavior": {
+        "initial_value": 400,
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          240,
+          420
+        ]
+      },
+      "description": "工場の倉庫にある品物。生産で増え、卸への出荷で減る。単位：個"
+    },
+    {
+      "type": "FLOW",
+      "name": "販売",
+      "from": "小売の在庫",
+      "to": null,
+      "behavior": {
+        "value": "Min([消費者の需要], [小売の在庫])"
+      },
+      "display": {
+        "to_coordinates": [
+          1500,
+          440
+        ]
+      },
+      "description": "店がお客に売る量。需要どおり売るが、在庫より多くは売れない。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "卸から小売への出荷",
+      "from": "卸の在庫",
+      "to": "小売の在庫",
+      "behavior": {
+        "value": "Min(Delay([小売の発注], [出荷の遅れ], 100), [卸の在庫])"
+      },
+      "description": "小売の発注が、出荷の遅れのぶんだけ後に届く。卸の在庫より多くは出せない。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "工場から卸への出荷",
+      "from": "工場の在庫",
+      "to": "卸の在庫",
+      "behavior": {
+        "value": "Min(Delay([卸の発注], [出荷の遅れ], 100), [工場の在庫])"
+      },
+      "description": "卸の発注が、出荷の遅れのぶんだけ後に届く。工場の在庫より多くは出せない。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "生産",
+      "from": null,
+      "to": "工場の在庫",
+      "behavior": {
+        "value": "Delay([工場の生産指示], [生産の遅れ], 100)"
+      },
+      "display": {
+        "from_coordinates": [
+          60,
+          440
+        ]
+      },
+      "description": "工場の生産指示が、生産の遅れのぶんだけ後にできあがる。材料や人手の限りは省いた。単位：個/週"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "小売の需要予測",
+      "behavior": {
+        "value": "Smooth([消費者の需要], [予測の期間], 100)"
+      },
+      "display": {
+        "coordinates": [
+          1220,
+          180
+        ]
+      },
+      "description": "店が見込む売れ行き。消費者の需要を予測の期間でならしたもので、変化に遅れて追いつく。単位：個/週"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "小売の目標在庫",
+      "behavior": {
+        "value": "[小売の需要予測] * [在庫の目安週数]"
+      },
+      "display": {
+        "coordinates": [
+          1040,
+          40
+        ]
+      },
+      "description": "店が持ちたい在庫。需要予測 × 在庫の目安週数。単位：個"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "小売の発注",
+      "description": "小売が卸へ出す注文。ふだんは元のモデルと同じく「需要予測 ＋ 在庫の不足 ÷ 在庫の調整時間」。スイッチ「受けた注文をそのまま流す」で消費者の需要と同じ量に、「届いていない注文も数える」で届いていない分の不足も足す。単位：個/週",
+      "behavior": {
+        "value": "IfThenElse([受けた注文をそのまま流す] = 1, [消費者の需要], Max(0, [小売の需要予測] + ([小売の目標在庫] - [小売の在庫]) / [在庫の調整時間] + [届いていない注文も数える] * ([小売の需要予測] * [出荷の遅れ] - [小売の届いていない注文]) / [在庫の調整時間]))"
+      },
+      "display": {
+        "coordinates": [
+          920,
+          280
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "卸の需要予測",
+      "behavior": {
+        "value": "Smooth(IfThenElse([消費者の需要を共有] = 1, [消費者の需要], [小売の発注]), [予測の期間], 100)"
+      },
+      "display": {
+        "coordinates": [
+          760,
+          180
+        ]
+      },
+      "description": "卸が見込む注文。ふだんは小売の発注をならして予測する。スイッチ「消費者の需要を共有」では、店頭の売れ行き（消費者の需要）をならして予測する。単位：個/週"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "卸の目標在庫",
+      "behavior": {
+        "value": "[卸の需要予測] * [在庫の目安週数]"
+      },
+      "display": {
+        "coordinates": [
+          580,
+          40
+        ]
+      },
+      "description": "卸が持ちたい在庫。需要予測 × 在庫の目安週数。単位：個"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "卸の発注",
+      "description": "卸が工場へ出す注文。決め方は小売の発注と同じ。「受けた注文をそのまま流す」では小売の発注と同じ量にする。単位：個/週",
+      "behavior": {
+        "value": "IfThenElse([受けた注文をそのまま流す] = 1, [小売の発注], Max(0, [卸の需要予測] + ([卸の目標在庫] - [卸の在庫]) / [在庫の調整時間] + [届いていない注文も数える] * ([卸の需要予測] * [出荷の遅れ] - [卸の届いていない注文]) / [在庫の調整時間]))"
+      },
+      "display": {
+        "coordinates": [
+          460,
+          280
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "工場の需要予測",
+      "behavior": {
+        "value": "Smooth(IfThenElse([消費者の需要を共有] = 1, [消費者の需要], [卸の発注]), [予測の期間], 100)"
+      },
+      "display": {
+        "coordinates": [
+          300,
+          180
+        ]
+      },
+      "description": "工場が見込む注文。ふだんは卸の発注をならして予測する。スイッチ「消費者の需要を共有」では、店頭の売れ行き（消費者の需要）をならして予測する。単位：個/週"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "工場の目標在庫",
+      "behavior": {
+        "value": "[工場の需要予測] * [在庫の目安週数]"
+      },
+      "display": {
+        "coordinates": [
+          120,
+          40
+        ]
+      },
+      "description": "工場が持ちたい在庫。需要予測 × 在庫の目安週数。単位：個"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "工場の生産指示",
+      "description": "工場が生産ラインに出す指示。決め方は小売の発注と同じで、「届いていない注文も数える」では生産中の分を数える。「受けた注文をそのまま流す」では卸の発注と同じ量にする。単位：個/週",
+      "behavior": {
+        "value": "IfThenElse([受けた注文をそのまま流す] = 1, [卸の発注], Max(0, [工場の需要予測] + ([工場の目標在庫] - [工場の在庫]) / [在庫の調整時間] + [届いていない注文も数える] * ([工場の需要予測] * [生産の遅れ] - [工場の生産中]) / [在庫の調整時間]))"
+      },
+      "display": {
+        "coordinates": [
+          90,
+          280
+        ]
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要",
+      "to": "販売",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の発注",
+      "to": "卸から小売への出荷",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "卸から小売への出荷",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の発注",
+      "to": "工場から卸への出荷",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "工場から卸への出荷",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の生産指示",
+      "to": "生産",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "生産の遅れ",
+      "to": "生産",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要",
+      "to": "小売の需要予測",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "予測の期間",
+      "to": "小売の需要予測",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の需要予測",
+      "to": "小売の目標在庫",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の目安週数",
+      "to": "小売の目標在庫",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の需要予測",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の目標在庫",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の在庫",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の調整時間",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の発注",
+      "to": "卸の需要予測",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "予測の期間",
+      "to": "卸の需要予測",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の需要予測",
+      "to": "卸の目標在庫",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の目安週数",
+      "to": "卸の目標在庫",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の需要予測",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の目標在庫",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の在庫",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の調整時間",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の発注",
+      "to": "工場の需要予測",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "予測の期間",
+      "to": "工場の需要予測",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の需要予測",
+      "to": "工場の目標在庫",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の目安週数",
+      "to": "工場の目標在庫",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の需要予測",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の目標在庫",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の在庫",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "在庫の調整時間",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "小売の届いていない注文",
+      "description": "小売が卸へ出したが、まだ届いていない注文（輸送中の分）。注文を出すと増え、届くと減る。単位：個",
+      "behavior": {
+        "initial_value": "100 * [出荷の遅れ]",
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          1360,
+          960
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "卸の届いていない注文",
+      "description": "卸が工場へ出したが、まだ届いていない注文（輸送中の分）。注文を出すと増え、届くと減る。単位：個",
+      "behavior": {
+        "initial_value": "100 * [出荷の遅れ]",
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          580,
+          840
+        ]
+      }
+    },
+    {
+      "type": "STOCK",
+      "name": "工場の生産中",
+      "description": "工場が生産を指示したが、まだできあがっていない量。単位：個",
+      "behavior": {
+        "initial_value": "100 * [生産の遅れ]",
+        "non_negative": true
+      },
+      "display": {
+        "coordinates": [
+          120,
+          640
+        ]
+      }
+    },
+    {
+      "type": "FLOW",
+      "name": "小売の注文を出す",
+      "from": null,
+      "to": "小売の届いていない注文",
+      "behavior": {
+        "value": "[小売の発注]"
+      },
+      "display": {
+        "from_coordinates": [
+          1190,
+          988
+        ]
+      },
+      "description": "小売の発注と同じ量。届いていない注文に加わる。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "小売に届く",
+      "from": "小売の届いていない注文",
+      "to": null,
+      "behavior": {
+        "value": "Delay([小売の発注], [出荷の遅れ], 100)"
+      },
+      "display": {
+        "to_coordinates": [
+          1654,
+          988
+        ]
+      },
+      "description": "小売の発注が、出荷の遅れのぶんだけ後に届くはずだった量。卸の在庫が足りずに出せなかった分も、届くはずだった時点で届いていない注文から外す（欠品は後で埋めない）。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "卸の注文を出す",
+      "from": null,
+      "to": "卸の届いていない注文",
+      "behavior": {
+        "value": "[卸の発注]"
+      },
+      "display": {
+        "from_coordinates": [
+          410,
+          868
+        ]
+      },
+      "description": "卸の発注と同じ量。届いていない注文に加わる。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "卸に届く",
+      "from": "卸の届いていない注文",
+      "to": null,
+      "behavior": {
+        "value": "Delay([卸の発注], [出荷の遅れ], 100)"
+      },
+      "display": {
+        "to_coordinates": [
+          874,
+          868
+        ]
+      },
+      "description": "卸の発注が、出荷の遅れのぶんだけ後に届くはずだった量。工場の在庫が足りずに出せなかった分も、届くはずだった時点で届いていない注文から外す（欠品は後で埋めない）。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "生産を始める",
+      "from": null,
+      "to": "工場の生産中",
+      "behavior": {
+        "value": "[工場の生産指示]"
+      },
+      "display": {
+        "from_coordinates": [
+          -50,
+          660
+        ]
+      },
+      "description": "工場の生産指示と同じ量。生産中に加わる。単位：個/週"
+    },
+    {
+      "type": "FLOW",
+      "name": "完成する",
+      "from": "工場の生産中",
+      "to": null,
+      "behavior": {
+        "value": "[生産]"
+      },
+      "display": {
+        "to_coordinates": [
+          390,
+          660
+        ]
+      },
+      "description": "生産と同じ量。生産中から減る。単位：個/週"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "受けた注文をそのまま流す",
+      "description": "対策のスイッチ（0 か 1）。1 にすると、各段は受けた注文（小売は消費者の需要）と同じ量だけ上流へ発注し、在庫の不足は埋めない。単位：なし",
+      "behavior": {
+        "value": 0
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 0,
+        "interactive_max": 1,
+        "coordinates": [
+          -180,
+          260
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "届いていない注文も数える",
+      "description": "対策のスイッチ（0 か 1）。1 にすると、発注量を決めるとき、すでに発注してまだ届いていない分（輸送中・生産中）も数え、二重に発注しない。単位：なし",
+      "behavior": {
+        "value": 0
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 0,
+        "interactive_max": 1,
+        "coordinates": [
+          380,
+          -60
+        ]
+      }
+    },
+    {
+      "type": "VARIABLE",
+      "name": "消費者の需要を共有",
+      "description": "対策のスイッチ（0 か 1）。1 にすると、卸と工場も、下流からの注文ではなく店頭の売れ行き（消費者の需要）を見て予測する。単位：なし",
+      "behavior": {
+        "value": 0
+      },
+      "display": {
+        "interactive": true,
+        "interactive_min": 0,
+        "interactive_max": 1,
+        "coordinates": [
+          620,
+          -140
+        ]
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "受けた注文をそのまま流す",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "届いていない注文も数える",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の届いていない注文",
+      "to": "小売の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要を共有",
+      "to": "卸の需要予測",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要",
+      "to": "卸の需要予測",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "受けた注文をそのまま流す",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の発注",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "届いていない注文も数える",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の届いていない注文",
+      "to": "卸の発注",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要を共有",
+      "to": "工場の需要予測",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "消費者の需要",
+      "to": "工場の需要予測",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "受けた注文をそのまま流す",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の発注",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "届いていない注文も数える",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "生産の遅れ",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の生産中",
+      "to": "工場の生産指示",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "小売の届いていない注文",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "卸の届いていない注文",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "生産の遅れ",
+      "to": "工場の生産中",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の発注",
+      "to": "小売の注文を出す",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の発注",
+      "to": "卸の注文を出す",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の生産指示",
+      "to": "生産を始める",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "生産",
+      "to": "完成する",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の在庫",
+      "to": "販売",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の在庫",
+      "to": "卸から小売への出荷",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "工場の在庫",
+      "to": "工場から卸への出荷",
+      "behavior": {
+        "polarity": "POSITIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "小売の発注",
+      "to": "小売に届く",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "小売に届く",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "卸の発注",
+      "to": "卸に届く",
+      "behavior": {
+        "polarity": "POSITIVE"
+      },
+      "display": {
+        "delay": true
+      }
+    },
+    {
+      "type": "LINK",
+      "from": "出荷の遅れ",
+      "to": "卸に届く",
+      "behavior": {
+        "polarity": "NEGATIVE"
+      }
+    }
+  ],
+  "description": "【どんな問題か】同じフォルダの bullwhip（ブルウィップ効果）のモデルで見た、上流ほど大きくなる発注の振れを、どうすれば小さくできるかを比べる。\n\n【どんな構造か】bullwhip と同じ 4 段のサプライチェーンに、各段の「届いていない注文」（小売と卸は輸送中の分、工場は生産中の分）のストックと、対策を切り替える 3 つのスイッチ（0 か 1）を足した。スイッチがすべて 0 なら、bullwhip と同じ動きになる。\n・受けた注文をそのまま流す：各段が、受けた注文と同じ量だけ上流へ発注する。在庫の不足は埋めない。\n・届いていない注文も数える：発注量を決めるとき、届いていない注文が目安（需要予測 × 届くまでの週数）より多ければ、そのぶん発注を控える。「届いていない注文が増える → 発注を減らす → 届いていない注文の増え方が減る」という釣り合わせるループ（find_loops の B7〜B9）が働く。届くと届いていない注文が減り、また発注するので、「発注 → 届く → 届いていない注文が減る → 発注」という強めるループ（find_loops の R1〜R3）もできる。B7〜B9 と組になって、届くまでの間だけ発注を控える働きをする。\n・消費者の需要を共有：卸と工場も、下流からの注文ではなく、店頭の売れ行き（消費者の需要）を見て予測する。\n\n【どんな動きになるか】グラフ「発注の振れ」と「在庫」で、保存したシナリオを「元のモデル」と比べる。工場の生産指示の山は、元のモデルでは 13 週目に約 533。\n・A 需要以上の発注をしない：振れはなくなる（120 のまま）が、在庫は減ったまま戻らない（小売の在庫は 400 から 360 へ）。\n・B 在庫をゆっくり戻す：山は約 177 に下がるが、在庫が戻るのに時間がかかる。\n・C 届いていない注文も数える：山は約 220 に下がり、在庫は目標（4 週分、480）に戻る。\n・D 売れ行きを共有する：山は約 349。これだけでは波が残る。\n・C+D 数える＋共有する：山は約 149 まで下がり、どの段の在庫も 480 へ行き過ぎずに戻る。\n\n【てこはどこか】効くのは、在庫の不足だけを見て慌てて発注するのをやめ、すでに頼んだ分（届いていない注文）も数えることと、店頭の売れ行きを上流と共有すること。2 つを合わせると、発注の振れも在庫の行き過ぎもほとんどなくなる。どれも、在庫を持つ量や遅れの長さは変えずに、発注の決め方と見る情報を変える打ち手である。\n\n【数字と単純化について】数字は動きの形を見せるための仮の値で、実際の会社の値ではない。品物は 1 種類で、出せなかった注文（欠品）は後で埋めずに消えるものとした。届いていない注文も、届くはずだった時点で、出せなかった分も含めて外す。図のリンクの ＋ と − は、需要が増えたときにどちらへ動くかで付けた（スイッチからのリンクは、スイッチを 1 にしたときに発注や予測が下がる向きで −）。生産の能力の上限、在庫や欠品の費用は省いた。ピーター・センゲ『学習する組織』のビールゲームをもとに、このプロジェクトで作ったモデル。",
+  "visualizations": [
+    {
+      "type": "TIME_SERIES",
+      "name": "発注の振れ",
+      "elements": [
+        "消費者の需要",
+        "小売の発注",
+        "卸の発注",
+        "工場の生産指示"
+      ]
+    },
+    {
+      "type": "TIME_SERIES",
+      "name": "在庫",
+      "elements": [
+        "小売の在庫",
+        "卸の在庫",
+        "工場の在庫"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "A 需要以上の発注をしない",
+      "values": {
+        "受けた注文をそのまま流す": 1
+      },
+      "description": "各段が、受けた注文と同じ量だけ上流へ発注する。発注の振れはなくなるが、在庫は減ったまま戻らない"
+    },
+    {
+      "name": "B 在庫をゆっくり戻す",
+      "values": {
+        "在庫の調整時間": 8
+      },
+      "description": "在庫の不足を 2 週ではなく 8 週かけて埋める。急な追加発注が減る"
+    },
+    {
+      "name": "C 届いていない注文も数える",
+      "values": {
+        "届いていない注文も数える": 1
+      },
+      "description": "発注量を決めるとき、輸送中・生産中の分も数えて、二重に発注しない"
+    },
+    {
+      "name": "D 売れ行きを共有する",
+      "values": {
+        "消費者の需要を共有": 1
+      },
+      "description": "卸と工場も、下流からの注文ではなく店頭の売れ行きを見て予測する。これだけでは波は残る"
+    },
+    {
+      "name": "C+D 数える＋共有する",
+      "values": {
+        "届いていない注文も数える": 1,
+        "消費者の需要を共有": 1
+      },
+      "description": "届いていない注文も数え、売れ行きも共有する。発注の山は小さく、在庫は目標の 4 週分へ行き過ぎずに戻る"
+    }
+  ],
+  "groups": [
+    {
+      "name": "小売",
+      "color": "green",
+      "elements": [
+        "卸から小売への出荷",
+        "小売の在庫",
+        "販売",
+        "消費者の需要",
+        "小売の需要予測",
+        "小売の目標在庫",
+        "小売の発注",
+        "小売の届いていない注文",
+        "小売の注文を出す",
+        "小売に届く"
+      ]
+    },
+    {
+      "name": "卸",
+      "color": "teal",
+      "elements": [
+        "工場から卸への出荷",
+        "卸の在庫",
+        "卸の需要予測",
+        "卸の目標在庫",
+        "卸の発注",
+        "卸の届いていない注文",
+        "卸の注文を出す",
+        "卸に届く"
+      ]
+    },
+    {
+      "name": "工場",
+      "color": "purple",
+      "elements": [
+        "生産",
+        "工場の在庫",
+        "工場の需要予測",
+        "工場の目標在庫",
+        "工場の生産指示",
+        "工場の生産中",
+        "生産を始める",
+        "完成する"
+      ]
+    }
+  ]
+}
