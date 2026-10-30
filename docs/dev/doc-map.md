@@ -6,4 +6,5 @@
 | 式、エンジンの版 | docs/reference/formulas.md |
 | 入れ方、必要なもの | README.md、docs/getting-started.md |
 | 開発の手順、scripts | CONTRIBUTING.md |
+| examples/ の sample | examples/README.md の一覧（その sample の項目） |
 | 利用者に見える変更 | CHANGELOG.md |

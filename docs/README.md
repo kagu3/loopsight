@@ -6,6 +6,7 @@ loopsight の文書の一覧。初めての人は、[はじめての手順](gett
 
 - [はじめての手順](getting-started.md)：Node.js を入れる、Claude Code に登録する、最初のモデルを頼む、ビューアで見る、シナリオで比べる。Claude に渡して、代わりに入れてもらうこともできる
 - [ビューアの使い方](viewer.md)：画面の見方と操作（スクリーンショットつき）
+- [sample のモデル](../examples/README.md)：システム思考を学ぶための sample。学ぶ順の一覧と使い方
 
 ### リファレンス
 
