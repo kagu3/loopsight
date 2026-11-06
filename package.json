@@ -21,6 +21,7 @@
   "files": [
     "dist/",
     "!dist/**/*.map",
+    "!dist/demo/",
     "CHANGELOG.md"
   ],
   "engines": {
@@ -30,6 +31,7 @@
     "build": "tsc -p tsconfig.json && vite build --config web/vite.config.ts",
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build --config web/vite.config.ts",
+    "build:demo": "vite build --config web/vite.config.ts --mode demo",
     "prepublishOnly": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && npm run build && npm run typecheck && npm test",
     "start": "node dist/mcp/index.js",
     "viewer": "node dist/viewer/index.js",

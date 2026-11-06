@@ -2,6 +2,8 @@
 
 loopsight を入れて、最初のモデルを作り、ビューアで見て、シナリオで比べるところまでを、順に進めます。
 
+入れる前に試したいときは、[デモサイト](https://kagu3.github.io/loopsight/) で、sample のモデルをビューアの画面で触れます（値やシナリオを変えられますが、保存はされません）。
+
 > **Claude に任せることもできます。** Claude Code に、このページのアドレス（https://github.com/kagu3/loopsight/blob/main/docs/getting-started.md）を貼って「この手順で loopsight を入れて」と頼めば、Claude が代わりに入れるか、あなたがすることを示してくれます。Claude 向けの注意は [Claude がこの手順を進めるとき](#claude-がこの手順を進めるとき) にあります。
 
 ## 目次

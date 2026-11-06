@@ -21,6 +21,7 @@ npm run typecheck # 型チェック
 npm run build     # dist/ にビルド（サーバーと画面）
 npm run viewer    # ビルドしたビューアを起動する（http://localhost:5180/）
 npm run dev:web   # 画面の開発用サーバー（/api は npm run viewer に回す）
+npm run build:demo # デモサイトを dist/demo にビルドする（下の「デモサイト」）
 npm run screenshots # docs/viewer.md のスクリーンショットを撮り直す（先に npm run build。Edge か Chrome が必要）
 npm run docs      # MCP のツールの定義から docs/reference/tools.md を作り直す
 ```
@@ -28,6 +29,16 @@ npm run docs      # MCP のツールの定義から docs/reference/tools.md を�
 `npm run viewer` に起動引数を渡すときは、`npm run viewer -- --port 5181` のように `--` のあとに書く。
 
 テストの一部はビルドした画面（`dist/web`）を使う。先に `npm run build` をしてから `npm test` を実行する。
+
+### デモサイト
+
+[デモサイト](https://kagu3.github.io/loopsight/) は、`examples/` の sample を、入れずにブラウザで触れるビューアの画面。サーバーはなく、画面の中でモデルを実行し、変更はメモリにだけ持つ（読み直すと元の sample に戻る）。
+
+- ビルド：`npm run build:demo`（`vite build --mode demo`）。`dist/demo` に静的なファイルを出す。`base` は `/loopsight/`
+- 手元で開く：`npx vite preview --config web/vite.config.ts --mode demo` を実行し、表示されたアドレスの `/loopsight/` を開く
+- 公開：main に入るたびに、GitHub Actions（[.github/workflows/demo.yml](.github/workflows/demo.yml)）がビルドして GitHub Pages に置く。手でも動かせる（Actions →「デモサイトを公開する」→ Run workflow）。リポジトリの Settings → Pages の Source は「GitHub Actions」にしておく
+- しくみ：画面がサーバーとやりとりするのは `web/src/api.ts` だけ。デモのビルドでは、その裏側を `web/src/demo/store.ts`（ブラウザの中のモデル）に差し替える。モデルを実行して返す形を作ることと、書き込みの確かめは `src/viewer/shared.ts` にまとめ、ビューアのサーバーと同じものを使う（動きがずれていないことは `tests/demo-store.test.ts` で確かめる）
+- デモでは、作業フォルダに書く機能（図の書き出し）と、変更の知らせ（`/api/events`）を使わない。画面のコードは複製せず、`web/src/api.ts` の `DEMO` で切り替える。`api.ts` はやりとりの相手（サーバーかブラウザの中のモデルか）を、`App.tsx` も同じ `DEMO` を見て、画面の違い（「ライブ」の代わりの「デモ」の印、デモの説明の欄、図の「書き出す」ボタンを出さないこと）を切り替える
 
 ### clone したもので MCP サーバーを使う
 
@@ -45,8 +56,8 @@ npm で入れたものも `loopsight` の名前で登録しているときは、
 
 - `src/core`：モデルの保持、変換、編集、検証、実行。MCP に依存しない（ビューアでも使う）
 - `src/mcp`：中核部分を MCP ツールとして公開する薄い層
-- `src/viewer`：ビューアのサーバー（API、ファイルの監視、画面の配信）
-- `web`：ビューアの画面（React、React Flow、Recharts。Vite で `dist/web` にビルド）
+- `src/viewer`：ビューアのサーバー（API、ファイルの監視、画面の配信）。`shared.ts` はデモサイトと共通の処理で、Node.js に依存させない
+- `web`：ビューアの画面（React、React Flow、Recharts。Vite で `dist/web` にビルド）。`web/src/demo` はデモサイトだけで使う
 - `examples`：公開する sample のモデル。足す・直すときの決まりと、テスト（`tests/examples.test.ts`）で確かめていることは [examples/README.md](examples/README.md) にある
 
 ## 守ってほしい決まり
@@ -68,7 +79,7 @@ npm で入れたものも `loopsight` の名前で登録しているときは、
 - **insightmaker.com には自動でアクセスしない**（利用規約で自動アクセスとスクレイピングが禁止されているため）。
 - **エンジン `simulation` が AGPL なので、このプロジェクトも AGPL-3.0（3 以降の版も可）にする。** 本文はリポジトリ直下の [LICENSE](LICENSE)。
 - **対象はシステムダイナミクスのモデル。** エージェントベースのモデルと、その部品の状態（STATE）と遷移（TRANSITION）は扱わない。
-- **`src/core` は Node.js の API に依存させない**（ファイルを読み書きする `store.ts` を除く）。ブラウザだけで動く版を後で作るため。`node:fs` などを使う処理は `store.ts` か、`src/mcp`・`src/viewer` に置く。
+- **`src/core` は Node.js の API に依存させない**（ファイルを読み書きする `store.ts` を除く）。ブラウザだけで動く版を後で作るため。`node:fs` などを使う処理は `store.ts` か、`src/mcp`・`src/viewer` に置く。ただし `src/viewer/shared.ts` と `web/src/demo` はデモサイトで動くので、同じく Node.js に依存させない（`tests/viewer-shared.test.ts` で確かめる）。
 
 これらの決まりは、もとは [docs/dev/VISION.md](docs/dev/VISION.md) の「操作の指針」と「制約と方針」にあった。Issue の本文で `docs/VISION.md` の「操作の指針」と書いてあるものは、ここを指す。
 

@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["dist/viewer/index.js"],
       "port": 5180
+    },
+    {
+      "name": "demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "preview", "--config", "web/vite.config.ts", "--mode", "demo", "--port", "4173", "--strictPort"],
+      "port": 4173
     }
   ]
 }

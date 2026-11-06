@@ -1,7 +1,7 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { AnnotationPatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch, SimulationSettings } from "../../src/viewer/api.js";
-import { FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postRemove, postScenarios, postSimulation, postUndo, type WriteResult } from "./api.js";
+import { DEMO, FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postRemove, postScenarios, postSimulation, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details, DelayToggle, linkPolarity, PolarityPicker } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
@@ -16,6 +16,7 @@ import { annotationsOf, findLink, sameName } from "../../src/core/modeljson.js";
 import { hasDelayMark } from "../../src/core/delay.js";
 import { countProblems, describeProblemCount, listProblems, stripCount } from "./problemList.js";
 import { Problems } from "./Problems.js";
+import { DemoNotice } from "./DemoNotice.js";
 import { ModelTree } from "./ModelTree.js";
 import { NoteDetails } from "./NoteDetails.js";
 import { folderKey, foldersOf, modelHash, modelTree } from "./modelList.js";
@@ -489,11 +490,12 @@ export function App() {
     [show, modelGone],
   );
 
-  // 一覧と変更の知らせ
+  // 一覧と変更の知らせ。デモでは、ほかから変わることはないので、変更の知らせ（/api/events）は使わない
   useEffect(() => {
     void loadList();
     let es: EventSource | undefined;
     const connect = () => {
+      if (DEMO) return;
       const source = new EventSource("/api/events");
       es = source;
       // つながり直したら読み直す（切れているあいだの変更は知らせが来ないため）
@@ -1126,10 +1128,16 @@ export function App() {
       <aside className="sidebar" id="sidebar">
         <header className="brand">
           <h1>Loopsight ビューア</h1>
-          <span className={`live ${connected ? "on" : ""}`} title={connected ? "ファイルの変更を見ています" : "サーバーにつながっていません"}>
-            <span className="dot" />
-            {connected ? "ライブ" : "未接続"}
-          </span>
+          {DEMO ? (
+            <span className="live demo" title="デモです。変更は保存されません">
+              デモ
+            </span>
+          ) : (
+            <span className={`live ${connected ? "on" : ""}`} title={connected ? "ファイルの変更を見ています" : "サーバーにつながっていません"}>
+              <span className="dot" />
+              {connected ? "ライブ" : "未接続"}
+            </span>
+          )}
           <button
             className="sidebar-collapse"
             ref={collapseRef}
@@ -1142,6 +1150,8 @@ export function App() {
             ◀
           </button>
         </header>
+
+        {DEMO && <DemoNotice />}
 
         <section className="panel">
           <h2>{editingSimulation ? "シミュレーション" : scenario ? "シナリオ" : selectedLink ? "選んだ線" : selectedNote !== undefined ? "選んだ注釈" : "選んだ要素"}</h2>
@@ -1304,7 +1314,8 @@ export function App() {
                   liveValues={liveValues}
                   valueTools={valueTools}
                   formula={selectedFormula}
-                  onExport={exportDiagramFiles}
+                  // デモでは、作業フォルダに書く「書き出す」を出さない
+                  onExport={DEMO ? undefined : exportDiagramFiles}
                   loop={loop?.view}
                   onLoopClose={closeLoop}
                   paneTools={<ExpandButton pane="diagram" expanded={expanded} onChange={expandPane} className="edit-toggle" />}
