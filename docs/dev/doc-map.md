@@ -6,5 +6,6 @@
 | 式、エンジンの版 | docs/reference/formulas.md |
 | 入れ方、必要なもの | README.md、docs/getting-started.md |
 | 開発の手順、scripts | CONTRIBUTING.md |
+| ビューアの API（web/src/api.ts、src/viewer/server.ts） | web/src/demo/store.ts（デモ。足さないと、デモではその機能だけ動かない）。書き込みの種類なら src/viewer/shared.ts の `WriteAction` と `applyWrite` |
 | examples/ の sample | examples/README.md の一覧（その sample の項目） |
 | 利用者に見える変更 | CHANGELOG.md |

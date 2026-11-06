@@ -1,0 +1,37 @@
+# PR のときと、main に入ったときに、型チェック・テスト・ビルド（デモサイトも）を走らせる。
+# main の保護で、このジョブ（check）が通らない PR はマージできないようにしている（CONTRIBUTING.md の「CI と main の保護」）。
+# ジョブの名前を変えると、main の保護の「必須のチェック」も直す必要がある
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# 同じ PR に新しい push があったら、古い実行は止める。main への push は、動いている実行を止めずに次を待たせる
+# （待てるのは 1 つだけなので、続けて push すると、待っていた古いほうは取り消される）
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # サーバーやファイルの監視を使うテストが終わらなくなっても、必須のチェックが「実行中」のまま残らないようにする
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # 図の画像を作るテスト（view_diagram と export_diagram）は、ビルドの前で dist/web がないので、
+      # 画像を作れないときの知らせだけを確かめる。npm run screenshots は走らせない
+      - run: npm test
+      - run: npm run build
+      - run: npm run build:demo
