@@ -6,6 +6,8 @@ AI アシスタントと一緒にシステムダイナミクス（SD）のモデ
 - ビューア（ブラウザで開く画面）で、図とグラフを見ながら式の値や配置を手直しできる。AI がモデルを変えると、画面がその場で変わる
 - 図だけを SVG と PNG に書き出して、資料に貼れる
 
+> **デモを触る：** 入れなくても、ブラウザで sample のモデルを触れる。[デモサイト](https://kagu3.github.io/loopsight/)（変更は保存されない）
+
 > **Claude に入れてもらうこともできる。** Claude Code に、はじめての手順のアドレス（https://github.com/kagu3/loopsight/blob/main/docs/getting-started.md）を貼って「この手順で loopsight を入れて」と頼めば、Claude が代わりに入れるか、あなたがすることを示してくれる。
 
 ![ビューアの画面](docs/images/viewer/overview.png)
@@ -17,7 +19,8 @@ AI アシスタントと一緒にシステムダイナミクス（SD）のモデ
 | 使い方 | 向いている人 | 始め方 |
 |---|---|---|
 | npm で入れる（`npx`） | Claude Code などの AI と一緒に使う人 | [はじめての手順](docs/getting-started.md) |
-| ブラウザ版（予定） | 何も入れずに試したい人 | まだない |
+| デモサイト | 入れる前に、何ができるかを見たい人 | [デモを触る](https://kagu3.github.io/loopsight/)（sample だけ。変更は保存されない） |
+| ブラウザ版（予定） | 何も入れずに自分のモデルを使いたい人 | まだない |
 
 ## すぐに始める
 

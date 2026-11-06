@@ -1,0 +1,46 @@
+# デモサイト（examples/ の sample を触れるビューア）をビルドして、GitHub Pages に置く。
+# main に入るたびに動く。手でも動かせる（Actions → このワークフロー → Run workflow）。
+# 公開先は https://kagu3.github.io/loopsight/（リポジトリの Settings → Pages の Source を「GitHub Actions」にしておく）
+name: デモサイトを公開する
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 公開は 1 つずつ。動いている公開は止めない（途中で止めると、半端な状態になるため）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:demo
+      - uses: actions/configure-pages@v6
+      # 先頭が . のファイルは載せない（この action の既定）。dist/demo には、そうしたファイルはない
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/demo
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
