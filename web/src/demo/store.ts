@@ -1,11 +1,13 @@
 // デモサイトの「サーバーの代わり」。ブラウザの中で、メモリ上のモデルを読み書きする。
 // 返す形はビューアのサーバー（src/viewer/server.ts）と同じで、確かめと実行は src/viewer/shared.ts の同じ処理を使う。
+// 実際のデータ（<モデル名>.data.csv）も、モデルと同じようにメモリに持ち、グラフに点で重ねる。
 // 変更はメモリにだけ持つので、ページを読み直すと元の sample に戻る。元に戻す（undo）の記録もメモリの中だけに持つ。
 // Node.js の API は使わない（tests/viewer-shared.test.ts で確かめる）。動きがサーバーとずれていないことは tests/demo-store.test.ts で確かめる
 import type { EditErrorResponse, EditResponse, FolderInfo, ModelInfo, ModelListResponse, ModelResponse } from "../../../src/viewer/api.js";
+import { renameDataHeader } from "../../../src/core/data.js";
 import { EditError } from "../../../src/core/edit.js";
 import type { ModelJSON } from "../../../src/core/modeljson.js";
-import { CONFLICT_MESSAGE, NOTHING_TO_UNDO, RequestError, applyWrite, buildModelResponse, modelText, pushHistory, type HistoryEntry, type WriteAction, type WriteBody } from "../../../src/viewer/shared.js";
+import { CONFLICT_MESSAGE, NOTHING_TO_UNDO, RequestError, actualDataResult, applyWrite, buildModelResponse, modelText, pushHistory, type HistoryEntry, type WriteAction, type WriteBody } from "../../../src/viewer/shared.js";
 
 /** 読めなかったときのエラー。status はサーバーと同じ番号（404 ならモデルがない） */
 export class DemoError extends Error {
@@ -46,6 +48,8 @@ const folderOf = (name: string) => (name.includes("/") ? name.slice(0, name.last
 export class DemoStore {
   /** モデル名 → いまの中身（ModelJSON の文字列） */
   private readonly texts = new Map<string, string>();
+  /** モデル名 → 実際のデータ（<モデル名>.data.csv の中身）。グラフに点で重ねる */
+  private readonly data = new Map<string, string>();
   /** 画面からの書き込みの記録（モデル名 → 古い順） */
   private readonly history = new Map<string, HistoryEntry[]>();
   /** 最後に作った応答（同じ版を読み直すたびに実行し直さないように） */
@@ -53,14 +57,17 @@ export class DemoStore {
 
   /**
    * models はモデル名（フォルダを含む。例：0_コーヒーが冷める/coffee-cooling）→ ModelJSON の文字列。
+   * data はモデル名 → 実際のデータ（CSV の中身）。モデルのないデータは使わない。
    * dir は一覧に出す作業フォルダの名前、modified はすべてのモデルの「変えた時刻」（どれも同じにする）
    */
   constructor(
     models: Record<string, string>,
+    data: Record<string, string> = {},
     private readonly dir = "examples",
     private readonly modified = "2026-01-01T00:00:00.000Z",
   ) {
     for (const name of Object.keys(models).sort(compareNames)) this.texts.set(name, models[name]!);
+    for (const [name, text] of Object.entries(data)) if (this.texts.has(name)) this.data.set(name, text);
   }
 
   /** 名前に当たるモデル。大文字と小文字は区別しない（Windows と macOS のファイル名に合わせる） */
@@ -125,11 +132,30 @@ export class DemoStore {
     const key = this.find(name);
     const { model, version } = this.current(key);
     const undo = this.historyOf(key).length;
+    const data = this.data.get(key);
+    const dataVersion = data === undefined ? undefined : demoVersion(data);
     const cached = this.cache.get(key);
-    if (cached && cached.version === version && cached.undo_available === undo) return cached;
-    const res = buildModelResponse({ name: key, modified: this.modified, version, undoAvailable: undo, model });
+    if (cached && cached.version === version && cached.undo_available === undo && cached.actual?.version === dataVersion) return cached;
+    // 実際のデータのファイル名は、サーバーと同じく <モデル名の最後の部分>.data.csv
+    const actual = data === undefined ? undefined : actualDataResult(model, data, `${key.slice(key.lastIndexOf("/") + 1)}.data.csv`, dataVersion!);
+    const res = buildModelResponse({ name: key, modified: this.modified, version, undoAvailable: undo, model, actual });
     this.cache.set(key, res);
     return res;
+  }
+
+  /** 要素の名前を変えたときに、実際のデータの列名も直す（src/core/store.ts の renameDataColumns と同じ知らせを返す） */
+  private renameDataColumns(name: string, renames: [string, string][]): { note?: string; warning?: string } {
+    const text = this.data.get(name);
+    if (!renames.length || text === undefined) return {};
+    const file = `${name.slice(name.lastIndexOf("/") + 1)}.data.csv`;
+    try {
+      const next = renameDataHeader(text, renames);
+      if (next === undefined) return {};
+      this.data.set(name, next);
+      return { note: `実際のデータ（${file}）の列名も直しました。` };
+    } catch (e) {
+      return { warning: `実際のデータ（${file}）の列名を直せませんでした（${(e as Error).message}）。列名を要素名にそろえてください。` };
+    }
   }
 
   /** POST /api/models/:name/<action> と同じ。version はいま画面に出している版 */
@@ -146,13 +172,17 @@ export class DemoStore {
         const text = modelText(current.model);
         this.texts.set(key, text);
         pushHistory(hist, { before: current.text, after: demoVersion(text), renamed });
-        return { status: 200, body: { ...(report ? { report } : {}), model: this.get(key), ...(renamed.length ? { renamed } : {}) } };
+        // 実際のデータの列名も、サーバーと同じく直す
+        const data = this.renameDataColumns(key, renamed);
+        if (data.note && report && "notes" in report) report.notes.push(data.note);
+        return { status: 200, body: { ...(report ? { report } : {}), model: this.get(key), ...(data.warning ? { warning: data.warning } : {}), ...(renamed.length ? { renamed } : {}) } };
       }
       const last = hist.pop();
       if (!last) throw new RequestError(400, NOTHING_TO_UNDO);
       this.texts.set(key, last.before);
       const back = last.renamed.map(([from, to]): [string, string] => [to, from]);
-      return { status: 200, body: { model: this.get(key), ...(back.length ? { renamed: back } : {}) } };
+      const data = this.renameDataColumns(key, back);
+      return { status: 200, body: { model: this.get(key), ...(data.warning ? { warning: data.warning } : {}), ...(back.length ? { renamed: back } : {}) } };
     } catch (e) {
       const status = e instanceof RequestError ? e.status : e instanceof DemoError ? e.status : e instanceof EditError ? 400 : 500;
       return { status, body: { error: (e as Error).message } };
