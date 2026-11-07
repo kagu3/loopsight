@@ -38,6 +38,7 @@ npm run docs      # MCP のツールの定義から docs/reference/tools.md を�
 - 手元で開く：`npx vite preview --config web/vite.config.ts --mode demo` を実行し、表示されたアドレスの `/loopsight/` を開く
 - 公開：main に入るたびに、GitHub Actions（[.github/workflows/demo.yml](.github/workflows/demo.yml)）がビルドして GitHub Pages に置く。手でも動かせる（Actions →「デモサイトを公開する」→ Run workflow）。リポジトリの Settings → Pages の Source は「GitHub Actions」にしておく
 - しくみ：画面がサーバーとやりとりするのは `web/src/api.ts` だけ。デモのビルドでは、その裏側を `web/src/demo/store.ts`（ブラウザの中のモデル）に差し替える。モデルを実行して返す形を作ることと、書き込みの確かめは `src/viewer/shared.ts` にまとめ、ビューアのサーバーと同じものを使う（動きがずれていないことは `tests/demo-store.test.ts` で確かめる）
+- sample の中身：`web/src/demo/samples.ts` が、ビルドのときに `examples/*/*.json`（モデル）と `examples/*/*.data.csv`（実際のデータ）を埋め込む。データも、モデルと同じようにメモリに持ち、グラフに点で重ねる
 - デモでは、作業フォルダに書く機能（図の書き出し）と、変更の知らせ（`/api/events`）を使わない。画面のコードは複製せず、`web/src/api.ts` の `DEMO` で切り替える。`api.ts` はやりとりの相手（サーバーかブラウザの中のモデルか）を、`App.tsx` も同じ `DEMO` を見て、画面の違い（「ライブ」の代わりの「デモ」の印、デモの説明の欄、図の「書き出す」ボタンを出さないこと）を切り替える
 
 **デモを置いていかないための決まり。** 画面のコードはビューアと同じなので、ほとんどの変更は main に入ると自動でデモにも入る。ただし、ビューアのサーバーと新しい種類のやりとり（`web/src/api.ts` の新しい関数と、`src/viewer/server.ts` の新しい API）を足したときは、デモ側の `web/src/demo/store.ts` にも同じものを足す。足さないと、デモではその機能だけ動かない。モデルへの書き込みの種類を足すときは、`src/viewer/shared.ts` の `WriteAction` と `applyWrite` に足せば、サーバーとデモの両方に入る。この決まりは [docs/dev/doc-map.md](docs/dev/doc-map.md) の表にもある。
@@ -84,7 +85,7 @@ npm で入れたものも `loopsight` の名前で登録しているときは、
 - `src/mcp`：中核部分を MCP ツールとして公開する薄い層
 - `src/viewer`：ビューアのサーバー（API、ファイルの監視、画面の配信）。`shared.ts` はデモサイトと共通の処理で、Node.js に依存させない
 - `web`：ビューアの画面（React、React Flow、Recharts。Vite で `dist/web` にビルド）。`web/src/demo` はデモサイトだけで使う
-- `examples`：公開する sample のモデル。足す・直すときの決まりと、テスト（`tests/examples.test.ts`）で確かめていることは [examples/README.md](examples/README.md) にある
+- `examples`：公開する sample のモデル。足す・直すときの決まりと、テスト（`tests/examples.test.ts`、`tests/examples-numbers.test.ts`）で確かめていることは [examples/README.md](examples/README.md) にある
 
 ## 守ってほしい決まり
 
