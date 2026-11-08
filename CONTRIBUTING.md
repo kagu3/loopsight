@@ -85,7 +85,7 @@ npm で入れたものも `loopsight` の名前で登録しているときは、
 - `src/mcp`：中核部分を MCP ツールとして公開する薄い層
 - `src/viewer`：ビューアのサーバー（API、ファイルの監視、画面の配信）。`shared.ts` はデモサイトと共通の処理で、Node.js に依存させない
 - `web`：ビューアの画面（React、React Flow、Recharts。Vite で `dist/web` にビルド）。`web/src/demo` はデモサイトだけで使う
-- `examples`：公開する sample のモデル。足す・直すときの決まりと、テスト（`tests/examples.test.ts`）で確かめていることは [examples/README.md](examples/README.md) にある
+- `examples`：公開する sample のモデル。足す・直すときの決まりと、テスト（`tests/examples.test.ts`、`tests/examples-numbers.test.ts`）で確かめていることは [examples/README.md](examples/README.md) にある
 
 ## 守ってほしい決まり
 

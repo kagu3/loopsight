@@ -4,10 +4,12 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  checkActualData,
   checkDiagram,
   emptyModel,
   findLoops,
   layoutModel,
+  parseDataCSV,
   runScenarios,
   setScenarios,
   toModelError,
@@ -39,6 +41,38 @@ function placementProblems(file: string): string[] {
   return problems;
 }
 
+/** 説明の見出しの並び（examples/README.md の「中身の決まり」）。見出しは行の頭に置く */
+const DESCRIPTION_HEADINGS = [
+  "ひとことで",
+  "どんな問題か",
+  "どんな構造か",
+  "どんな動きになるか",
+  "てこはどこか",
+  "数字と単純化について",
+  "もっと詳しく",
+];
+
+/** 説明が、決まりの見出しの並びに反していれば、その理由を返す */
+function descriptionProblems(description: string): string[] {
+  const problems: string[] = [];
+  if (!description.startsWith("【ひとことで】")) problems.push("説明が【ひとことで】で始まっていない");
+  // 本文の中で見出しの名前を引くこともあるので、行の頭にあるものだけを見出しとみなす
+  const headings = [...description.matchAll(/^【([^】]+)】/gm)].map((m) => m[1]!);
+  if (headings.join("→") !== DESCRIPTION_HEADINGS.join("→")) {
+    problems.push(`説明の見出しの並びを ${DESCRIPTION_HEADINGS.map((h) => `【${h}】`).join("→")} にする（いまは ${headings.map((h) => `【${h}】`).join("→") || "見出しなし"}）`);
+  }
+  return problems;
+}
+
+/** 実際のデータ（.data.csv）が、モデルと照らして問題のあるところ。なければ空 */
+function dataProblems(model: ModelJSON, csv: string): string[] {
+  try {
+    return checkActualData(model, parseDataCSV(csv)).map((i) => `実際のデータ：${i.message}`);
+  } catch (e) {
+    return [`実際のデータが読めない：${(e as Error).message}`];
+  }
+}
+
 /** モデルが sample の決まりに反しているところ（決まりごとに 1 行）。守っていれば空 */
 function sampleProblems(model: ModelJSON): string[] {
   const problems: string[] = [];
@@ -48,6 +82,7 @@ function sampleProblems(model: ModelJSON): string[] {
   for (const i of v.warnings) problems.push(`検証の警告：${i.element ? `${i.element}：` : ""}${i.message}`);
 
   if (!model.description?.trim()) problems.push("モデルの説明（description）がない");
+  else problems.push(...descriptionProblems(model.description));
 
   for (const el of model.elements) {
     if (el.type !== "LINK") continue;
@@ -82,7 +117,7 @@ function sampleProblems(model: ModelJSON): string[] {
 /** 決まりを守った小さなモデル（コーヒーが冷める）。単体のテストで、ここから 1 つずつ壊す */
 function goodModel(): ModelJSON {
   const m = emptyModel("coffee", { time_length: 60, time_units: "MINUTES" });
-  m.description = "テスト用。コーヒーの温度が室温に近づく。";
+  m.description = DESCRIPTION_HEADINGS.map((h) => `【${h}】テスト用。`).join("\n\n");
   upsertElements(m, [
     { type: "STOCK", name: "コーヒーの温度", behavior: { initial_value: 90 } },
     { type: "VARIABLE", name: "室温", behavior: { value: 20 } },
@@ -112,6 +147,8 @@ describe("examples/ の sample", () => {
       problems.push(`ModelJSON として読めない：${(e as Error).message}`);
     }
     if (model) problems.push(...sampleProblems(model));
+    const csv = path.join(EXAMPLES_DIR, file.replace(/\.json$/i, ".data.csv"));
+    if (model && existsSync(csv)) problems.push(...dataProblems(model, readFileSync(csv, "utf8")));
     expect(problems, `examples/${file} が sample の決まり（examples/README.md）に反しています:\n${problems.join("\n")}`).toEqual([]);
   });
 });
@@ -140,6 +177,29 @@ describe("sample の決まりの判定", () => {
     const m = goodModel();
     delete m.description;
     expect(sampleProblems(m)).toEqual(["モデルの説明（description）がない"]);
+  });
+
+  test("説明は【ひとことで】で始め、見出しを決まりの順に並べる", () => {
+    const m = goodModel();
+    expect(descriptionProblems(m.description!)).toEqual([]);
+    // 本文の中で見出しの名前を引いても、見出しとは数えない
+    expect(descriptionProblems(m.description!.replace("【もっと詳しく】テスト用。", "【もっと詳しく】（【どんな問題か】を参照）"))).toEqual([]);
+    m.description = `前置き。\n${m.description}`;
+    expect(sampleProblems(m)).toEqual(["説明が【ひとことで】で始まっていない"]);
+    const swapped = goodModel();
+    swapped.description = swapped.description!.replace("【どんな構造か】", "【X】").replace("【どんな問題か】", "【どんな構造か】").replace("【X】", "【どんな問題か】");
+    expect(sampleProblems(swapped)).toEqual([expect.stringContaining("いまは 【ひとことで】→【どんな構造か】→【どんな問題か】")]);
+    const missing = goodModel();
+    missing.description = missing.description!.replace(/\n\n【もっと詳しく】テスト用。$/, "");
+    expect(sampleProblems(missing)).toEqual([expect.stringContaining("見出しの並び")]);
+  });
+
+  test("実際のデータ（.data.csv）がモデルに合う", () => {
+    const m = goodModel();
+    expect(dataProblems(m, "Time,コーヒーの温度\n0,90\n10,60\n")).toEqual([]);
+    expect(dataProblems(m, "Time,コーヒー\n0,90\n")).toEqual([expect.stringMatching(/^実際のデータ：.*"コーヒー"/)]);
+    expect(dataProblems(m, "Time,コーヒーの温度\n100,90\n")).toEqual([expect.stringMatching(/^実際のデータ：.*重なりません/)]);
+    expect(dataProblems(m, "")).toEqual([expect.stringMatching(/^実際のデータが読めない/)]);
   });
 
   test("極性のないリンクと、R か B か決まっていないループ", () => {
