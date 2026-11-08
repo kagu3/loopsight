@@ -23,7 +23,7 @@ export const DEMO = import.meta.env.MODE === "demo";
 // デモのときだけ、sample とブラウザの中のモデルを読み込む（ふつうのビルドには入れない）
 let demoStore: Promise<DemoStore> | undefined;
 const demo = () =>
-  (demoStore ??= Promise.all([import("./demo/store.js"), import("./demo/samples.js")]).then(([{ DemoStore }, { SAMPLES }]) => new DemoStore(SAMPLES)));
+  (demoStore ??= Promise.all([import("./demo/store.js"), import("./demo/samples.js")]).then(([{ DemoStore }, { SAMPLES, SAMPLE_DATA }]) => new DemoStore(SAMPLES, SAMPLE_DATA)));
 
 /** 読めなかったときのエラー。status はサーバーの応答の番号（404 ならモデルのファイルがない） */
 export class FetchError extends Error {
