@@ -1,7 +1,7 @@
 // デモサイト（npm run build:demo）の「サーバーの代わり」（web/src/demo/store.ts）を確かめる。
 // 返す形と動きが、ビューアのサーバー（src/viewer/server.ts）とずれていないことも、同じ書き込みを両方に送って比べる
 import { readdirSync, readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { EditErrorResponse, EditResponse, ModelResponse } from "../src/viewer/api.js";
@@ -11,8 +11,9 @@ import { tempDir } from "./helpers.js";
 
 const EXAMPLES_DIR = path.resolve("examples");
 
-/** examples/ の sample（モデル名 → 中身）。ext が .data.csv なら実際のデータ。web/src/demo/samples.ts と同じ名前の付け方 */
-function samples(ext = ".json"): Record<string, string> {
+/** examples/ の sample（モデル名 → 中身）。web/src/demo/samples.ts と同じ名前の付け方 */
+function samples(): Record<string, string> {
+  const ext = ".json";
   const out: Record<string, string> = {};
   for (const folder of readdirSync(EXAMPLES_DIR, { withFileTypes: true })) {
     if (!folder.isDirectory()) continue;
@@ -24,6 +25,10 @@ function samples(ext = ".json"): Record<string, string> {
 }
 
 const COFFEE = "0_コーヒーが冷める/coffee-cooling";
+
+/** 実際のデータ（.data.csv）を試すモデル。examples/ の sample にはデータがないので、tests/fixtures/ のものを使う */
+const POPULATION = "population";
+const fixture = (file: string) => readFileSync(path.join("tests/fixtures", file), "utf8");
 
 describe("デモのモデル（ブラウザの中で読み書きする）", () => {
   test("sample をフォルダの番号の順に並べ、最初のモデルを開ける", () => {
@@ -75,24 +80,23 @@ describe("デモのモデル（ブラウザの中で読み書きする）", () =
   });
 
   test("実際のデータ（.data.csv）をグラフ用に返す。要素の名前を変えると、列名も直り、元に戻すと戻る", () => {
-    const data = samples(".data.csv");
-    expect(data[COFFEE], "0 の sample の実測のデータ").toBeDefined();
-    const store = new DemoStore(samples(), data);
-    const before = store.get(COFFEE);
-    expect(before.actual).toMatchObject({ file: "coffee-cooling.data.csv", issues: [] });
+    const data = { [POPULATION]: fixture("population.data.csv") };
+    const store = new DemoStore({ ...samples(), [POPULATION]: fixture("population.json") }, data);
+    const before = store.get(POPULATION);
+    expect(before.actual).toMatchObject({ file: "population.data.csv", issues: [] });
     expect(before.actual!.times[0]).toBe(0);
-    expect(before.actual!.series["コーヒーの温度"]![0]).toBe(98.2);
+    expect(before.actual!.series["Population"]![0]).toBe(1000);
     // データのない sample には付けない。モデルのないデータは使わない
-    expect(store.get("1_成長の限界/limits-to-growth").actual).toBeUndefined();
-    expect(new DemoStore({ [COFFEE]: samples()[COFFEE]! }, { ない: data[COFFEE]! }).get(COFFEE).actual).toBeUndefined();
+    expect(store.get(COFFEE).actual).toBeUndefined();
+    expect(new DemoStore({ [POPULATION]: fixture("population.json") }, { ない: data[POPULATION]! }).get(POPULATION).actual).toBeUndefined();
 
-    const edit = store.write(COFFEE, "edit", { version: before.version, elements: [{ type: "STOCK", name: "コーヒーの温度", rename_to: "湯の温度" }] } as never);
+    const edit = store.write(POPULATION, "edit", { version: before.version, elements: [{ type: "STOCK", name: "Population", rename_to: "人口" }] } as never);
     expect(edit.status).toBe(200);
     const body = edit.body as EditResponse;
-    expect(body.report && "notes" in body.report ? body.report.notes : []).toContain("実際のデータ（coffee-cooling.data.csv）の列名も直しました。");
-    expect(Object.keys(body.model.actual!.series)).toEqual(["湯の温度"]);
-    const undo = store.write(COFFEE, "undo", { version: body.model.version } as never);
-    expect(Object.keys((undo.body as EditResponse).model.actual!.series)).toEqual(["コーヒーの温度"]);
+    expect(body.report && "notes" in body.report ? body.report.notes : []).toContain("実際のデータ（population.data.csv）の列名も直しました。");
+    expect(Object.keys(body.model.actual!.series)).toEqual(["人口", "Births"]);
+    const undo = store.write(POPULATION, "undo", { version: body.model.version } as never);
+    expect(Object.keys((undo.body as EditResponse).model.actual!.series)).toEqual(["Population", "Births"]);
   });
 
   test("読み直す（作り直す）と、元の sample に戻る", () => {
@@ -113,14 +117,14 @@ describe("デモとビューアのサーバーで、同じ書き込みの結果�
   });
 
   test("要素の編集・削除・シナリオ・グループ・シミュレーションの設定・元に戻す", async () => {
-    const text = samples()[COFFEE]!;
-    const data = samples(".data.csv")[COFFEE]!;
+    // 実際のデータの列名を直すところまで比べるため、データのある tests/fixtures/ のモデルを使う
+    const text = fixture("population.json");
+    const data = fixture("population.data.csv");
     const dir = await tempDir();
-    await mkdir(path.join(dir, "0_コーヒーが冷める"));
-    await writeFile(path.join(dir, `${COFFEE}.json`), text);
-    await writeFile(path.join(dir, `${COFFEE}.data.csv`), data);
+    await writeFile(path.join(dir, `${POPULATION}.json`), text);
+    await writeFile(path.join(dir, `${POPULATION}.data.csv`), data);
     viewer = await startViewer({ modelsDir: dir, port: 0 });
-    const url = (p: string) => new URL(`/api/models/${encodeURIComponent(COFFEE)}${p}`, viewer!.url);
+    const url = (p: string) => new URL(`/api/models/${encodeURIComponent(POPULATION)}${p}`, viewer!.url);
     const post = async (action: string, body: object) => {
       const res = await fetch(url(`/${action}`), {
         method: "POST",
@@ -129,7 +133,7 @@ describe("デモとビューアのサーバーで、同じ書き込みの結果�
       });
       return { status: res.status, body: (await res.json()) as EditResponse & EditErrorResponse };
     };
-    const store = new DemoStore({ [COFFEE]: text }, { [COFFEE]: data });
+    const store = new DemoStore({ [POPULATION]: text }, { [POPULATION]: data });
     const server0 = (await (await fetch(url(""))).json()) as ModelResponse;
     const variable = server0.model.elements.find((e) => e.type === "VARIABLE")!.name!;
     const stock = server0.model.elements.find((e) => e.type === "STOCK")!.name!;
@@ -148,10 +152,10 @@ describe("デモとビューアのサーバーで、同じ書き込みの結果�
       ["scenarios", { scenarios: [] }],
     ];
     let serverVersion = server0.version;
-    let demoVersion = store.get(COFFEE).version;
+    let demoVersion = store.get(POPULATION).version;
     for (const [action, body] of steps) {
       const s = await post(action, { version: serverVersion, ...body });
-      const d = store.write(COFFEE, action as never, { version: demoVersion, ...body } as never);
+      const d = store.write(POPULATION, action as never, { version: demoVersion, ...body } as never);
       expect(d.status, `${action} ${JSON.stringify(body)}`).toBe(s.status);
       const sb = s.body;
       const db = d.body as EditResponse & EditErrorResponse;
