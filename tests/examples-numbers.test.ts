@@ -33,8 +33,9 @@ const KEY_NUMBERS: KeyNumber[] = [
   { model: "0_コーヒーが冷める/coffee-cooling.json", scenario: "夏の部屋", element: "コーヒーの温度", what: { at: 60 }, value: "51.8", text: "1 時間後は 51.8 ℃" },
   // 1 成長の限界
   { model: "1_成長の限界/limits-to-growth.json", element: "使っている人", what: { at: 24 }, value: "9,600", text: "24 か月目には約 9,600 人" },
-  { model: "1_成長の限界/limits-to-growth.json", scenario: "営業を 10 倍にする", element: "使っている人", what: { at: 36 }, value: "9,994", text: "36 か月目は 9,994 人" },
-  { model: "1_成長の限界/limits-to-growth.json", scenario: "新しい市場に出る", element: "使っている人", what: { at: 36 }, value: "19,948", text: "36 か月目に 19,948 人" },
+  { model: "1_成長の限界/limits-to-growth.json", scenario: "営業を 10 倍にする", element: "使い始める人", what: { at: 16 }, value: "719", text: "16 か月目は月 1,010 人対 719 人" },
+  { model: "1_成長の限界/limits-to-growth.json", scenario: "新しい市場に出る", element: "使い始める人", what: { at: 16 }, value: "1,010", text: "16 か月目は月 1,010 人対 719 人" },
+  { model: "1_成長の限界/limits-to-growth.json", scenario: "新しい市場に出る", element: "使っている人", what: { at: 36 }, value: "19,851", text: "36 か月目に 19,851 人" },
   // 2 うまくいかない解決策（残りが 10 タスクを切る週）
   { model: "2_うまくいかない解決策/fixes-that-fail.json", element: "残っている仕事", what: { firstBelow: 10 }, value: "30.25", text: "残業ありが 30.25 週目" },
   { model: "2_うまくいかない解決策/fixes-that-fail.json", scenario: "残業しない", element: "残っている仕事", what: { firstBelow: 10 }, value: "28.25", text: "残業しないが 28.25 週目" },
