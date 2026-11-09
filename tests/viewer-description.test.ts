@@ -3,11 +3,11 @@ import { firstParagraph } from "../web/src/description.js";
 
 describe("上の帯に出す説明の最初の段落", () => {
   test("最初の空行の手前までを、改行を空白にして 1 行で返す", () => {
-    expect(firstParagraph("【ひとことで】\n成長は止まる。\n\n【どんな問題か】\n長い説明")).toBe("【ひとことで】 成長は止まる。");
+    expect(firstParagraph("口コミの成長は止まる。\nてこは市場を広げること。\n\n【どんな問題か】\n長い説明")).toBe("口コミの成長は止まる。 てこは市場を広げること。");
   });
 
-  test("見出しがなくても、最初の段落を返す", () => {
-    expect(firstParagraph("在庫が増えすぎる。\n\nくわしい説明")).toBe("在庫が増えすぎる。");
+  test("見出しで始まっていても、見出しの有無は見ずに最初の段落を返す", () => {
+    expect(firstParagraph("【メモ】\n在庫が増えすぎる。\n\nくわしい説明")).toBe("【メモ】 在庫が増えすぎる。");
   });
 
   test("空行がなければ全体を返す", () => {

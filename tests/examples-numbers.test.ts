@@ -42,8 +42,8 @@ const KEY_NUMBERS: KeyNumber[] = [
   { model: "2_うまくいかない解決策/fixes-that-fail.json", scenario: "予定を引き直す（28 週）", element: "残っている仕事", what: { firstBelow: 10 }, value: "28.25", text: "28.25 週目に終わり" },
   { model: "2_うまくいかない解決策/fixes-that-fail.json", scenario: "仕事の量を減らす（700 タスク）", element: "残っている仕事", what: { firstBelow: 10 }, value: "19.75", text: "19.75 週目に終わる" },
   // 3 問題のすり替わり（60 か月目の売上）
-  { model: "3_問題のすり替わり/shifting-the-burden.json", element: "売上", what: { at: 60 }, value: "31", text: "元のモデルが 31" },
-  { model: "3_問題のすり替わり/shifting-the-burden.json", scenario: "品質に回す", element: "売上", what: { at: 60 }, value: "76", text: "品質に回すが 76" },
+  { model: "3_問題のすり替わり/shifting-the-burden.json", element: "売上", what: { at: 60 }, value: "31", text: "足りない分を営業で埋めると 31" },
+  { model: "3_問題のすり替わり/shifting-the-burden.json", scenario: "品質に回す", element: "売上", what: { at: 60 }, value: "76", text: "品質に回すと 76" },
   { model: "3_問題のすり替わり/shifting-the-burden.json", scenario: "営業に強く頼る", element: "売上", what: { at: 60 }, value: "20", text: "60 か月で 20 になる" },
   // 4 エスカレート（52 週目）
   { model: "4_エスカレート/advertising-war.json", element: "A社の広告費", what: { at: 52 }, value: "38.4", text: "52 週で約 38.4" },
