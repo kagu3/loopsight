@@ -4,7 +4,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  annotationsOf,
   checkActualData,
+  DEFAULT_BASELINE_NAME,
   checkDiagram,
   emptyModel,
   findLoops,
@@ -17,6 +19,7 @@ import {
   validateModel,
   type ModelJSON,
 } from "../src/core/index.js";
+import { firstParagraph } from "../web/src/description.js";
 
 const EXAMPLES_DIR = path.resolve("examples");
 
@@ -41,9 +44,8 @@ function placementProblems(file: string): string[] {
   return problems;
 }
 
-/** 説明の見出しの並び（examples/README.md の「中身の決まり」）。見出しは行の頭に置く */
+/** 説明の見出しの並び（examples/README.md の「中身の決まり」）。見出しは行の頭に置く。最初の段落（概要）には見出しを付けない */
 const DESCRIPTION_HEADINGS = [
-  "ひとことで",
   "どんな問題か",
   "どんな構造か",
   "どんな動きになるか",
@@ -52,14 +54,44 @@ const DESCRIPTION_HEADINGS = [
   "もっと詳しく",
 ];
 
-/** 説明が、決まりの見出しの並びに反していれば、その理由を返す */
+/** 概要（説明の最初の段落）の長さの上限。空白も 1 文字に数える。ビューアの上の帯の 2 行目に、見切れずに 1 行で出る長さ */
+const SUMMARY_MAX_CHARS = 60;
+
+/** 説明が、決まりの概要と見出しの並びに反していれば、その理由を返す */
 function descriptionProblems(description: string): string[] {
   const problems: string[] = [];
-  if (!description.startsWith("【ひとことで】")) problems.push("説明が【ひとことで】で始まっていない");
+  // 帯の 2 行目と同じく、最初の空行の手前までを 1 行にして（段落の中の改行は空白 1 つにして）数える
+  const summary = firstParagraph(description);
+  if (/^【[^】]+】/.test(description.trim())) problems.push("説明が見出しで始まっている（最初の段落は見出しなしの概要にする）");
+  else if (/\n【[^】]+】/.test(description.trim().split(/\n[ \t　]*\n/)[0]!)) problems.push("概要のあとに空行を入れて、次の見出しと分ける");
+  else if ([...summary].length > SUMMARY_MAX_CHARS) problems.push(`概要（説明の最初の段落）を ${SUMMARY_MAX_CHARS} 文字以内にする（いまは ${[...summary].length} 文字）`);
   // 本文の中で見出しの名前を引くこともあるので、行の頭にあるものだけを見出しとみなす
   const headings = [...description.matchAll(/^【([^】]+)】/gm)].map((m) => m[1]!);
   if (headings.join("→") !== DESCRIPTION_HEADINGS.join("→")) {
     problems.push(`説明の見出しの並びを ${DESCRIPTION_HEADINGS.map((h) => `【${h}】`).join("→")} にする（いまは ${headings.map((h) => `【${h}】`).join("→") || "見出しなし"}）`);
+  }
+  return problems;
+}
+
+/**
+ * 何も変えない実行に、その線が何を表すかの名前（既定の「いまのまま」でないもの）と説明があるか。
+ * 説明・シナリオの説明・注釈・要素の説明で、何も変えない実行を「元のモデル」と呼んでいないか
+ */
+function baselineProblems(model: ModelJSON): string[] {
+  const problems: string[] = [];
+  const b = model.baseline;
+  if (!b?.name?.trim() || b.name.trim() === DEFAULT_BASELINE_NAME) {
+    problems.push(`何も変えない実行に、何を表す線かの名前を付ける（set_scenarios の baseline.name。既定の「${DEFAULT_BASELINE_NAME}」のままにしない）`);
+  }
+  if (!b?.description?.trim()) problems.push("何も変えない実行に、何を表す線かの説明を付ける（set_scenarios の baseline.description）");
+  const texts: [string, string | undefined][] = [
+    ["モデルの説明", model.description],
+    ...(model.scenarios ?? []).map((s): [string, string | undefined] => [`シナリオ「${s.name}」の説明`, s.description]),
+    ...annotationsOf(model).map((a): [string, string | undefined] => [`注釈「${a.id}」`, a.text]),
+    ...model.elements.map((e): [string, string | undefined] => [`要素「${e.name ?? `${e.from} → ${e.to}`}」の説明`, e.description]),
+  ];
+  for (const [where, text] of texts) {
+    if (text?.includes("元のモデル")) problems.push(`${where}で「元のモデル」と呼んでいる（何も変えない実行の名前か、自然な言い方にする）`);
   }
   return problems;
 }
@@ -83,6 +115,7 @@ function sampleProblems(model: ModelJSON): string[] {
 
   if (!model.description?.trim()) problems.push("モデルの説明（description）がない");
   else problems.push(...descriptionProblems(model.description));
+  problems.push(...baselineProblems(model));
 
   for (const el of model.elements) {
     if (el.type !== "LINK") continue;
@@ -132,7 +165,7 @@ const FORMULA_SCENARIOS_TO_FIX = new Set(["1_成長の限界/limits-to-growth.js
 /** 決まりを守った小さなモデル（コーヒーが冷める）。単体のテストで、ここから 1 つずつ壊す */
 function goodModel(): ModelJSON {
   const m = emptyModel("coffee", { time_length: 60, time_units: "MINUTES" });
-  m.description = DESCRIPTION_HEADINGS.map((h) => `【${h}】テスト用。`).join("\n\n");
+  m.description = ["熱いコーヒーは、部屋の温度に近づいて冷める。", ...DESCRIPTION_HEADINGS.map((h) => `【${h}】テスト用。`)].join("\n\n");
   upsertElements(m, [
     { type: "STOCK", name: "コーヒーの温度", behavior: { initial_value: 90 } },
     { type: "VARIABLE", name: "室温", behavior: { value: 20 } },
@@ -142,7 +175,7 @@ function goodModel(): ModelJSON {
     { type: "LINK", from: "コーヒーの温度", to: "冷める", behavior: { polarity: "POSITIVE" } },
     { type: "LINK", from: "室温", to: "冷める", behavior: { polarity: "NEGATIVE" } },
   ]);
-  setScenarios(m, [{ name: "寒い部屋", values: { 室温: 5 } }]);
+  setScenarios(m, [{ name: "寒い部屋", values: { 室温: 5 } }], { baseline: { name: "ふつうの部屋", description: "室温 20 ℃の部屋に置いたとき。" } });
   layoutModel(m);
   return m;
 }
@@ -200,19 +233,59 @@ describe("sample の決まりの判定", () => {
     expect(sampleProblems(m)).toEqual(["モデルの説明（description）がない"]);
   });
 
-  test("説明は【ひとことで】で始め、見出しを決まりの順に並べる", () => {
+  test("説明は見出しなしの 60 文字以内の概要で始め、そのあと見出しを決まりの順に並べる", () => {
     const m = goodModel();
     expect(descriptionProblems(m.description!)).toEqual([]);
     // 本文の中で見出しの名前を引いても、見出しとは数えない
     expect(descriptionProblems(m.description!.replace("【もっと詳しく】テスト用。", "【もっと詳しく】（【どんな問題か】を参照）"))).toEqual([]);
-    m.description = `前置き。\n${m.description}`;
-    expect(sampleProblems(m)).toEqual(["説明が【ひとことで】で始まっていない"]);
+
+    const headed = goodModel();
+    headed.description = `【ひとことで】\n${headed.description}`;
+    expect(sampleProblems(headed)).toEqual([
+      "説明が見出しで始まっている（最初の段落は見出しなしの概要にする）",
+      expect.stringContaining("いまは 【ひとことで】→【どんな問題か】"),
+    ]);
+    const noSummary = goodModel();
+    noSummary.description = noSummary.description!.replace(/^[^\n]*\n\n/, "");
+    expect(sampleProblems(noSummary)).toEqual(["説明が見出しで始まっている（最初の段落は見出しなしの概要にする）"]);
+    const noBlankLine = goodModel();
+    noBlankLine.description = noBlankLine.description!.replace("\n\n【どんな問題か】", "\n【どんな問題か】");
+    expect(sampleProblems(noBlankLine)).toEqual(["概要のあとに空行を入れて、次の見出しと分ける"]);
+
+    // 空白も 1 文字に数え、段落の中の改行は、帯と同じく空白 1 つにして数える
+    const withSummary = (summary: string) => descriptionProblems(goodModel().description!.replace(/^[^\n]*/, summary));
+    expect(withSummary("あ".repeat(60))).toEqual([]);
+    expect(withSummary(`${"あ".repeat(30)} ${"あ".repeat(29)}`)).toEqual([]);
+    expect(withSummary(`${"あ".repeat(30)} ${"あ".repeat(30)}`)).toEqual(["概要（説明の最初の段落）を 60 文字以内にする（いまは 61 文字）"]);
+    expect(withSummary(`${"あ".repeat(30)}\n${"あ".repeat(30)}`)).toEqual(["概要（説明の最初の段落）を 60 文字以内にする（いまは 61 文字）"]);
+
     const swapped = goodModel();
     swapped.description = swapped.description!.replace("【どんな構造か】", "【X】").replace("【どんな問題か】", "【どんな構造か】").replace("【X】", "【どんな問題か】");
-    expect(sampleProblems(swapped)).toEqual([expect.stringContaining("いまは 【ひとことで】→【どんな構造か】→【どんな問題か】")]);
+    expect(sampleProblems(swapped)).toEqual([expect.stringContaining("いまは 【どんな構造か】→【どんな問題か】")]);
     const missing = goodModel();
     missing.description = missing.description!.replace(/\n\n【もっと詳しく】テスト用。$/, "");
     expect(sampleProblems(missing)).toEqual([expect.stringContaining("見出しの並び")]);
+  });
+
+  test("何も変えない実行に名前と説明を付け、「元のモデル」と呼ばない", () => {
+    const none = goodModel();
+    delete none.baseline;
+    expect(sampleProblems(none)).toEqual([expect.stringContaining("何を表す線かの名前を付ける"), expect.stringContaining("何を表す線かの説明を付ける")]);
+    const named = goodModel();
+    named.baseline = { name: DEFAULT_BASELINE_NAME, description: "説明" };
+    expect(sampleProblems(named)).toEqual([expect.stringContaining(`既定の「${DEFAULT_BASELINE_NAME}」のままにしない`)]);
+
+    const called = goodModel();
+    called.description = called.description!.replace("【もっと詳しく】テスト用。", "【もっと詳しく】元のモデルより遅い。");
+    called.scenarios![0]!.description = "元のモデルより寒い。";
+    called.elements.find((e) => e.name === "室温")!.description = "元のモデルは 20。";
+    called.annotations = [{ id: "読み方", text: "元のモデルと比べる。", coordinates: [0, 400] }];
+    expect(baselineProblems(called)).toEqual([
+      expect.stringMatching(/^モデルの説明で「元のモデル」/),
+      expect.stringMatching(/^シナリオ「寒い部屋」の説明で「元のモデル」/),
+      expect.stringMatching(/^注釈「読み方」で「元のモデル」/),
+      expect.stringMatching(/^要素「室温」の説明で「元のモデル」/),
+    ]);
   });
 
   test("実際のデータ（.data.csv）がモデルに合う", () => {
