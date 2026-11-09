@@ -7,7 +7,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
-  BASELINE_SCENARIO,
+  DEFAULT_BASELINE_NAME,
+  baselineOf,
   ELEMENT_TYPES,
   EditError,
   GROUP_COLORS,
@@ -28,6 +29,7 @@ import {
   didYouMean,
   emptyModel,
   findElement,
+  hasBaselinePatch,
   findLoops,
   importModelText,
   layoutModel,
@@ -44,6 +46,7 @@ import {
   setScenarios,
   setSimulation,
   staticCheck,
+  toModelError,
   summarizeModel,
   summarizeRun,
   unmarkedDelays,
@@ -56,6 +59,7 @@ import {
   type LoopStep,
   type LoopView,
   type ModelJSON,
+  type BaselinePatch,
   type ScenarioPatch,
 } from "../core/index.js";
 import { BrowserNotFoundError, launchBrowser } from "../viewer/browser.js";
@@ -219,7 +223,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 1. create_model か import_model でモデルを用意する
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
-4. run_simulation で実行する。値を振って調べる（感度分析）ときや、いくつかの値をまとめて変えて比べるときは、run_simulation の overrides を変えて何回か実行する。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに「元のモデル」と重ねて出る）。保存したシナリオは run_simulation の scenarios: true で「元のモデル」と並べて読める。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
+4. run_simulation で実行する。値を振って調べる（感度分析）ときや、いくつかの値をまとめて変えて比べるときは、run_simulation の overrides を変えて何回か実行する。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに、何も変えない実行と重ねて出る）。何も変えない実行には、何を表す線か（「営業は今のまま」など）がわかるよう、set_scenarios の baseline で名前と説明を付ける（付けなければ「${DEFAULT_BASELINE_NAME}」と出る）。保存したシナリオは run_simulation の scenarios: true で、何も変えない実行と並べて読める。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
 5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューアで同じ図を見ている（npx -y -p loopsight loopsight-viewer --models-dir <この作業フォルダ> で起動する。clone したものなら npm run viewer）。要素の補足や図の読み方は、set_annotations で説明する箱の近くに注釈（文字だけのもの）として置ける
    要素が多いときは、set_groups で意味のまとまり（「お店側」「お客側」など）をグループにする。図では属する要素が薄い色の背景で囲まれ、凡例が出る。layout_model は同じグループの要素を近くに集めて並べる
@@ -705,8 +709,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       description:
         "シナリオをモデルの scenarios に保存する。シナリオは名前、説明、変える値の組 { 要素名: 値 }（STOCK は初期値、VARIABLE と FLOW は式を置き換える）。" +
         `名前で既存のシナリオを探し、あれば説明と値を重ね（値を null にするとその要素は変えない）、なければ追加する。remove で消し、replace: true で今のシナリオをすべて置き換える。` +
-        `何も変えない実行は「${BASELINE_SCENARIO}」として扱う（保存しなくてよい）。ビューアのグラフでは「${BASELINE_SCENARIO}」と各シナリオが重なって出る。` +
-        `結果に、「${BASELINE_SCENARIO}」と各シナリオの初期値・最終値・最小・最大の比較を付ける。`,
+        "何も変えない実行は、シナリオとして保存しなくてよい（いつも比べる基準として先頭に並ぶ）。ビューアのグラフでは、何も変えない実行と各シナリオが重なって出る。" +
+        `何も変えない実行の名前と説明は baseline で付ける（何を表す線か。例：名前「営業は今のまま」）。名前を付けなければ「${DEFAULT_BASELINE_NAME}」。シナリオにはこの名前を付けられない。baseline だけを直すときは、実行できないシナリオがあっても保存する（比較のその行の error に理由を入れる）。` +
+        "結果に、何も変えない実行と各シナリオの初期値・最終値・最小・最大の比較と、何も変えない実行の名前と説明（baseline）を付ける。",
       inputSchema: {
         model: modelName,
         scenarios: z
@@ -722,18 +727,33 @@ export function registerTools(server: McpServer, store: ModelStore): void {
           .describe("[{name:'広告を増やす', description:'広告費を 2 倍にする', values:{'Ad Budget':200}}, ...]"),
         remove: z.array(z.string()).optional().describe("消すシナリオの名前"),
         replace: z.boolean().optional().describe("今のシナリオをすべて捨ててから scenarios を保存する（既定は false）"),
+        baseline: z
+          .object({
+            name: z.string().nullable().optional().describe(`名前（null か空で「${DEFAULT_BASELINE_NAME}」に戻す）`),
+            description: z.string().nullable().optional().describe("どんな実行か（null で消す）"),
+          })
+          .optional()
+          .describe("何も変えない実行の名前と説明。省いた項目はそのまま。例：{name:'営業は今のまま', description:'人を増やさず、今の営業のやり方を続ける'}"),
         elements: targets,
       },
     },
-    handle(async (a: { model: string; scenarios?: ScenarioPatch[]; remove?: string[]; replace?: boolean; elements?: string[] }) => {
-      if (!a.scenarios?.length && !a.remove?.length && !a.replace) throw new EditError("scenarios か remove を指定してください。");
+    handle(async (a: { model: string; scenarios?: ScenarioPatch[]; remove?: string[]; replace?: boolean; baseline?: BaselinePatch; elements?: string[] }) => {
+      if (!a.scenarios?.length && !a.remove?.length && !a.replace && !hasBaselinePatch(a.baseline)) throw new EditError("scenarios か remove か baseline を指定してください。");
       const m = await store.read(a.model);
-      const report = setScenarios(m, a.scenarios ?? [], { remove: a.remove, replace: a.replace });
-      const extra: Record<string, unknown> = { changes: report, scenarios: m.scenarios ?? [] };
-      // 実行できないシナリオは保存しない（エラーのあるモデルは、検証結果で知らせる）
+      const report = setScenarios(m, a.scenarios ?? [], { remove: a.remove, replace: a.replace, baseline: a.baseline });
+      const extra: Record<string, unknown> = { changes: report, baseline: baselineOf(m), scenarios: m.scenarios ?? [] };
+      // 実行できないシナリオは保存しない（エラーのあるモデルは、検証結果で知らせる）。
+      // 何も変えない実行の名前と説明だけを直すときは、シナリオを変えていないので、実行できないシナリオがあっても保存する
+      // （その行の error に理由を入れる。ビューアで直すときと同じく、名前と説明は直せる）
+      const baselineOnly = !a.scenarios?.length && !a.remove?.length && !a.replace;
       if (m.scenarios?.length && staticCheck(m).errors.length === 0) {
-        const { targets: names, time_units, rows } = compareScenarios(m, withBaseline(modelScenarios(m)), { targets: a.elements });
-        extra.comparison = { targets: names, time_units, rows };
+        try {
+          const { targets: names, time_units, rows } = compareScenarios(m, withBaseline(m, modelScenarios(m)), { targets: a.elements, keepErrors: baselineOnly });
+          extra.comparison = { targets: names, time_units, rows };
+        } catch (e) {
+          if (!baselineOnly) throw e;
+          extra.comparison_error = toModelError(e).message;
+        }
       }
       return saveAndCheck(a.model, m, extra);
     }),
@@ -851,8 +871,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "モデルを実行して、要素ごとに初期値・最終値・最小・最大とその時刻、間引いた時系列を返す。overrides と simulation で一時的に値を変えられる（ファイルは変わらない）。" +
         "値を振って調べる（感度分析）ときは、overrides を変えて何回か実行する。" +
         "csv: true で全データを作業フォルダの output/ に CSV で保存する。" +
-        `scenarios: true で、モデルに保存したシナリオ（set_scenarios）も実行し、「${BASELINE_SCENARIO}」と各シナリオの結果を rows に並べて返す（ビューアのシナリオの比較と同じ値）。` +
-        `このとき overrides は各シナリオにだけ当て、「${BASELINE_SCENARIO}」には当てない。実行できないシナリオは、その行の error と issues に理由を入れる。`,
+        "scenarios: true で、モデルに保存したシナリオ（set_scenarios）も実行し、何も変えない実行（rows の先頭）と各シナリオの結果を rows に並べて返す（ビューアのシナリオの比較と同じ値）。" +
+        `何も変えない実行の名前と説明は baseline に入れる（名前を付けていなければ「${DEFAULT_BASELINE_NAME}」）。` +
+        "このとき overrides は各シナリオにだけ当て、何も変えない実行には当てない。実行できないシナリオは、その行の error と issues に理由を入れる。",
       inputSchema: {
         model: modelName,
         elements: targets,
@@ -861,7 +882,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         simulation: simulation.optional().describe("一時的に変えるシミュレーション設定"),
         csv: z.boolean().optional().describe("全データを CSV に保存する"),
         csv_path: z.string().optional().describe("CSV の保存先（作業フォルダからの相対パス）。指定すると csv: true と同じ"),
-        scenarios: z.boolean().optional().describe(`保存したシナリオも実行して「${BASELINE_SCENARIO}」と並べる（csv とは一緒に使えない）`),
+        scenarios: z.boolean().optional().describe("保存したシナリオも実行して、何も変えない実行と並べる（csv とは一緒に使えない）"),
       },
       annotations: { readOnlyHint: false },
     },
@@ -895,7 +916,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     ),
   );
 
-  /** run_simulation の scenarios: true。「元のモデル」と保存したシナリオを並べる（set_scenarios の comparison と同じ形） */
+  /** run_simulation の scenarios: true。何も変えない実行と保存したシナリオを並べる（set_scenarios の comparison と同じ形） */
   function compareSaved(
     m: ModelJSON,
     a: {
@@ -913,10 +934,10 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     if (!saved.length) throw new ModelError("モデルにシナリオが保存されていません。set_scenarios で保存してください。", []);
     // 渡された overrides の要素名の間違いは、シナリオごとの失敗ではないので、全体をエラーにする（候補つき）
     if (a.overrides) applyOverrides(m, { overrides: a.overrides });
-    // 「元のモデル」は名前どおり何も変えない（overrides も当てない）
-    const scenarios = withBaseline(saved.map((s) => ({ name: s.name, overrides: { ...(a.overrides ?? {}), ...s.overrides } })));
+    // 何も変えない実行は、名前どおり何も変えない（overrides も当てない）
+    const scenarios = withBaseline(m, saved.map((s) => ({ name: s.name, overrides: { ...(a.overrides ?? {}), ...s.overrides } })));
     const comparison = compareScenarios(m, scenarios, { targets: a.elements, samples: a.samples ?? 11, simulation: a.simulation, keepErrors: true });
-    const out: Record<string, unknown> = { model: a.model, ...comparison };
+    const out: Record<string, unknown> = { model: a.model, baseline: baselineOf(m), ...comparison };
     if (a.overrides) out.overrides = a.overrides;
     const { warnings } = staticCheck(m);
     if (warnings.length) out.warnings = warnings;

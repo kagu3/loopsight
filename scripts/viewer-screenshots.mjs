@@ -164,7 +164,7 @@ try {
   await sleep(500);
   await shot("live-update");
 
-  // AI がシナリオを保存して、「元のモデル」と重ねたところ（MCP の set_scenarios と同じ処理でファイルを書き換える）。
+  // AI がシナリオを保存して、何も変えない実行と重ねたところ（MCP の set_scenarios と同じ処理でファイルを書き換える）。
   // 開いている画面のまま撮る（ページを開き直すたびにビューアへのつながりが残り、ブラウザの同時接続の上限に近づくため）
   core.setScenarios(m, [
     { name: "移民を増やす", description: "受け入れを毎年 50 人にする", values: { Immigrants: 50 } },

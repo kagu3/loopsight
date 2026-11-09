@@ -148,7 +148,7 @@ describe("MCP server", () => {
     expect(await callError("set_simulation", { model: "m", time_step: -1 })).toMatch(/time_step/);
   });
 
-  test("シナリオを保存し、「元のモデル」と比べる。要素の名前を変えるとシナリオの中も変わる", async () => {
+  test("シナリオを保存し、何も変えない実行と比べる。要素の名前を変えるとシナリオの中も変わる", async () => {
     await call("create_model", { model: "s" });
     await call("upsert_elements", { model: "s", elements: SIR });
     const saved = await call("set_scenarios", {
@@ -161,21 +161,22 @@ describe("MCP server", () => {
     });
     expect(saved.changes.added).toEqual(["外出を控える", "早く治す"]);
     expect(saved.validation.ok).toBe(true);
-    expect(saved.comparison.rows.map((r: any) => r.scenario)).toEqual(["元のモデル", "外出を控える", "早く治す"]);
+    expect(saved.comparison.rows.map((r: any) => r.scenario)).toEqual(["いまのまま", "外出を控える", "早く治す"]);
+    expect(saved.baseline).toEqual({ name: "いまのまま" });
     const peaks = saved.comparison.rows.map((r: any) => r.results.Infected.max);
     expect(peaks[1]).toBeLessThan(peaks[0]);
     expect(peaks[2]).toBeLessThan(peaks[0]);
 
-    // 保存したシナリオは run_simulation の scenarios: true でも「元のモデル」と並べて読める（set_scenarios の比較と同じ値）
+    // 保存したシナリオは run_simulation の scenarios: true でも何も変えない実行と並べて読める（set_scenarios の比較と同じ値）
     const compared = await call("run_simulation", { model: "s", scenarios: true, elements: ["Infected"], samples: 0 });
     expect(compared).toMatchObject({ targets: ["Infected"], time_units: saved.comparison.time_units });
     expect(compared.rows).toEqual(saved.comparison.rows);
     // シナリオなしの run_simulation の結果とも同じ値
     const plain = await call("run_simulation", { model: "s", elements: ["Infected"], samples: 0 });
     expect(compared.rows[0].results).toEqual(plain.results);
-    // overrides は各シナリオにだけ当て、「元のモデル」には当てない
+    // overrides は各シナリオにだけ当て、何も変えない実行には当てない
     const withOv = await call("run_simulation", { model: "s", scenarios: true, overrides: { "Recovery Rate": 0.3 }, elements: ["Infected"] });
-    expect(withOv.rows.map((r: any) => r.scenario)).toEqual(["元のモデル", "外出を控える", "早く治す"]);
+    expect(withOv.rows.map((r: any) => r.scenario)).toEqual(["いまのまま", "外出を控える", "早く治す"]);
     expect(withOv.rows[0].overrides).toEqual({});
     expect(withOv.rows[0].results.Infected.max).toBe(peaks[0]);
     expect(withOv.rows[0].results.Infected.series).toHaveLength(11);
@@ -194,9 +195,51 @@ describe("MCP server", () => {
     // 実行できないシナリオは保存しない
     expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "壊れた", values: { 接触率: "[Nope]" } }] })).toMatch(/壊れた/);
     expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "x", values: { Contact: 1 } }] })).toMatch(/見つかりません/);
-    expect(await callError("set_scenarios", { model: "s" })).toMatch(/scenarios か remove/);
+    expect(await callError("set_scenarios", { model: "s" })).toMatch(/scenarios か remove か baseline/);
+    // 項目のない baseline は、指定していないものとして断る
+    expect(await callError("set_scenarios", { model: "s", baseline: {} })).toMatch(/scenarios か remove か baseline/);
     const full = await call<ModelJSON>("get_model", { model: "s", format: "full" });
     expect(full.scenarios!.map((s) => s.name)).toEqual(["外出を控える", "治療を早める"]);
+
+    // 何も変えない実行に名前と説明を付けると、比較・run_simulation・get_model に出る
+    const named = await call("set_scenarios", { model: "s", baseline: { name: "何もしない", description: "今の暮らしのまま" } });
+    expect(named.baseline).toEqual({ name: "何もしない", description: "今の暮らしのまま" });
+    expect(named.comparison.rows[0].scenario).toBe("何もしない");
+    const run = await call("run_simulation", { model: "s", scenarios: true, elements: ["Infected"], samples: 0 });
+    expect(run.baseline).toEqual({ name: "何もしない", description: "今の暮らしのまま" });
+    expect(run.rows.map((r: any) => r.scenario)).toEqual(["何もしない", "外出を控える", "治療を早める"]);
+    expect((await call("get_model", { model: "s" })).baseline).toEqual({ name: "何もしない", description: "今の暮らしのまま" });
+    expect((await call<ModelJSON>("get_model", { model: "s", format: "full" })).baseline).toEqual({ name: "何もしない", description: "今の暮らしのまま" });
+    // シナリオと同じ名前にはできない。付けた名前はシナリオに使えない
+    expect(await callError("set_scenarios", { model: "s", baseline: { name: "外出を控える" } })).toMatch(/シナリオがある/);
+    expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "何もしない", values: {} }] })).toMatch(/何も変えない実行の名前/);
+    // null で既定の名前に戻す
+    const reset = await call("set_scenarios", { model: "s", baseline: { name: null, description: null } });
+    expect(reset.baseline).toEqual({ name: "いまのまま" });
+    // 説明の前後の空白は削る
+    expect((await call("set_scenarios", { model: "s", baseline: { description: "  何もしない  " } })).baseline).toEqual({ name: "いまのまま", description: "何もしない" });
+
+    // 実行できないシナリオがあっても（手で書き換えたときなど）、baseline だけなら保存する。その行の error に理由を入れる（ビューアと同じく直せる）
+    const file = path.join(dir, "s.json");
+    const broken = JSON.parse(await readFile(file, "utf8")) as ModelJSON;
+    const good = [...broken.scenarios!];
+    broken.scenarios!.push({ name: "壊れた", values: { 接触率: "[Nope]" } });
+    await writeFile(file, JSON.stringify(broken));
+    const onlyBaseline = await call("set_scenarios", { model: "s", baseline: { name: "何もしない" } });
+    expect(onlyBaseline.baseline.name).toBe("何もしない");
+    expect(onlyBaseline.comparison.rows.at(-1).error).toMatch(/実行できません/);
+    expect((await call<ModelJSON>("get_model", { model: "s", format: "full" })).baseline!.name).toBe("何もしない");
+    // シナリオを直すときは、これまでどおり保存しない
+    expect(await callError("set_scenarios", { model: "s", scenarios: [{ name: "外出を控える", description: "x" }] })).toMatch(/壊れた/);
+
+    // 前からある、何も変えない実行と同じ名前のシナリオは、notes と検証の警告で知らせる
+    const clash = JSON.parse(await readFile(file, "utf8")) as ModelJSON;
+    clash.scenarios = [{ name: "何もしない", values: {} }];
+    await writeFile(file, JSON.stringify(clash));
+    const noted = await call("set_scenarios", { model: "s", baseline: { description: "そのまま" } });
+    expect(noted.changes.notes.join("\n")).toMatch(/"何もしない" は、何も変えない実行と同じ名前/);
+    expect((await call("validate_model", { model: "s" })).warnings.map((w: any) => w.message).join("\n")).toMatch(/何も変えない実行と同じ名前/);
+    await writeFile(file, JSON.stringify({ ...clash, scenarios: good }));
 
     const removed = await call("set_scenarios", { model: "s", remove: ["外出を控える", "治療を早める"] });
     expect(removed.scenarios).toEqual([]);

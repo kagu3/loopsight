@@ -1,11 +1,11 @@
 // シナリオを重ねて比べるときと、画面でシナリオを直すときの、React に依存しない計算。
-import type { Equation, ModelElement, ModelJSON, RunResult, Scenario, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
+import type { BaselinePatch, Equation, ModelElement, ModelJSON, RunResult, Scenario, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
+import { baselineOf, DEFAULT_BASELINE_NAME } from "../../src/core/modeljson.js";
 import { halfWidthEquation, parseEquation } from "./editing.js";
 
-/** 何も変えない実行の名前（サーバーの BASELINE_SCENARIO と同じ） */
-export const BASELINE_NAME = "元のモデル";
+// 何も変えない実行の名前と説明は、モデルの baseline（サーバーと同じ baselineOf で読む。名前がなければ「いまのまま」）
 
-/** グラフに重ねる実行 1 つ分。baseline は「元のモデル」 */
+/** グラフに重ねる実行 1 つ分。baseline は何も変えない実行 */
 export interface CompareRun {
   name: string;
   description?: string;
@@ -15,7 +15,7 @@ export interface CompareRun {
 }
 
 export interface CompareRuns {
-  /** 先頭が「元のモデル」。続けて、実行できたシナリオをモデルの並び順で */
+  /** 先頭が何も変えない実行。続けて、実行できたシナリオをモデルの並び順で */
   runs: CompareRun[];
   /** 実行できなかったシナリオ */
   failed: { name: string; error: string }[];
@@ -23,10 +23,10 @@ export interface CompareRuns {
   omitted: string[];
 }
 
-/** 「元のモデル」とシナリオを、重ねて出す順に並べる。シナリオは色の数（max）まで */
-export function compareRuns(run: RunResult, scenarios: ScenarioRunResult[], max: number): CompareRuns {
+/** 何も変えない実行（名前と説明は baseline。baselineOf の結果）とシナリオを、重ねて出す順に並べる。シナリオは色の数（max）まで */
+export function compareRuns(run: RunResult, scenarios: ScenarioRunResult[], max: number, baseline: { name: string; description?: string }): CompareRuns {
   const out: CompareRuns = {
-    runs: [{ name: BASELINE_NAME, values: {}, series: run.series, baseline: true }],
+    runs: [{ name: baseline.name, ...(baseline.description ? { description: baseline.description } : {}), values: {}, series: run.series, baseline: true }],
     failed: [],
     omitted: [],
   };
@@ -50,7 +50,7 @@ export function compareRuns(run: RunResult, scenarios: ScenarioRunResult[], max:
 
 /** シナリオの説明（凡例にカーソルを乗せたときに出す）。説明と、変える値 */
 export function describeRun(r: CompareRun): string {
-  if (r.baseline) return "モデルの値を何も変えずに実行した結果です";
+  if (r.baseline) return [r.description, "モデルの値を何も変えずに実行した結果です"].filter(Boolean).join("\n");
   const values = Object.entries(r.values).map(([k, v]) => `${k} = ${String(v)}`);
   return [r.description, values.length ? `変える値：${values.join("、")}` : "値を変えていません"].filter(Boolean).join("\n");
 }
@@ -68,7 +68,7 @@ export function numberOf(v: Equation | undefined): number | undefined {
 const MINUS = "−";
 
 /**
- * 「元のモデル」の値から、シナリオの値への変化の添え書き。
+ * 何も変えない実行の値から、シナリオの値への変化の添え書き。
  * 率にできれば +50% / −25%（10% 未満は小数 1 桁まで、それ以上は整数に丸める）。
  * 0 からの変化など率にできなければ差（+0.5）。どちらかが数でなければ空文字
  */
@@ -88,16 +88,16 @@ export function changeLabel(base: number | null | undefined, value: number | nul
 /** 表のマス 1 つ。value は値の書き方のまま（変えていなければ undefined） */
 export interface MatrixCell {
   value?: string;
-  /** シナリオで値を変えたか（「元のモデル」の列はいつも false） */
+  /** シナリオで値を変えたか（何も変えない実行の列はいつも false） */
   changed: boolean;
-  /** 「元のモデル」からの変化（+50% など）。式のときや変えていないときは空文字 */
+  /** 何も変えない実行からの変化（+50% など）。式のときや変えていないときは空文字 */
   change: string;
 }
 
-/** 変えた値の行。cells は runs と同じ並び（先頭が「元のモデル」） */
+/** 変えた値の行。cells は runs と同じ並び（先頭が何も変えない実行） */
 export interface MatrixRow {
   element: string;
-  /** ストックの行（「元のモデル」の値は初期値） */
+  /** ストックの行（何も変えない実行の値は初期値） */
   initial: boolean;
   cells: MatrixCell[];
 }
@@ -105,7 +105,7 @@ export interface MatrixRow {
 /**
  * 変えた値の行。どれかのシナリオで変えた要素だけを、モデルの並び順で（モデルにない要素は最後に）。
  * added（表で足した行の要素）は、どのシナリオでも変えていなくても出す（シナリオで値を変えられない要素や、モデルにない要素は出さない）。
- * 「元のモデル」の列はいまの値（ストックは初期値、変数とフローは式）
+ * 何も変えない実行の列はいまの値（ストックは初期値、変数とフローは式）
  */
 export function valueRows(model: ModelJSON, runs: CompareRun[], added: string[] = []): MatrixRow[] {
   const scenarios = runs.filter((r) => !r.baseline);
@@ -135,7 +135,7 @@ export function valueRows(model: ModelJSON, runs: CompareRun[], added: string[] 
   });
 }
 
-/** 結果の行。cells は runs と同じ並び。シナリオの列の change は「元のモデル」からの変化 */
+/** 結果の行。cells は runs と同じ並び。シナリオの列の change は何も変えない実行からの変化 */
 export interface ResultRow {
   element: string;
   /** 値を読んだ時点 */
@@ -188,7 +188,7 @@ export function valueTargets(model: ModelJSON): ModelElement[] {
   return model.elements.filter((e) => e.name && VALUE_TYPES.has(e.type));
 }
 
-/** いまのモデルの値（元のモデル）。ストックは初期値、変数とフローは式。要素がなければ undefined */
+/** いまのモデルの値（何も変えない実行）。ストックは初期値、変数とフローは式。要素がなければ undefined */
 export function currentValueOf(model: ModelJSON, name: string): string | undefined {
   const el = model.elements.find((e) => e.type !== "LINK" && e.name && nameKey(e.name) === nameKey(name));
   const v = el?.type === "STOCK" ? el.behavior?.initial_value : el?.behavior?.value;
@@ -196,13 +196,13 @@ export function currentValueOf(model: ModelJSON, name: string): string | undefin
 }
 
 /**
- * シナリオの名前に使えない理由。空、「元のモデル」、ほかのシナリオ（others）と同じ名前。使えれば undefined。
+ * シナリオの名前に使えない理由。空、何も変えない実行の名前（baseline）、ほかのシナリオ（others）と同じ名前。使えれば undefined。
  * 比べ方はサーバーの setScenarios と同じ（大文字と小文字、前後の空白を区別しない）
  */
-export function scenarioNameProblem(name: string, others: string[]): string | undefined {
+export function scenarioNameProblem(name: string, others: string[], baseline: string): string | undefined {
   const n = name.trim();
   if (!n) return "シナリオの名前が空です。";
-  if (nameKey(n) === nameKey(BASELINE_NAME)) return `「${BASELINE_NAME}」は何も変えない実行の名前なので、シナリオには使えません。`;
+  if (nameKey(n) === nameKey(baseline)) return `「${baseline}」は何も変えない実行の名前なので、シナリオには使えません。`;
   if (others.some((o) => nameKey(o) === nameKey(n))) return `「${n}」という名前のシナリオがすでにあります。`;
   return undefined;
 }
@@ -219,9 +219,41 @@ export function renamePatchOf(model: ModelJSON, name: string, text: string): Sce
   const next = text.trim();
   if (next === original) return undefined;
   const others = scenarios.map(scenarioName).filter((_, i) => scenarios[i] !== s);
-  const problem = scenarioNameProblem(next, others);
+  const problem = scenarioNameProblem(next, others, baselineOf(model).name);
   if (problem) throw new Error(problem);
   return { name: original, rename_to: next };
+}
+
+/**
+ * 表の見出しの吹き出しで、何も変えない実行の名前を変えるときの変更（MCP の set_scenarios の baseline と同じ形）。
+ * 名前が同じなら undefined。空にしたら、既定の名前（いまのまま）に戻す（null）。シナリオと同じ名前なら例外を投げる
+ */
+export function baselineRenamePatchOf(model: ModelJSON, text: string): BaselinePatch | undefined {
+  const current = baselineOf(model).name;
+  const next = text.trim() || DEFAULT_BASELINE_NAME;
+  if (next === current) return undefined;
+  const scenarios = model.scenarios ?? [];
+  if (scenarios.some((s, i) => nameKey(scenarioName(s, i)) === nameKey(next)) && nameKey(next) !== nameKey(current)) {
+    throw new Error(`「${next}」という名前のシナリオがあるので、何も変えない実行の名前には使えません。`);
+  }
+  return { name: next === DEFAULT_BASELINE_NAME ? null : next };
+}
+
+/** 何も変えない実行の説明（左の欄）。直していなければ undefined。空にしたら説明を消す（null） */
+export function baselineDescriptionPatchOf(before: string, after: string): BaselinePatch | undefined {
+  const description = after.trim();
+  if (description === before.trim()) return undefined;
+  return { description: description || null };
+}
+
+/**
+ * 左の欄で説明を保存したあと、欄を保存した中身で作り直すか。waiting は保存の結果を待っているか、base は編集を始めたときの説明、
+ * latest はいまのモデルの説明。保存する前の版（latest が base のまま）で描き直したときは、まだ待つ（欄を古い説明に戻さない）。
+ * 新しい版が来たら reset にその説明を返し、待つのをやめる
+ */
+export function descriptionAfterSave(waiting: boolean, base: string, latest: string): { waiting: boolean; reset?: string } {
+  if (!waiting || latest === base) return { waiting };
+  return { waiting: false, reset: latest };
 }
 
 /** シナリオの説明（左の欄）。直していなければ undefined。空にしたら説明を消す（null） */
@@ -239,7 +271,7 @@ export interface ScenarioBadge {
   element: string;
   /** ストック（いまの値・シナリオの値は初期値） */
   initial: boolean;
-  /** いまの値（元のモデル）。値のない要素なら空文字 */
+  /** いまの値（何も変えない実行）。値のない要素なら空文字 */
   current: string;
   /** シナリオの値 */
   value: string;
@@ -308,7 +340,7 @@ function valueProblem(model: ModelJSON, text: string): string | undefined {
 
 /**
  * 表のマスに入れた文字から、送る変更を組み立てる（MCP の set_scenarios と同じ形）。
- * 空なら、そのシナリオではその値を変えない（null。「元のモデル」と同じ値に戻る）。全角の数字と記号は半角にする。
+ * 空なら、そのシナリオではその値を変えない（null。何も変えない実行と同じ値に戻る）。全角の数字と記号は半角にする。
  * 保存してある値と同じなら（何も変えていなければ）undefined。書けない値なら例外を投げる
  */
 export function cellPatchOf(model: ModelJSON, scenario: string, element: string, text: string): ScenarioPatch | undefined {
@@ -335,10 +367,10 @@ export function copyNameOf(name: string, others: string[]): string {
 
 /**
  * 表の見出しで足すシナリオの変更。source（複製元のシナリオの名前）があれば、その値と説明を写す。
- * 値のないシナリオも送る（サーバーは受け付け、「元のモデル」と同じ結果の列になる）。名前が使えなければ例外を投げる
+ * 値のないシナリオも送る（サーバーは受け付け、何も変えない実行と同じ結果の列になる）。名前が使えなければ例外を投げる
  */
 export function newScenarioPatchOf(model: ModelJSON, name: string, source?: string): ScenarioPatch {
-  const problem = scenarioNameProblem(name, (model.scenarios ?? []).map(scenarioName));
+  const problem = scenarioNameProblem(name, (model.scenarios ?? []).map(scenarioName), baselineOf(model).name);
   if (problem) throw new Error(problem);
   const from = source === undefined ? undefined : findScenario(model, source);
   if (source !== undefined && !from) throw new Error(`複製するシナリオ「${source}」が見つかりません。ほかのところ（AI など）で名前が変わったか、消された可能性があります。`);

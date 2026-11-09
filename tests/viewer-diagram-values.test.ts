@@ -79,7 +79,7 @@ describe("値を出すシナリオ", () => {
     expect(valueScenarioNames(scenarios)).toEqual(["早く直す"]);
     expect(valueScenarioNames(undefined)).toEqual([]);
   });
-  test("選んだシナリオが実行できなかった・消されたときは、なし（元のモデルに戻す）", () => {
+  test("選んだシナリオが実行できなかった・消されたときは、なし（何も変えない実行に戻す）", () => {
     expect(valueScenarioRun(scenarios, "早く直す")?.series).toEqual({ X: [1, 2] });
     expect(valueScenarioRun(scenarios, "壊れた")).toBeUndefined();
     expect(valueScenarioRun(scenarios, "ない")).toBeUndefined();

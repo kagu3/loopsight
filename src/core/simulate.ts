@@ -1,7 +1,7 @@
 import { Link } from "simulation";
 import type { Equation, ModelElement, ModelJSON, SimulationSettings } from "./modeljson.js";
-import { clone, didYouMean, findElement } from "./modeljson.js";
-import { BASELINE_SCENARIO, checkSimulation } from "./edit.js";
+import { baselineOf, clone, didYouMean, findElement } from "./modeljson.js";
+import { checkSimulation } from "./edit.js";
 import { ModelError, buildModel, staticCheck, toModelError, type Issue } from "./validate.js";
 
 /** 実行 1 回分の全データ */
@@ -237,7 +237,7 @@ export function compareScenarios(
   options: { targets?: string[]; samples?: number; simulation?: SimulationSettings; keepErrors?: boolean } = {},
 ): Comparison {
   if (!scenarios.length) throw new ModelError("比較するシナリオがありません。", []);
-  // 上限は、先頭（比べる基準。ふつうは「元のモデル」）を除いて数える
+  // 上限は、先頭（比べる基準。ふつうは何も変えない実行）を除いて数える
   if (scenarios.length - 1 > 200) throw new ModelError("一度に比較できるのは、先頭の基準のほかに 200 通りまでです。", []);
   const targets = resolveTargets(model, options.targets);
   let timeUnits = "";
@@ -265,9 +265,9 @@ export function modelScenarios(model: ModelJSON): ScenarioInput[] {
   return (model.scenarios ?? []).map((s, i) => ({ name: s.name ?? `scenario ${i + 1}`, overrides: s.values }));
 }
 
-/** 「元のモデル」（何も変えない実行）を先頭に足したシナリオの並び */
-export function withBaseline(scenarios: ScenarioInput[]): ScenarioInput[] {
-  return [{ name: BASELINE_SCENARIO, overrides: {} }, ...scenarios];
+/** 何も変えない実行（名前はモデルの baseline。なければ「いまのまま」）を先頭に足したシナリオの並び */
+export function withBaseline(model: ModelJSON, scenarios: ScenarioInput[]): ScenarioInput[] {
+  return [{ name: baselineOf(model).name, overrides: {} }, ...scenarios];
 }
 
 /** 保存したシナリオ 1 つ分の実行結果。実行できなかったときは data の代わりに error が入る */
@@ -282,8 +282,8 @@ export interface ScenarioRun {
 }
 
 /**
- * 「元のモデル」と、モデルに保存したシナリオすべてを実行して、全時系列を返す。
- * 「元のモデル」が実行できなければ例外にする。シナリオごとの失敗は、そのシナリオの error に入れる。
+ * 何も変えない実行と、モデルに保存したシナリオすべてを実行して、全時系列を返す。
+ * 何も変えない実行が実行できなければ例外にする。シナリオごとの失敗は、そのシナリオの error に入れる。
  * limit を付けると、先頭からその数までだけ実行する（残りは skipped にして名前だけ返す）。
  */
 export function runScenarios(

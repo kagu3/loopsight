@@ -1,5 +1,5 @@
 import { hasDelayMark } from "./delay.js";
-import { annotationsOf, type ModelElement, type ModelJSON } from "./modeljson.js";
+import { annotationsOf, baselineOf, type ModelElement, type ModelJSON } from "./modeljson.js";
 import { wellFormedGroups } from "./groups.js";
 
 /** AI が読みやすい、座標などを省いたモデルの要約 */
@@ -15,6 +15,8 @@ export interface ModelSummary {
   converters: Record<string, unknown>[];
   links: string[];
   scenarios?: string[];
+  /** 何も変えない実行（シナリオと並べて比べる基準）の名前と説明。シナリオがあるか、名前か説明を付けたときだけ */
+  baseline?: { name: string; description?: string };
   /** 図のグループ（名前、色、属する要素） */
   groups?: { name: string; color: string; elements: string[] }[];
   /** 図の注釈（要素ではない、文字だけのもの） */
@@ -71,6 +73,7 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
     }),
   };
   if (model.scenarios?.length) summary.scenarios = model.scenarios.map((s) => s.name ?? "(名前なし)");
+  if (model.scenarios?.length || model.baseline) summary.baseline = baselineOf(model);
   const groups = wellFormedGroups(model);
   if (groups.length) summary.groups = groups.map((g) => ({ name: g.name, color: g.color, elements: g.elements }));
   const notes = annotationsOf(model);

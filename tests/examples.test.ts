@@ -95,14 +95,14 @@ function sampleProblems(model: ModelJSON): string[] {
 
   const scenarios = model.scenarios ?? [];
   if (!scenarios.length) problems.push("シナリオがない（てこのシナリオを 1 つ以上入れる）");
-  // 検証でエラーがあれば元のモデルは動かないので、シナリオの実行は確かめない
+  // 検証でエラーがあれば何も変えない実行も動かないので、シナリオの実行は確かめない
   if (scenarios.length && !v.errors.length) {
     try {
       for (const run of runScenarios(model).scenarios) {
         if (run.error) problems.push(`シナリオ「${run.name}」が実行できない：${run.error.message}`);
       }
     } catch (e) {
-      problems.push(`元のモデルが実行できない：${toModelError(e).message}`);
+      problems.push(`何も変えない実行が実行できない：${toModelError(e).message}`);
     }
   }
 

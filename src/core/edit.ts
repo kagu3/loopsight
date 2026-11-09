@@ -2,7 +2,7 @@ import type { Annotation, ElementBehavior, ElementDisplay, ElementType, Equation
 import { bounds, toGraph } from "./diagram.js";
 import { ANNOTATION_MAX_WIDTH, ANNOTATION_MIN_WIDTH, boxLayout, BOX_TYPES } from "./geometry.js";
 import { DELAY_MARK_TYPES } from "./delay.js";
-import { annotationsOf, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
+import { annotationsOf, baselineClashMessage, baselineOf, DEFAULT_BASELINE_NAME, scenarioNamedLikeBaseline, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 import { removeFromGroups, renameInGroups } from "./groups.js";
 
 export class EditError extends Error {
@@ -346,9 +346,6 @@ export function removeElements(model: ModelJSON, targets: RemoveTarget[], option
   return report;
 }
 
-/** 何も変えない実行の名前。保存したシナリオと並べて比べる基準にする */
-export const BASELINE_SCENARIO = "元のモデル";
-
 /** シナリオで値を変えられる要素の種類（実行時の上書きと同じ） */
 const SCENARIO_TYPES: readonly ElementType[] = ["STOCK", "VARIABLE", "FLOW"];
 
@@ -359,6 +356,20 @@ export interface ScenarioPatch {
   rename_to?: string;
   description?: string | null;
   values?: Record<string, Equation | null>;
+}
+
+/**
+ * set_scenarios の baseline。何も変えない実行（シナリオと並べて比べる基準）の名前と説明を直す。
+ * 省いた項目はそのまま。null か空の文字で消す（名前は既定の DEFAULT_BASELINE_NAME に戻る）
+ */
+export interface BaselinePatch {
+  name?: string | null;
+  description?: string | null;
+}
+
+/** baseline に直す項目（name か description）があるか。項目のない {} は、指定していないものとして扱う */
+export function hasBaselinePatch(patch: BaselinePatch | undefined): patch is BaselinePatch {
+  return !!patch && typeof patch === "object" && (patch.name !== undefined || patch.description !== undefined);
 }
 
 export interface ScenarioReport {
@@ -372,10 +383,10 @@ function scenarioNameOf(s: Scenario, i: number): string {
   return s.name ?? `scenario ${i + 1}`;
 }
 
-function checkScenarioName(name: string, scenarios: Scenario[], self?: Scenario): string {
+function checkScenarioName(name: string, scenarios: Scenario[], baseline: string, self?: Scenario): string {
   const n = name.trim();
   if (!n) throw new EditError("シナリオには name が必要です。");
-  if (sameName(n, BASELINE_SCENARIO)) throw new EditError(`"${BASELINE_SCENARIO}" は何も変えない実行の名前なので、シナリオには使えません。`);
+  if (sameName(n, baseline)) throw new EditError(`"${baseline}" は何も変えない実行の名前なので、シナリオには使えません。`);
   const clash = scenarios.find((s, i) => s !== self && sameName(scenarioNameOf(s, i), n));
   if (clash) throw new EditError(`"${n}" という名前のシナリオがすでにあります。`);
   return n;
@@ -385,9 +396,24 @@ function checkScenarioName(name: string, scenarios: Scenario[], self?: Scenario)
  * シナリオをまとめて追加・更新・削除する。モデルはその場で書き換える。
  * 名前で既存のシナリオを探し、あれば重ね、なければ追加する。replace なら今のシナリオを捨ててから足す。
  * 値の名前は要素の表記にそろえる（ない要素や、値を変えられない要素はエラー）。
+ * baseline で、何も変えない実行の名前と説明も直す（名前はシナリオの名前と重ねられない）。
  */
-export function setScenarios(model: ModelJSON, patches: ScenarioPatch[], options: { remove?: string[]; replace?: boolean } = {}): ScenarioReport {
+export function setScenarios(
+  model: ModelJSON,
+  patches: ScenarioPatch[],
+  options: { remove?: string[]; replace?: boolean; baseline?: BaselinePatch } = {},
+): ScenarioReport {
   const report: ScenarioReport = { added: [], updated: [], removed: [], notes: [] };
+  // 何も変えない実行の名前は、直したあとのもので確かめる
+  const before = baselineOf(model);
+  const given = options.baseline;
+  if (given !== undefined && (!given || typeof given !== "object" || Array.isArray(given))) throw new EditError("baseline は { name, description } の形にしてください。");
+  // 項目のない baseline（{}）は、指定していないものとして扱う
+  const bp = hasBaselinePatch(given) ? given : undefined;
+  for (const k of ["name", "description"] as const) {
+    if (bp?.[k] !== undefined && bp[k] !== null && typeof bp[k] !== "string") throw new EditError(`baseline の ${k} は文字か null にしてください。`);
+  }
+  const baseline = bp?.name === undefined ? before.name : bp.name?.trim() || DEFAULT_BASELINE_NAME;
   const scenarios = options.replace ? [] : [...(model.scenarios ?? [])];
   if (options.replace) report.removed.push(...(model.scenarios ?? []).map(scenarioNameOf));
 
@@ -409,7 +435,7 @@ export function setScenarios(model: ModelJSON, patches: ScenarioPatch[], options
     if (s) {
       if (p.rename_to !== undefined) {
         const before = scenarioNameOf(s, scenarios.indexOf(s));
-        s.name = checkScenarioName(p.rename_to, scenarios, s);
+        s.name = checkScenarioName(p.rename_to, scenarios, baseline, s);
         if (!sameName(before, s.name)) report.notes.push(`シナリオ "${before}" を "${s.name}" に名前変更しました。`);
       }
       report.updated.push(s.name ?? p.name);
@@ -417,7 +443,7 @@ export function setScenarios(model: ModelJSON, patches: ScenarioPatch[], options
       if (p.rename_to !== undefined) {
         throw new EditError(`名前を変えるシナリオ "${p.name}" が見つかりません。${didYouMean(p.name, scenarios.map(scenarioNameOf))}`);
       }
-      s = { name: checkScenarioName(p.name, scenarios), values: {} };
+      s = { name: checkScenarioName(p.name, scenarios, baseline), values: {} };
       scenarios.push(s);
       report.added.push(s.name!);
     }
@@ -441,11 +467,32 @@ export function setScenarios(model: ModelJSON, patches: ScenarioPatch[], options
         );
       }
     }
-    if (!Object.keys(s.values).length) report.notes.push(`シナリオ "${s.name}" は値を変えていないので、「${BASELINE_SCENARIO}」と同じ結果になります。`);
+    if (!Object.keys(s.values).length) report.notes.push(`シナリオ "${s.name}" は値を変えていないので、「${baseline}」と同じ結果になります。`);
+  }
+
+  if (bp?.name !== undefined && !sameName(baseline, before.name)) {
+    const clash = scenarios.find((s, i) => sameName(scenarioNameOf(s, i), baseline));
+    if (clash) throw new EditError(`"${baseline}" という名前のシナリオがあるので、何も変えない実行の名前には使えません。`);
+  }
+  if (bp) {
+    const next = { ...(model.baseline && typeof model.baseline === "object" ? model.baseline : {}) };
+    if (bp.name !== undefined) {
+      // 既定の名前と同じなら、付けていないのと同じなので保存しない
+      if (baseline === DEFAULT_BASELINE_NAME) delete next.name;
+      else next.name = baseline;
+      if (baseline !== before.name) report.notes.push(`何も変えない実行の名前を「${before.name}」から「${baseline}」に変えました。`);
+    }
+    const description = bp.description?.trim();
+    if (bp.description === null || description === "") delete next.description;
+    else if (description !== undefined) next.description = description;
+    if (Object.keys(next).length) model.baseline = next;
+    else delete model.baseline;
   }
 
   if (scenarios.length) model.scenarios = scenarios;
   else delete model.scenarios;
+  const clash = scenarioNamedLikeBaseline(model);
+  if (clash !== undefined) report.notes.push(baselineClashMessage(clash));
   return report;
 }
 

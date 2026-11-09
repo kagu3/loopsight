@@ -1,7 +1,7 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { AnnotationPatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch, SimulationSettings } from "../../src/viewer/api.js";
-import { DEMO, FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postRemove, postScenarios, postSimulation, postUndo, type WriteResult } from "./api.js";
+import type { AnnotationPatch, BaselinePatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch, SimulationSettings } from "../../src/viewer/api.js";
+import { DEMO, FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postBaseline, postRemove, postScenarios, postSimulation, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details, DelayToggle, linkPolarity, PolarityPicker } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
@@ -13,7 +13,7 @@ import { InfoTip } from "./InfoTip.js";
 import { addElementPatches, addNotePatches, linkProblem, linkRemoveProblem, reconnectChanges, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
 import { LOOP_KIND_LABEL, type LoopView } from "../../src/core/loops.js";
-import { annotationsOf, findLink, sameName } from "../../src/core/modeljson.js";
+import { annotationsOf, baselineOf, findLink, sameName } from "../../src/core/modeljson.js";
 import { hasDelayMark } from "../../src/core/delay.js";
 import { countProblems, describeProblemCount, listProblems, stripCount } from "./problemList.js";
 import { Problems } from "./Problems.js";
@@ -251,7 +251,8 @@ export function App() {
   const [selectedNote, setSelectedNote] = useState<string>();
   // 左の欄で説明を直しているシナリオ（名前・値・足す・消すは、シナリオの中身の表で直す）。
   // id は欄を開いた回ごとの番号。表で名前を変えても同じ欄のまま（書きかけの説明を残す）にするため、欄の key に使う
-  const [scenario, setScenario] = useState<{ name: string; id: number }>();
+  // baseline は何も変えない実行の説明を直しているとき（名前は AI などが変えても追わなくてよいよう、印で持つ）
+  const [scenario, setScenario] = useState<{ name: string; id: number; baseline?: boolean }>();
   const scenarioSeq = useRef(0);
   // 図で目立たせているループ（左の欄の「ループ」で押したもの。LoopItem の key）
   const [shownLoop, setShownLoop] = useState<string>();
@@ -278,8 +279,8 @@ export function App() {
     (sidebarOpen ? collapseRef : stripRef).current?.focus();
   }, [sidebarOpen]);
   /** 左の欄でシナリオの説明を直す。同じシナリオの欄を開いていれば、そのままにする。左の欄をたたんでいれば開く */
-  const editScenarioDescription = useCallback((name: string) => {
-    setScenario((s) => (s && sameName(s.name, name) ? s : { name, id: ++scenarioSeq.current }));
+  const editScenarioDescription = useCallback((name: string, baseline = false) => {
+    setScenario((s) => (s && (baseline ? s.baseline : !s.baseline && sameName(s.name, name)) ? s : { name, id: ++scenarioSeq.current, baseline }));
     setEditingSimulation(false);
     setSidebarOpen(true);
   }, []);
@@ -303,7 +304,7 @@ export function App() {
     setShowValuesState(on);
     saveShowValues(on);
   }, []);
-  // 図に値を出すシナリオ（undefined は「元のモデル」）
+  // 図に値を出すシナリオ（undefined は何も変えない実行）
   const [valuesScenario, setValuesScenario] = useState<string>();
   // グラフにカーソルを乗せている時刻（図に値を出している間だけ受け取る）
   const [hoverTime, setHoverTime] = useState<number>();
@@ -667,6 +668,16 @@ export function App() {
   );
   /** 左の欄で、シナリオの説明を直す */
   const saveScenarioDescription = useCallback((patch: ScenarioPatch) => editScenarios([patch]), [editScenarios]);
+  /** 何も変えない実行の名前（表の見出しの吹き出し）と説明（左の欄）を直す（MCP の set_scenarios の baseline と同じ形） */
+  const saveBaseline = useCallback(
+    (patch: BaselinePatch): Promise<string | undefined> =>
+      enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        return applyWrite(await postBaseline(d.name, d.version, patch));
+      }, SKIPPED_MESSAGE),
+    [applyWrite, enqueueWrite],
+  );
   /**
    * シナリオの中身の表で、シナリオを直す（値、足す・複製する、見出しの吹き出しで名前を変える）。編集欄は開かない。
    * 左の欄で説明を直しているシナリオの名前を変えたら、新しい名前で開いたままにする
@@ -681,7 +692,7 @@ export function App() {
         // 名前は、新しい版と同じ描画で差し替える（左の欄が一瞬「見つかりません」になって作り直されないように）
         const to = patch.rename_to;
         if (!err && result.ok && to !== undefined) {
-          setScenario((s) => (s && sameName(s.name, patch.name) ? { ...s, name: to } : s));
+          setScenario((s) => (s && !s.baseline && sameName(s.name, patch.name) ? { ...s, name: to } : s));
           // 図に値を出しているシナリオも、新しい名前で選んだままにする
           setValuesScenario((s) => (s !== undefined && sameName(s, patch.name) ? to : s));
         }
@@ -734,7 +745,7 @@ export function App() {
         }
         return err;
       }, SKIPPED_MESSAGE);
-      if (!err && currentRef.current === model) setScenario((s) => (s && sameName(s.name, name) ? undefined : s));
+      if (!err && currentRef.current === model) setScenario((s) => (s && !s.baseline && sameName(s.name, name) ? undefined : s));
       return err;
     },
     [applyWrite, enqueueWrite],
@@ -992,14 +1003,14 @@ export function App() {
   // 乗せたまま AI などがシナリオを消したり名前を変えたりして見つからなければ、直しているシナリオに戻す
   const scenarioMarks = useMemo<ScenarioMarks | undefined>(() => {
     if (!data) return undefined;
-    const name = [hoveredScenario, scenario?.name].find((n) => n !== undefined && findScenario(data.model, n));
+    const name = [hoveredScenario, scenario?.baseline ? undefined : scenario?.name].find((n) => n !== undefined && findScenario(data.model, n));
     const s = name !== undefined ? findScenario(data.model, name) : undefined;
     if (name === undefined || !s) return undefined;
     // 色はシナリオの線の色。直しているシナリオが実行できなかった・色が足りずに出していないときは、線がないので灰色にする
     const color = (data.run && scenarioColor(data.run, data.scenarios ?? [], name)) ?? "var(--text-secondary)";
     return { badges: scenarioBadges(data.model, s.values), color };
-  }, [data, hoveredScenario, scenario?.name]);
-  // 図に値を出すシナリオの実行結果。選んだシナリオが実行できなかった・消されたときは、「元のモデル」に戻す
+  }, [data, hoveredScenario, scenario?.name, scenario?.baseline]);
+  // 図に値を出すシナリオの実行結果。選んだシナリオが実行できなかった・消されたときは、何も変えない実行に戻す
   const valuesRun = valueScenarioRun(data?.scenarios, valuesScenario);
   useEffect(() => {
     if (valuesScenario !== undefined && data && !valuesRun) setValuesScenario(undefined);
@@ -1019,6 +1030,7 @@ export function App() {
       on: showValues,
       onChange: setShowValues,
       scenarios: valueScenarioNames(data?.scenarios),
+      baseline: data ? baselineOf(data.model).name : "",
       scenario: valuesRun?.name,
       onScenario: setValuesScenario,
       // いまどちらを出しているか（図の欄の上の帯に出す）
@@ -1163,8 +1175,10 @@ export function App() {
             <ScenarioEditor
               key={scenario.id}
               model={data.model}
-              name={scenario.name}
+              name={scenario.baseline ? baselineOf(data.model).name : scenario.name}
+              baseline={scenario.baseline}
               onSave={saveScenarioDescription}
+              onSaveBaseline={saveBaseline}
               onClose={() => setScenario(undefined)}
             />
           ) : selectedEl ? (
@@ -1383,9 +1397,11 @@ export function App() {
               scenarios={data.scenarios}
               actual={data.actual}
               renamed={renamed}
-              editingScenario={scenario?.name}
+              editingScenario={scenario?.baseline ? undefined : scenario?.name}
+              editingBaseline={scenario?.baseline}
               onEditScenario={editScenarioDescription}
               onSaveScenario={saveScenarioValue}
+              onSaveBaseline={saveBaseline}
               onRemoveScenario={removeScenario}
               onRemoveScenarioValue={removeScenarioValue}
               onFocusScenario={setHoveredScenario}

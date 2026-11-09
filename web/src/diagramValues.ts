@@ -102,7 +102,7 @@ export function valueScenarioNames(scenarios: ScenarioRunResult[] | undefined): 
   return (scenarios ?? []).filter((s) => s.series).map((s) => s.name);
 }
 
-/** 値を出すシナリオの実行結果。name がない・実行できなかった・消されたときは undefined（「元のモデル」の値を出す） */
+/** 値を出すシナリオの実行結果。name がない・実行できなかった・消されたときは undefined（何も変えない実行の値を出す） */
 export function valueScenarioRun(scenarios: ScenarioRunResult[] | undefined, name: string | undefined): ScenarioRunResult | undefined {
   if (name === undefined) return undefined;
   return (scenarios ?? []).find((s) => s.series && nameKey(s.name) === nameKey(name));

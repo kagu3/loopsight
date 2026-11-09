@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 import type { ModelJSON, RunResult, ScenarioRunResult } from "../src/viewer/api.js";
 import {
   addableValues,
-  BASELINE_NAME,
+  baselineDescriptionPatchOf,
+  baselineRenamePatchOf,
+  descriptionAfterSave,
   canEditValue,
   cellPatchOf,
   changeLabel,
@@ -23,7 +25,10 @@ import {
   valueRows,
   valueTargets,
 } from "../web/src/scenarios.js";
-import { BASELINE_SCENARIO, clone, upsertElements } from "../src/core/index.js";
+import { DEFAULT_BASELINE_NAME, clone, upsertElements } from "../src/core/index.js";
+
+/** 名前を付けていないモデルの、何も変えない実行 */
+const BASE = { name: DEFAULT_BASELINE_NAME };
 
 const run: RunResult = { time_units: "years", times: [0, 1], series: { Pop: [100, 110] } };
 const scenario = (name: string, extra: Partial<ScenarioRunResult> = {}): ScenarioRunResult => ({
@@ -34,10 +39,10 @@ const scenario = (name: string, extra: Partial<ScenarioRunResult> = {}): Scenari
 });
 
 describe("シナリオを重ねるグラフ", () => {
-  test("「元のモデル」を先頭に、実行できたシナリオを並べる", () => {
-    const c = compareRuns(run, [scenario("a"), scenario("b", { series: undefined, error: "式が正しくありません" }), scenario("c")], 8);
+  test("何も変えない実行を先頭に、実行できたシナリオを並べる", () => {
+    const c = compareRuns(run, [scenario("a"), scenario("b", { series: undefined, error: "式が正しくありません" }), scenario("c")], 8, BASE);
     expect(c.runs.map((r) => [r.name, r.baseline])).toEqual([
-      [BASELINE_NAME, true],
+      [DEFAULT_BASELINE_NAME, true],
       ["a", false],
       ["c", false],
     ]);
@@ -47,21 +52,24 @@ describe("シナリオを重ねるグラフ", () => {
   });
 
   test("色の数より多いシナリオは出さずに知らせる", () => {
-    const c = compareRuns(run, [scenario("a"), scenario("b"), scenario("c")], 2);
-    expect(c.runs.map((r) => r.name)).toEqual([BASELINE_NAME, "a", "b"]);
+    const c = compareRuns(run, [scenario("a"), scenario("b"), scenario("c")], 2, BASE);
+    expect(c.runs.map((r) => r.name)).toEqual([DEFAULT_BASELINE_NAME, "a", "b"]);
     expect(c.omitted).toEqual(["c"]);
     // サーバーが実行しなかったシナリオも「出していません」に入れる
-    expect(compareRuns(run, [scenario("d", { series: undefined, skipped: true })], 8).omitted).toEqual(["d"]);
+    expect(compareRuns(run, [scenario("d", { series: undefined, skipped: true })], 8, BASE).omitted).toEqual(["d"]);
   });
 
-  test("「元のモデル」の名前はサーバーと同じ", () => {
-    expect(BASELINE_NAME).toBe(BASELINE_SCENARIO);
+  test("何も変えない実行は、モデルで付けた名前と説明で出す", () => {
+    const [base] = compareRuns(run, [scenario("a")], 8, { name: "営業は今のまま", description: "人を増やさない" }).runs;
+    expect(base).toMatchObject({ name: "営業は今のまま", description: "人を増やさない", baseline: true });
   });
 
-  test("凡例の説明には、シナリオの説明と変える値を出す", () => {
-    const [base, a] = compareRuns(run, [scenario("a", { description: "速く増やす" })], 8).runs;
+  test("凡例の説明には、シナリオの説明と変える値を出す。何も変えない実行は、付けた説明と、何も変えていないこと", () => {
+    const [base, a] = compareRuns(run, [scenario("a", { description: "速く増やす" })], 8, BASE).runs;
     expect(describeRun(base!)).toMatch(/何も変えず/);
     expect(describeRun(a!)).toBe("速く増やす\n変える値：Rate = 0.2");
+    const [named] = compareRuns(run, [], 8, { name: "営業は今のまま", description: "人を増やさない" }).runs;
+    expect(describeRun(named!)).toBe("人を増やさない\nモデルの値を何も変えずに実行した結果です");
   });
 });
 
@@ -86,6 +94,7 @@ describe("シナリオの中身の表", () => {
       { name: "b", values: { Zero: 2, Rate: "0.05" }, series: { Pop: [100, 105, 90] } },
     ],
     8,
+    BASE,
   ).runs;
 
   test("数として読める値だけを数にする。式は数にしない", () => {
@@ -116,7 +125,7 @@ describe("シナリオの中身の表", () => {
     expect(changeLabel(1, Number.NaN)).toBe("");
   });
 
-  test("行はどれかのシナリオで変えた要素だけ、モデルの並び順。「元のモデル」はいまの値（ストックは初期値、変数とフローは式）", () => {
+  test("行はどれかのシナリオで変えた要素だけ、モデルの並び順。何も変えない実行はいまの値（ストックは初期値、変数とフローは式）", () => {
     const rows = valueRows(model, runs);
     expect(rows.map((r) => [r.element, r.initial])).toEqual([
       ["Pop", true],
@@ -145,13 +154,13 @@ describe("シナリオの中身の表", () => {
   });
 
   test("モデルにない要素の行は最後。シナリオがなければ行もない", () => {
-    const [b0, a] = compareRuns(base, [{ name: "a", values: { Nope: 1, Rate: 0.2 }, series: base.series }], 8).runs;
+    const [b0, a] = compareRuns(base, [{ name: "a", values: { Nope: 1, Rate: 0.2 }, series: base.series }], 8, BASE).runs;
     expect(valueRows(model, [b0!, a!]).map((r) => r.element)).toEqual(["Rate", "Nope"]);
     expect(valueRows(model, [b0!, a!])[1]!.cells[0]).toEqual({ value: undefined, changed: false, change: "" });
     expect(valueRows(model, [b0!])).toEqual([]);
   });
 
-  test("結果は選んでいる要素ごとに、最後の時点の値と「元のモデル」からの変化", () => {
+  test("結果は選んでいる要素ごとに、最後の時点の値と何も変えない実行からの変化", () => {
     expect(resultRows(runs, times, ["Pop"])).toEqual([
       {
         element: "Pop",
@@ -209,9 +218,13 @@ describe("シナリオの名前と説明を直す", () => {
     expect(renamePatchOf(model, "高い", " 高い ")).toBeUndefined();
   });
 
-  test("名前が空・「元のモデル」・ほかのシナリオと同じ名前なら送らない。シナリオが見つからなければ知らせる", () => {
+  test("名前が空・何も変えない実行の名前・ほかのシナリオと同じ名前なら送らない。シナリオが見つからなければ知らせる", () => {
     expect(() => renamePatchOf(model, "高い", " ")).toThrow(/名前が空/);
-    expect(() => renamePatchOf(model, "高い", BASELINE_NAME)).toThrow(/何も変えない実行/);
+    expect(() => renamePatchOf(model, "高い", DEFAULT_BASELINE_NAME)).toThrow(/何も変えない実行/);
+    // 名前を付けたモデルでは、その名前が使えない（既定の名前は使える）
+    const named: ModelJSON = { ...model, baseline: { name: "営業は今のまま" } };
+    expect(() => renamePatchOf(named, "高い", " 営業は今のまま ")).toThrow(/「営業は今のまま」は何も変えない実行の名前/);
+    expect(renamePatchOf(named, "高い", DEFAULT_BASELINE_NAME)).toEqual({ name: "高い", rename_to: DEFAULT_BASELINE_NAME });
     expect(() => renamePatchOf(model, "高い", "scenario 2")).toThrow(/すでにあります/);
     expect(() => renamePatchOf(model, "ない", "新しい")).toThrow(/見つかりません/);
   });
@@ -221,6 +234,35 @@ describe("シナリオの名前と説明を直す", () => {
     expect(descriptionPatchOf("高い", "速く増やす", " ")).toEqual({ name: "高い", description: null });
     expect(descriptionPatchOf("高い", "速く増やす", "速く増やす ")).toBeUndefined();
     expect(descriptionPatchOf("scenario 2", "", "")).toBeUndefined();
+  });
+
+  test("何も変えない実行の名前を変えると baseline の名前を送る。空か既定の名前にしたら既定に戻す（null）。シナリオと同じ名前なら送らない", () => {
+    expect(baselineRenamePatchOf(model, " 営業は今のまま ")).toEqual({ name: "営業は今のまま" });
+    expect(baselineRenamePatchOf(model, DEFAULT_BASELINE_NAME)).toBeUndefined();
+    expect(baselineRenamePatchOf(model, " ")).toBeUndefined();
+    const named: ModelJSON = { ...model, baseline: { name: "営業は今のまま" } };
+    expect(baselineRenamePatchOf(named, "営業は今のまま")).toBeUndefined();
+    expect(baselineRenamePatchOf(named, "")).toEqual({ name: null });
+    expect(baselineRenamePatchOf(named, DEFAULT_BASELINE_NAME)).toEqual({ name: null });
+    expect(() => baselineRenamePatchOf(model, " 高い ")).toThrow(/「高い」という名前のシナリオがある/);
+  });
+
+  test("左の欄で保存したあと、保存する前の版で描き直しても欄を戻さず、新しい版が来たら新しい説明で作り直す。続けて直して保存できる", () => {
+    // 「a」から「b」に直して保存した。保存の結果を待つ間、前の版（a）で描き直しても欄は「b」のまま
+    expect(descriptionAfterSave(true, "a", "a")).toEqual({ waiting: true });
+    // 新しい版（b）が来たら、欄と比べる元を「b」にする
+    const after = descriptionAfterSave(true, "a", "b");
+    expect(after).toEqual({ waiting: false, reset: "b" });
+    // 続けて「c」に直すとき、比べる元（b）といまの説明（b）が同じなので、AI が変えたとは知らせず保存できる
+    expect(baselineDescriptionPatchOf(after.reset!, "c")).toEqual({ description: "c" });
+    // 保存していないときは、AI などが説明を変えても欄は変えない（保存するときに知らせる）
+    expect(descriptionAfterSave(false, "b", "AI の説明")).toEqual({ waiting: false });
+  });
+
+  test("何も変えない実行の説明は、baseline の説明だけを送る。空にしたら消す（null）", () => {
+    expect(baselineDescriptionPatchOf("", " 人を増やさない ")).toEqual({ description: "人を増やさない" });
+    expect(baselineDescriptionPatchOf("人を増やさない", "")).toEqual({ description: null });
+    expect(baselineDescriptionPatchOf("人を増やさない", "人を増やさない ")).toBeUndefined();
   });
 });
 
@@ -350,12 +392,14 @@ describe("シナリオの中身の表の見出しでシナリオを足す・複�
   };
   const others = (model.scenarios ?? []).map((s, i) => s.name ?? `scenario ${i + 1}`);
 
-  test("名前は、空・「元のモデル」・ほかのシナリオと同じなら使えない。比べ方はサーバーと同じ（大文字と小文字、前後の空白を区別しない）", () => {
-    expect(scenarioNameProblem("  ", others)).toMatch(/空です/);
-    expect(scenarioNameProblem(` ${BASELINE_NAME} `, others)).toMatch(/何も変えない実行の名前/);
-    expect(scenarioNameProblem(" 人を増やさない ", others)).toMatch(/「人を増やさない」という名前のシナリオがすでにあります/);
-    expect(scenarioNameProblem("Scenario 3", others)).toMatch(/すでにあります/);
-    expect(scenarioNameProblem("広告を増やす", others)).toBeUndefined();
+  test("名前は、空・何も変えない実行の名前・ほかのシナリオと同じなら使えない。比べ方はサーバーと同じ（大文字と小文字、前後の空白を区別しない）", () => {
+    const b = DEFAULT_BASELINE_NAME;
+    expect(scenarioNameProblem("  ", others, b)).toMatch(/空です/);
+    expect(scenarioNameProblem(` ${DEFAULT_BASELINE_NAME} `, others, b)).toMatch(/何も変えない実行の名前/);
+    expect(scenarioNameProblem(" 人を増やさない ", others, b)).toMatch(/「人を増やさない」という名前のシナリオがすでにあります/);
+    expect(scenarioNameProblem("Scenario 3", others, b)).toMatch(/すでにあります/);
+    expect(scenarioNameProblem("広告を増やす", others, b)).toBeUndefined();
+    expect(scenarioNameProblem("今のやり方", others, "今のやり方")).toMatch(/「今のやり方」は何も変えない実行の名前/);
   });
 
   test("複製するときの名前は、まだ使っていない番号を付ける。番号つきのシナリオを複製しても番号を重ねない（全角・半角のかっこ）", () => {
@@ -386,8 +430,8 @@ describe("シナリオの中身の表の見出しでシナリオを足す・複�
   });
 
   test("値を変えないシナリオも、表の列になる（どの行も「—」）", () => {
-    const c = compareRuns(run, [scenario("a"), scenario("空", { values: {}, series: run.series })], 8);
-    expect(c.runs.map((r) => r.name)).toEqual([BASELINE_NAME, "a", "空"]);
+    const c = compareRuns(run, [scenario("a"), scenario("空", { values: {}, series: run.series })], 8, BASE);
+    expect(c.runs.map((r) => r.name)).toEqual([DEFAULT_BASELINE_NAME, "a", "空"]);
     const m: ModelJSON = { elements: [{ type: "VARIABLE", name: "Rate", behavior: { value: 0.1 } }] };
     expect(valueRows(m, c.runs).map((r) => r.cells.map((x) => x.value ?? "—"))).toEqual([["0.1", "0.2", "—"]]);
   });
@@ -412,6 +456,7 @@ describe("シナリオの中身の表で行（変える値）を足す・消す"
     run,
     [scenario("a", { values: { rate: 0.2, Pop: 80 } }), scenario("b", { values: { Pop: 90 } }), scenario("scenario 3", { values: { Rate: 0.3 } })],
     8,
+    BASE,
   ).runs;
 
   test("足した行は、どのシナリオでも変えていなくても全部「—」で出し、モデルの並び順に並べる", () => {

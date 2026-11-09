@@ -12,7 +12,7 @@ const EXAMPLES_DIR = path.resolve("examples");
 interface KeyNumber {
   /** examples/ からの相対パス */
   model: string;
-  /** シナリオの名前。なければ「元のモデル」 */
+  /** シナリオの名前。なければ何も変えない実行 */
   scenario?: string;
   element: string;
   /** element ÷ per の値を見る（注文 ÷ 需要 など） */
@@ -137,7 +137,7 @@ function keyNumberProblems(k: KeyNumber): string[] {
   const text = k.text ?? k.value;
   const problems: string[] = [];
   if (!text.includes(k.value)) problems.push(`表の text「${text}」に value「${k.value}」が入っていない`);
-  // シナリオの行は、そのシナリオの説明かモデルの説明から探す。元のモデルの行は、モデルの説明とすべてのシナリオの説明から探す
+  // シナリオの行は、そのシナリオの説明かモデルの説明から探す。何も変えない実行の行は、モデルの説明とすべてのシナリオの説明から探す
   const scenarios = (model.scenarios ?? []).filter((s) => !k.scenario || s.name === k.scenario);
   const descriptions = [model.description ?? "", ...scenarios.map((s) => s.description ?? "")];
   if (!descriptions.some((d) => d.includes(text))) problems.push(`説明に「${text}」がない（説明の数字を変えたら、この表も直す）`);
@@ -146,7 +146,7 @@ function keyNumberProblems(k: KeyNumber): string[] {
   try {
     run = runOf(k.model);
   } catch (e) {
-    return [...problems, `元のモデルが実行できない：${toModelError(e).message}`];
+    return [...problems, `何も変えない実行が実行できない：${toModelError(e).message}`];
   }
   let data: RunData | undefined = run.baseline;
   if (k.scenario) {
@@ -168,7 +168,7 @@ describe("sample の説明の要の数字が、シミュレーションの結果
 
   test.each([...byModel.keys()])("%s", (file) => {
     const problems = byModel.get(file)!.flatMap((k) =>
-      keyNumberProblems(k).map((p) => `${k.scenario ?? "元のモデル"}「${k.text ?? k.value}」：${p}`),
+      keyNumberProblems(k).map((p) => `${k.scenario ?? "何も変えない実行"}「${k.text ?? k.value}」：${p}`),
     );
     expect(problems, `examples/${file} の説明の数字が、結果と合いません:\n${problems.join("\n")}`).toEqual([]);
   });

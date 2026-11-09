@@ -2,13 +2,17 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { toModelJSON } from "simulation";
 import {
+  DEFAULT_BASELINE_NAME,
   ImportError,
   ModelStore,
   StoreError,
+  baselineOf,
   buildModel,
   checkBrackets,
   emptyModel,
+  engineModel,
   importModelText,
+  modelScenarios,
   removeElements,
   setScenarios,
   setSimulation,
@@ -16,6 +20,7 @@ import {
   summarizeModel,
   upsertElements,
   validateModel,
+  withBaseline,
   type ModelJSON,
 } from "../src/core/index.js";
 import { loadSample, sampleNames, sortedElements, tempDir, UNSUPPORTED_SAMPLE } from "./helpers.js";
@@ -248,7 +253,7 @@ describe("シナリオの保存", () => {
     expect(r2.updated).toEqual(["早く治す", "接触を減らす"]);
     expect(m.scenarios![1]!.values).toEqual({ Beta: 0.3, Gamma: 0.25 });
     expect(m.scenarios![0]).toEqual({ name: "接触を減らす", values: {} });
-    expect(r2.notes.join("\n")).toMatch(/元のモデル/);
+    expect(r2.notes.join("\n")).toMatch(/いまのまま/);
   });
 
   test("値を直しても、変える値の並び順は変えない。表記の違うキーは元の位置で要素の表記にそろえる", () => {
@@ -285,11 +290,48 @@ describe("シナリオの保存", () => {
     expect(() => setScenarios(m, [{ name: "x", values: { Bta: 1 } }])).toThrow(/もしかして "Beta"/);
     m.elements.push({ type: "CONVERTER", name: "Table", behavior: { input: "TIME", data: [[0, 1]] } });
     expect(() => setScenarios(m, [{ name: "x", values: { Table: 1 } }])).toThrow(/CONVERTER/);
-    expect(() => setScenarios(m, [{ name: "元のモデル", values: { Beta: 1 } }])).toThrow(/元のモデル/);
+    expect(() => setScenarios(m, [{ name: "いまのまま", values: { Beta: 1 } }])).toThrow(/いまのまま/);
     setScenarios(m, [{ name: "x", values: { Beta: 1 } }, { name: "y", values: { Beta: 2 } }]);
     expect(() => setScenarios(m, [{ name: "y", rename_to: "X" }])).toThrow(/すでにあります/);
     expect(() => setScenarios(m, [{ name: "z", rename_to: "w" }])).toThrow(/見つかりません/);
     expect(() => setScenarios(m, [], { remove: ["nothing"] })).toThrow(/見つかりません/);
+  });
+
+  test("何も変えない実行に名前と説明を付ける。付けた名前はシナリオに使えず、既定の名前は使える。消すと既定に戻る", () => {
+    const m = sir();
+    expect(baselineOf(m)).toEqual({ name: DEFAULT_BASELINE_NAME });
+    const r = setScenarios(m, [{ name: "対策", values: { Beta: 0.2 } }], { baseline: { name: " 今のやり方 ", description: "何もしない" } });
+    expect(m.baseline).toEqual({ name: "今のやり方", description: "何もしない" });
+    expect(baselineOf(m)).toEqual({ name: "今のやり方", description: "何もしない" });
+    expect(r.notes.join("\n")).toMatch(/「いまのまま」から「今のやり方」に変えました/);
+    expect(() => setScenarios(m, [{ name: "今のやり方", values: {} }])).toThrow(/何も変えない実行の名前/);
+    expect(() => setScenarios(m, [{ name: "対策", rename_to: "今のやり方" }])).toThrow(/何も変えない実行の名前/);
+    // 既定の名前はもう何も変えない実行の名前ではないので、シナリオに使える
+    setScenarios(m, [{ name: DEFAULT_BASELINE_NAME, values: { Beta: 0.3 } }]);
+    // シナリオと同じ名前にはできない（既定の名前に戻すときも）
+    expect(() => setScenarios(m, [], { baseline: { name: "対策" } })).toThrow(/"対策" という名前のシナリオがある/);
+    expect(() => setScenarios(m, [], { baseline: { name: null } })).toThrow(/シナリオがある/);
+    // 同じ 1 回でシナリオの名前を変えれば、空いた名前を使える
+    setScenarios(m, [{ name: DEFAULT_BASELINE_NAME, rename_to: "強める" }], { baseline: { name: "" } });
+    expect(m.baseline).toEqual({ description: "何もしない" });
+    // 説明の前後の空白は削る
+    setScenarios(m, [], { baseline: { description: '  何もしない ' } });
+    expect(m.baseline).toEqual({ description: '何もしない' });
+    setScenarios(m, [], { baseline: { description: null } });
+    expect(m.baseline).toBeUndefined();
+    // 既定の名前を付けても保存しない
+    setScenarios(m, [], { baseline: { name: DEFAULT_BASELINE_NAME } });
+    expect(m.baseline).toBeUndefined();
+    expect(() => setScenarios(m, [], { baseline: { name: 1 as unknown as string } })).toThrow(/文字か null/);
+  });
+
+  test("何も変えない実行の名前と説明は、エンジンに渡さず、要約に出す", () => {
+    const m = sir();
+    setScenarios(m, [{ name: "対策", values: { Beta: 0.2 } }], { baseline: { name: "今のやり方", description: "何もしない" } });
+    expect("baseline" in engineModel(m)).toBe(false);
+    expect(summarizeModel(m).baseline).toEqual({ name: "今のやり方", description: "何もしない" });
+    expect(summarizeModel(sir()).baseline).toBeUndefined();
+    expect(withBaseline(m, modelScenarios(m)).map((s) => s.name)).toEqual(["今のやり方", "対策"]);
   });
 });
 

@@ -4,6 +4,7 @@ import type { DemoStore } from "./demo/store.js";
 import {
   VIEWER_HEADER,
   type AnnotationPatch,
+  type BaselinePatch,
   type DiagramExportResponse,
   type EditErrorResponse,
   type EditResponse,
@@ -88,6 +89,9 @@ export const postRemove = (name: string, version: string, elements: RemoveTarget
 /** シナリオを足す・直す・消す。scenarios と remove は MCP の set_scenarios と同じ形 */
 export const postScenarios = (name: string, version: string, scenarios: ScenarioPatch[], remove?: string[]) =>
   post(name, "scenarios", remove?.length ? { version, scenarios, remove } : { version, scenarios });
+
+/** 何も変えない実行の名前と説明を直す。baseline は MCP の set_scenarios の baseline と同じ形 */
+export const postBaseline = (name: string, version: string, baseline: BaselinePatch) => post(name, "scenarios", { version, scenarios: [], baseline });
 
 /** シミュレーションの設定を直す。simulation は MCP の set_simulation と同じ形（変えた項目だけ） */
 export const postSimulation = (name: string, version: string, simulation: SimulationSettings) => post(name, "simulation", { version, simulation });

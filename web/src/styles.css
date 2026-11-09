@@ -1826,7 +1826,7 @@ button.legend-remove:hover {
   border-radius: 2px;
   flex: none;
 }
-/* シナリオを重ねるときの凡例。「元のモデル」は灰色の点線 */
+/* シナリオを重ねるときの凡例。何も変えない実行は灰色の点線 */
 .scenario-bar {
   flex: none;
   padding: 0 16px 4px;
