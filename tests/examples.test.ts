@@ -114,6 +114,21 @@ function sampleProblems(model: ModelJSON): string[] {
   return problems;
 }
 
+/**
+ * シナリオで変えるのは数字だけ（式を入れない）。式はシナリオの表にそのまま出て、長くて省略されるため。
+ * 式で変えたいときは、数字のつまみになる変数をモデルに足す
+ */
+function scenarioValueProblems(model: ModelJSON): string[] {
+  return (model.scenarios ?? []).flatMap((s) =>
+    Object.entries(s.values)
+      .filter(([, v]) => typeof v !== "number")
+      .map(([name]) => `シナリオ「${s.name}」の「${name}」が数字でない（シナリオで変えるのは数字だけ。式で変えたいときは、数字のつまみになる変数をモデルに足す）`),
+  );
+}
+
+/** シナリオに式が残っている sample（別の Issue で、数字のつまみに直す）。直したら外す */
+const FORMULA_SCENARIOS_TO_FIX = new Set(["1_成長の限界/limits-to-growth.json"]);
+
 /** 決まりを守った小さなモデル（コーヒーが冷める）。単体のテストで、ここから 1 つずつ壊す */
 function goodModel(): ModelJSON {
   const m = emptyModel("coffee", { time_length: 60, time_units: "MINUTES" });
@@ -147,9 +162,15 @@ describe("examples/ の sample", () => {
       problems.push(`ModelJSON として読めない：${(e as Error).message}`);
     }
     if (model) problems.push(...sampleProblems(model));
+    if (model && !FORMULA_SCENARIOS_TO_FIX.has(file)) problems.push(...scenarioValueProblems(model));
     const csv = path.join(EXAMPLES_DIR, file.replace(/\.json$/i, ".data.csv"));
     if (model && existsSync(csv)) problems.push(...dataProblems(model, readFileSync(csv, "utf8")));
     expect(problems, `examples/${file} が sample の決まり（examples/README.md）に反しています:\n${problems.join("\n")}`).toEqual([]);
+  });
+
+  test.each([...FORMULA_SCENARIOS_TO_FIX])("%s は、シナリオの式を直したら FORMULA_SCENARIOS_TO_FIX から外す", (file) => {
+    const model = JSON.parse(readFileSync(path.join(EXAMPLES_DIR, file), "utf8")) as ModelJSON;
+    expect(scenarioValueProblems(model)).not.toEqual([]);
   });
 });
 
@@ -218,6 +239,13 @@ describe("sample の決まりの判定", () => {
     const bad = goodModel();
     bad.scenarios = [{ name: "壊れた", values: { 室温: "[ない要素]" } }];
     expect(sampleProblems(bad)).toEqual([expect.stringMatching(/^シナリオ「壊れた」が実行できない/)]);
+  });
+
+  test("シナリオで変えるのは数字だけ（式を入れない）", () => {
+    const m = goodModel();
+    expect(scenarioValueProblems(m)).toEqual([]);
+    m.scenarios = [{ name: "だんだん寒くなる", values: { 室温: "20 - Minutes() / 10" } }];
+    expect(scenarioValueProblems(m)).toEqual([expect.stringMatching(/^シナリオ「だんだん寒くなる」の「室温」が数字でない/)]);
   });
 
   test("図の重なり、線が要素の上を通るところ、座標のない要素", () => {

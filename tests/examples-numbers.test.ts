@@ -45,15 +45,14 @@ const KEY_NUMBERS: KeyNumber[] = [
   { model: "3_問題のすり替わり/shifting-the-burden.json", element: "売上", what: { at: 60 }, value: "31", text: "元のモデルが 31" },
   { model: "3_問題のすり替わり/shifting-the-burden.json", scenario: "品質に回す", element: "売上", what: { at: 60 }, value: "76", text: "品質に回すが 76" },
   { model: "3_問題のすり替わり/shifting-the-burden.json", scenario: "営業に強く頼る", element: "売上", what: { at: 60 }, value: "20", text: "60 か月で 20 になる" },
-  { model: "3_問題のすり替わり/shifting-the-burden.json", scenario: "予算の残りをすべて品質に回す", element: "売上", what: { at: 60 }, value: "81.8", text: "60 か月で 81.8" },
   // 4 エスカレート（52 週目）
-  { model: "4_エスカレート/advertising-war.json", element: "A社の広告費", what: { at: 52 }, value: "29.9", text: "52 週で約 29.9" },
-  { model: "4_エスカレート/advertising-war.json", scenario: "A社が12週目に競り合いをやめる", element: "A社の利益", what: { at: 52 }, value: "25.8", text: "A社 約 25.8" },
-  { model: "4_エスカレート/advertising-war.json", scenario: "A社が12週目に競り合いをやめる", element: "B社の利益", what: { at: 52 }, value: "24.4", text: "B社 約 24.4" },
-  { model: "4_エスカレート/advertising-war.json", scenario: "A社が相手に合わせるだけにする", element: "A社の広告費", what: { at: 52 }, value: "19.4", text: "A社 約 19.4" },
+  { model: "4_エスカレート/advertising-war.json", element: "A社の広告費", what: { at: 52 }, value: "38.4", text: "52 週で約 38.4" },
+  { model: "4_エスカレート/advertising-war.json", element: "A社の利益", what: { at: 52 }, value: "1.6", text: "約 1.6 まで減り" },
+  { model: "4_エスカレート/advertising-war.json", scenario: "A社が競り合いをやめる（12 週目）", element: "A社の利益", what: { at: 52 }, value: "25.8", text: "A社 約 25.8" },
+  { model: "4_エスカレート/advertising-war.json", scenario: "A社が相手に合わせるだけにする", element: "A社の広告費", what: { at: 52 }, value: "19.3", text: "A社 約 19.3" },
   // 5 成長と投資不足（120 か月目）
   { model: "5_成長と投資不足/growth-and-underinvestment.json", element: "注文", what: { at: 120 }, value: "2,769", text: "120 か月目の注文は 2,769 台/月" },
-  { model: "5_成長と投資不足/growth-and-underinvestment.json", element: "注文", per: "市場の需要", what: { at: 120 }, value: "0.63", text: "0.63（120 か月目）" },
+  { model: "5_成長と投資不足/growth-and-underinvestment.json", element: "注文", per: "この製品への需要", what: { at: 120 }, value: "0.63", text: "0.63（120 か月目）" },
   { model: "5_成長と投資不足/growth-and-underinvestment.json", scenario: "目標を守る", element: "注文", what: { at: 120 }, value: "5,576", text: "120 か月目の注文は 5,576 台/月" },
   { model: "5_成長と投資不足/growth-and-underinvestment.json", scenario: "先に投資する", element: "注文", what: { at: 120 }, value: "6,598", text: "6,598 台/月" },
   // 6 ブルウィップ効果（工場の生産指示の山）
