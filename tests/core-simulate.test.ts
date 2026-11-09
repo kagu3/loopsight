@@ -117,10 +117,10 @@ describe("比較", () => {
       { name: "fast", values: { Rate: 0.2 } },
       { name: "broken", values: { Rate: "[Nope]" } },
     ];
-    const scenarios = withBaseline(modelScenarios(m));
+    const scenarios = withBaseline(m, modelScenarios(m));
     expect(() => compareScenarios(m, scenarios)).toThrow(/broken/);
     const c = compareScenarios(m, scenarios, { targets: ["pop"], keepErrors: true });
-    expect(c.rows.map((r) => r.scenario)).toEqual(["元のモデル", "fast", "broken"]);
+    expect(c.rows.map((r) => r.scenario)).toEqual(["いまのまま", "fast", "broken"]);
     expect(c.rows[1]!.results!.Pop!.final).toBeCloseTo(100 * 1.2 ** 10, 2);
     expect(c.rows[1]!.results!.Pop!.series).toBeUndefined();
     expect(c.rows[2]!.results).toBeUndefined();
@@ -132,7 +132,7 @@ describe("比較", () => {
     expect(c.rows[1]!.results).toEqual(summarizeRun(viewer.scenarios[0]!.data!, ["Pop"], 0).results);
     expect(c.rows[2]!.error).toBe(viewer.scenarios[1]!.error!.message);
     // 上限の 200 通りは、先頭の基準を除いて数える
-    const many = withBaseline([...Array(200).keys()].map((i) => ({ name: `s${i}`, overrides: { Rate: i / 1000 } })));
+    const many = withBaseline(m, [...Array(200).keys()].map((i) => ({ name: `s${i}`, overrides: { Rate: i / 1000 } })));
     expect(compareScenarios(m, many, { targets: ["pop"] }).rows).toHaveLength(201);
     expect(() => compareScenarios(m, [...many, { name: "over", overrides: {} }])).toThrow(/200 通り/);
     // 先頭（比べる基準）の失敗は、keepErrors でも例外にする
@@ -150,7 +150,7 @@ describe("比較", () => {
     expect(c.rows[1]!.results!.Pop!.series).toHaveLength(2);
   });
 
-  test("「元のモデル」と保存したシナリオの全時系列をまとめて返す", () => {
+  test("何も変えない実行と保存したシナリオの全時系列をまとめて返す", () => {
     const m = growth();
     m.scenarios = [
       { name: "fast", description: "速く増やす", values: { Rate: 0.2 } },
@@ -165,7 +165,7 @@ describe("比較", () => {
     // 実行できないシナリオは、ほかを止めずに error に入れる
     expect(scenarios[1]!.data).toBeUndefined();
     expect(scenarios[1]!.error).toBeInstanceOf(ModelError);
-    expect(withBaseline(modelScenarios(m)).map((s) => s.name)).toEqual(["元のモデル", "fast", "broken"]);
+    expect(withBaseline(m, modelScenarios(m)).map((s) => s.name)).toEqual(["いまのまま", "fast", "broken"]);
     // limit を超えたシナリオは実行せず、名前だけ返す
     const limited = runScenarios(m, { limit: 1 }).scenarios;
     expect(limited[1]).toMatchObject({ name: "broken", skipped: true });

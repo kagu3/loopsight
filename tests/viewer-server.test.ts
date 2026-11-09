@@ -2,12 +2,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { ModelStore, emptyModel, toGraph, upsertElements } from "../src/core/index.js";
+import { ModelStore, emptyModel, summarizeModel, toGraph, upsertElements } from "../src/core/index.js";
 import type { ChangeEvent, EditErrorResponse, EditResponse, ElementPatch, ModelListResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
 import { watchTree } from "../src/viewer/watch.js";
 import { reconnectPatches } from "../web/src/editing.js";
-import { cellPatchOf, clearValuePatches, newScenarioPatchOf } from "../web/src/scenarios.js";
+import { baselineDescriptionPatchOf, baselineRenamePatchOf, cellPatchOf, clearValuePatches, newScenarioPatchOf } from "../web/src/scenarios.js";
 import { simulationFormOf, simulationPatchOf } from "../web/src/simulation.js";
 import { loadSample, tempDir, UNSUPPORTED_SAMPLE } from "./helpers.js";
 
@@ -538,7 +538,7 @@ describe("ビューアからのシナリオの編集", () => {
     const add = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: [newScenarioPatchOf(v0.model, "広告を増やす")] });
     expect(add.status).toBe(200);
     expect(add.body.model.model.scenarios).toEqual([m.scenarios[0], { name: "広告を増やす", values: {} }]);
-    // 値を変えないシナリオも実行し、「元のモデル」と同じ結果を返す（グラフと表の列になる）
+    // 値を変えないシナリオも実行し、何も変えない実行と同じ結果を返す（グラフと表の列になる）
     expect(add.body.model.scenarios!.map((s) => s.name)).toEqual(["高い", "広告を増やす"]);
     expect(add.body.model.scenarios![1]!.series).toEqual(add.body.model.run!.series);
     const u1 = await post<EditResponse>("/api/models/pop/undo", { version: add.body.model.version });
@@ -552,6 +552,27 @@ describe("ビューアからのシナリオの編集", () => {
     const u2 = await post<EditResponse>("/api/models/pop/undo", { version: copy.body.model.version });
     expect(u2.body.model.version).toBe(v0.version);
     expect(u2.body.model.model.scenarios).toEqual(m.scenarios);
+  });
+
+  test("何も変えない実行の名前と説明を画面で直すと、ファイルに保存し（AI の get_model の要約にも出る）、1 回の「元に戻す」で戻る", async () => {
+    const store = new ModelStore(dir);
+    const m = population();
+    m.scenarios = [{ name: "高い", values: { Rate: 0.2 } }];
+    await store.write("pop", m);
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body;
+    const rename = await post<EditResponse>("/api/models/pop/scenarios", { version: v0.version, scenarios: [], baseline: baselineRenamePatchOf(v0.model, "今の割合のまま") });
+    expect(rename.status).toBe(200);
+    const desc = await post<EditResponse>("/api/models/pop/scenarios", {
+      version: rename.body.model.version,
+      scenarios: [],
+      baseline: baselineDescriptionPatchOf("", "増える割合を変えない"),
+    });
+    expect(desc.status).toBe(200);
+    expect(desc.body.model.model.baseline).toEqual({ name: "今の割合のまま", description: "増える割合を変えない" });
+    const saved = await store.read("pop");
+    expect(summarizeModel(saved).baseline).toEqual({ name: "今の割合のまま", description: "増える割合を変えない" });
+    const u = await post<EditResponse>("/api/models/pop/undo", { version: desc.body.model.version });
+    expect(u.body.model.model.baseline).toEqual({ name: "今の割合のまま" });
   });
 
   test("表の行を消す（すべてのシナリオでその値を変えない）は、複数のシナリオをまとめた 1 回の保存で、1 回の「元に戻す」で全部戻る", async () => {
@@ -619,7 +640,7 @@ describe("ビューアからのシナリオの編集", () => {
     expect((await new ModelStore(dir).read("pop")).scenarios).toEqual([{ name: "AI のシナリオ", values: { Rate: 0.3 } }]);
   });
 
-  test("シナリオの誤り（名前の重なり、「元のモデル」、値を変えられない要素など）は 400 で、ファイルは変えない", async () => {
+  test("シナリオの誤り（名前の重なり、何も変えない実行の名前、値を変えられない要素など）は 400 で、ファイルは変えない", async () => {
     const store = new ModelStore(dir);
     const m = population();
     m.scenarios = [{ name: "高い", values: { Rate: 0.2 } }];
@@ -627,7 +648,8 @@ describe("ビューアからのシナリオの編集", () => {
     const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
     const bad = async (body: unknown) => (await post<EditErrorResponse>("/api/models/pop/scenarios", { version: v0, ...(body as object) })).body.error;
     expect(await bad({ scenarios: [{ name: "低い" }, { name: "低い", rename_to: "高い" }] })).toMatch(/すでにあります/);
-    expect(await bad({ scenarios: [{ name: "元のモデル", values: { Rate: 0 } }] })).toMatch(/何も変えない実行/);
+    expect(await bad({ scenarios: [{ name: "いまのまま", values: { Rate: 0 } }] })).toMatch(/何も変えない実行/);
+    expect(await bad({ scenarios: [], baseline: { name: "高い" } })).toMatch(/シナリオがある/);
     expect(await bad({ scenarios: [{ name: "低い", values: { Rat: 0 } }] })).toMatch(/Rate/);
     expect(await bad({ scenarios: [], remove: ["ないシナリオ"] })).toMatch(/見つかりません/);
     // 形の誤り
@@ -635,6 +657,9 @@ describe("ビューアからのシナリオの編集", () => {
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [] })).status).toBe(400);
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [{ values: {} }] })).status).toBe(400);
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [], remove: "高い" })).status).toBe(400);
+    expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [], baseline: "今のまま" })).status).toBe(400);
+    expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [], baseline: { name: 1 } })).status).toBe(400);
+    expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [], baseline: {} })).status).toBe(400);
     expect((await post("/api/models/pop/scenarios", { version: v0, scenarios: [{ name: "x" }] }, { Origin: "https://evil.example" })).status).toBe(403);
     expect((await store.readVersioned("pop")).version).toBe(v0);
     expect((await get<ModelResponse>("/api/models/pop")).body.undo_available).toBe(0);

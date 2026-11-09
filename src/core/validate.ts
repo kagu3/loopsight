@@ -1,6 +1,6 @@
 import { loadModelJSON, type Model } from "simulation";
 import type { ModelElement, ModelJSON } from "./modeljson.js";
-import { ELEMENT_TYPES, canReference, didYouMean, engineModel, equationsOf, findElement, isConnector, nameKey, referencesIn, sameName } from "./modeljson.js";
+import { ELEMENT_TYPES, baselineClashMessage, canReference, scenarioNamedLikeBaseline, didYouMean, engineModel, equationsOf, findElement, isConnector, nameKey, referencesIn, sameName } from "./modeljson.js";
 
 export interface Issue {
   /** 問題のある要素の名前（わかる場合） */
@@ -176,6 +176,8 @@ export function staticCheck(model: ModelJSON): { errors: Issue[]; warnings: Issu
   if (sim.time_step !== undefined && sim.time_length !== undefined && sim.time_step > 0 && sim.time_length / sim.time_step > 100_000) {
     warnings.push({ message: `刻み数が ${Math.round(sim.time_length / sim.time_step)} あり、実行に時間がかかります。`, hint: "time_step を大きくするか time_length を短くしてください。" });
   }
+  const clash = scenarioNamedLikeBaseline(model);
+  if (clash !== undefined) warnings.push({ message: baselineClashMessage(clash) });
   return { errors, warnings };
 }
 

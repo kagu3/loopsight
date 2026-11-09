@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts";
-import type { ActualDataResult, ModelJSON, RunResult, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
+import type { ActualDataResult, BaselinePatch, ModelJSON, RunResult, ScenarioPatch, ScenarioRunResult } from "../../src/viewer/api.js";
+import { baselineOf, DEFAULT_BASELINE_NAME } from "../../src/core/modeljson.js";
 import { sameTime, withActualPoints } from "./actualPoints.js";
 import { renamedName } from "./editing.js";
 import {
   addableValues,
-  BASELINE_NAME,
+  baselineRenamePatchOf,
   canEditValue,
   cellPatchOf,
   compareRuns,
@@ -27,7 +28,7 @@ import { groupCandidates, type SeriesCandidate } from "./seriesPicker.js";
 // 実行結果の時系列グラフと表。
 // 色は検証済みの 8 色を順に使う。色は要素ごとに決め、ほかの要素を出し入れしても変えない。
 // 9 色目は作らないので、同時に出せるのは 8 本まで。
-// モデルにシナリオが保存されていれば、要素ごとに小さなグラフを並べ、「元のモデル」（灰色の点線）とシナリオを重ねる。
+// モデルにシナリオが保存されていれば、要素ごとに小さなグラフを並べ、何も変えない実行（灰色の点線。名前はモデルの baseline）とシナリオを重ねる。
 // このときの色はシナリオごとに決める（シナリオも 8 つまで）。
 // 実際のデータ（<モデル名>.data.csv）がある要素は、同じ色の白抜きの丸を線に重ねる（線の上の、塗りつぶした丸と見分けるため）。
 // シナリオを重ねているときは、シナリオの色と見分けられるよう、文字の色の白抜きの丸にする。
@@ -103,18 +104,25 @@ export interface ChartProps {
   renamed?: [string, string][];
   /** 左の欄で説明を直しているシナリオの名前（凡例で目立たせる） */
   editingScenario?: string;
-  /** シナリオの説明を左の欄で直す（表の見出しの吹き出しの「説明を直す」） */
-  onEditScenario?(name: string): void;
+  /** 左の欄で何も変えない実行の説明を直している（凡例で目立たせる。editingScenario より先に見る） */
+  editingBaseline?: boolean;
+  /** シナリオの説明を左の欄で直す（表の見出しの吹き出しの「説明を直す」）。baseline は何も変えない実行の説明を直すとき */
+  onEditScenario?(name: string, baseline?: boolean): void;
   /**
    * シナリオを直す（MCP の set_scenarios と同じ形）。失敗したらエラーの文を返す。
    * あれば、シナリオの中身の表で値をその場で直し、シナリオを足し、見出しの吹き出しで名前を変えられる
    */
   onSaveScenario?(patch: ScenarioPatch): Promise<string | undefined>;
+  /**
+   * 何も変えない実行の名前と説明を直す（MCP の set_scenarios の baseline と同じ形）。失敗したらエラーの文を返す。
+   * あれば、凡例（表の見出し）の何も変えない実行の名前を押すと、シナリオと同じ吹き出しで名前を変え、説明を直せる（説明は onEditScenario に baseline: true で渡す）
+   */
+  onSaveBaseline?(patch: BaselinePatch): Promise<string | undefined>;
   /** シナリオを消す（表の見出しの吹き出しの「このシナリオを消す」）。失敗したらエラーの文を返す */
   onRemoveScenario?(name: string): Promise<string | undefined>;
   /** すべてのシナリオで、その要素の値を変えないことにする（シナリオの中身の表の行を消す）。失敗したらエラーの文を返す */
   onRemoveScenarioValue?(element: string): Promise<string | undefined>;
-  /** シナリオの凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。「元のモデル」では呼ばない */
+  /** シナリオの凡例（開いたときは表の列の見出し）にカーソルを乗せた・外した（図の変えた要素に札を付ける）。何も変えない実行では呼ばない */
   onFocusScenario?(name: string | undefined): void;
   /** グラフにカーソルを乗せている時刻が変わった（外したら undefined）。図の要素に、その時刻の値を出す */
   onHoverTime?(t: number | undefined): void;
@@ -122,14 +130,15 @@ export interface ChartProps {
   tools?: ReactNode;
 }
 
-/** 「元のモデル」の線の色と点線 */
+/** 何も変えない実行の線の色と点線 */
 const BASELINE_COLOR = "var(--text-muted)";
 const BASELINE_DASH = "4 4";
 const runColor = (r: CompareRun, k: number) => (r.baseline ? BASELINE_COLOR : `var(${SLOTS[(k - 1) % SLOTS.length]})`);
 
 /** シナリオの線の色（凡例と同じ）。実行できなかったシナリオと、色が足りずに出さないシナリオは undefined */
 export function scenarioColor(run: RunResult, scenarios: ScenarioRunResult[], name: string): string | undefined {
-  const runs = compareRuns(run, scenarios, MAX_SERIES).runs;
+  // 色はシナリオの並びで決まるので、何も変えない実行の名前は使わない
+  const runs = compareRuns(run, scenarios, MAX_SERIES, { name: DEFAULT_BASELINE_NAME }).runs;
   const k = runs.findIndex((r) => !r.baseline && r.name.toLowerCase() === name.toLowerCase());
   return k > 0 ? runColor(runs[k]!, k) : undefined;
 }
@@ -145,8 +154,10 @@ export function Chart({
   actual,
   renamed,
   editingScenario,
+  editingBaseline,
   onEditScenario,
   onSaveScenario,
+  onSaveBaseline,
   onRemoveScenario,
   onRemoveScenarioValue,
   onFocusScenario,
@@ -164,10 +175,11 @@ export function Chart({
   const [view, setView] = useState<"chart" | "table">("chart");
   // シナリオを重ねるか。シナリオが保存されていれば、はじめは重ねる
   const [overlay, setOverlay] = useState(true);
-  const compare = useMemo(() => compareRuns(run, scenarios ?? [], MAX_SERIES), [run, scenarios]);
+  const baseline = useMemo(() => baselineOf(model), [model]);
+  const compare = useMemo(() => compareRuns(run, scenarios ?? [], MAX_SERIES, baseline), [run, scenarios, baseline]);
   const hasScenarios = (scenarios?.length ?? 0) > 0;
   const comparing = overlay && hasScenarios;
-  // シナリオの中身の表で、名前を付けている途中の足すシナリオ。シナリオがない・重ねないときも、足し始めたら「元のモデル」だけの表を出す
+  // シナリオの中身の表で、名前を付けている途中の足すシナリオ。シナリオがない・重ねないときも、足し始めたら何も変えない実行だけの表を出す
   const [adding, setAdding] = useState<NewScenario>();
   const full = isFull(model);
   // グラフの上の「＋ シナリオを足す」で足し始めたときの、押す前の「重ねる」「重ねない」。取りやめたら元に戻し、そのボタンにフォーカスを戻す
@@ -295,7 +307,7 @@ export function Chart({
               aria-checked={comparing}
               className={comparing ? "on" : ""}
               onClick={() => setOverlay(true)}
-              title={`要素ごとにグラフを分け、「${BASELINE_NAME}」とモデルに保存したシナリオを重ねます`}
+              title={`要素ごとにグラフを分け、「${baseline.name}」（何も変えない実行）とモデルに保存したシナリオを重ねます`}
             >
               シナリオを重ねる
             </button>
@@ -308,7 +320,7 @@ export function Chart({
                 changeAdding(undefined);
                 setOverlay(false);
               }}
-              title={`「${BASELINE_NAME}」だけを、要素を重ねて出します`}
+              title={`「${baseline.name}」（何も変えない実行）だけを、要素を重ねて出します`}
             >
               重ねない
             </button>
@@ -326,7 +338,7 @@ export function Chart({
               changeAdding({ initial: "" });
             }}
             aria-disabled={full}
-            title={full ? FULL_NOTE : `シナリオの中身の表を開いて、シナリオを足します（名前を付けて Enter）。「${BASELINE_NAME}」と重ねて比べます`}
+            title={full ? FULL_NOTE : `シナリオの中身の表を開いて、シナリオを足します（名前を付けて Enter）。「${baselineOf(model).name}」と重ねて比べます`}
           >
             ＋ シナリオを足す
           </button>
@@ -358,11 +370,13 @@ export function Chart({
           visible={visible}
           at={view === "chart" ? hoverTime : undefined}
           unit={unit}
-          editing={editingScenario}
+          editing={editingBaseline ? undefined : editingScenario}
+          editingBaseline={editingBaseline}
           adding={adding}
           onAdding={changeAdding}
           onEdit={onEditScenario}
           onSave={onSaveScenario}
+          onSaveBaseline={onSaveBaseline}
           onRemove={removeScenario}
           onRemoveValue={onRemoveScenarioValue}
           onFocus={onFocusScenario}
@@ -512,8 +526,9 @@ const isFull = (model: ModelJSON) => (model.scenarios ?? []).length >= MAX_SERIE
 const FULL_NOTE = `グラフに重ねられるシナリオは ${MAX_SERIES} つまでです。表の見出しのシナリオの名前を押して、使わないシナリオを消すと足せます`;
 
 /**
- * シナリオの凡例。「元のモデル」は灰色の点線。実行できなかったシナリオと、色が足りずに出さないシナリオも知らせる。
+ * シナリオの凡例。何も変えない実行は灰色の点線。実行できなかったシナリオと、色が足りずに出さないシナリオも知らせる。
  * onSave があれば、シナリオの名前を押すと吹き出し（名前を変える・説明を直す・消す）を出す。最後に「＋ シナリオを足す」を置く。
+ * onSaveBaseline があれば、何も変えない実行の名前を押しても同じ吹き出し（名前を変える・説明を直す）を出す。
  * 「中身を見る」で開くと、凡例がそのまま表の見出しになり、シナリオごとに変えた値と結果（グラフで選んでいる要素の値）を並べる。
  * onSave があれば、表のシナリオの値をその場で直せる。onRemoveValue があれば、表の行（変える値）を消せる。
  * 「＋ シナリオを足す」は表を開いて、表の右端の「＋」と同じく名前を入れる状態にする（adding）
@@ -526,10 +541,12 @@ function ScenarioLegend({
   at,
   unit,
   editing,
+  editingBaseline,
   adding,
   onAdding,
   onEdit,
   onSave,
+  onSaveBaseline,
   onRemove,
   onRemoveValue,
   onFocus,
@@ -543,11 +560,13 @@ function ScenarioLegend({
   at?: number;
   unit: string;
   editing?: string;
+  editingBaseline?: boolean;
   adding?: NewScenario;
   /** cancelled は、名前を付けずに取りやめたとき */
   onAdding(adding: NewScenario | undefined, cancelled?: boolean): void;
-  onEdit?(name: string): void;
+  onEdit?(name: string, baseline?: boolean): void;
   onSave?(patch: ScenarioPatch): Promise<string | undefined>;
+  onSaveBaseline?(patch: BaselinePatch): Promise<string | undefined>;
   onRemove?(name: string): Promise<string | undefined>;
   onRemoveValue?(element: string): Promise<string | undefined>;
   onFocus?(name: string | undefined): void;
@@ -564,21 +583,25 @@ function ScenarioLegend({
   useEffect(() => {
     if (adding && !open) setOpen(true);
   }, [adding]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 重ねているシナリオがない（どれも実行できなかった・出していない）ときは、表にしても空なので開かない。足している途中は「元のモデル」だけの表を出す
+  // 重ねているシナリオがない（どれも実行できなかった・出していない）ときは、表にしても空なので開かない。足している途中は何も変えない実行だけの表を出す
   const canOpen = compare.runs.length > 1;
   const isOpen = (open && canOpen) || adding !== undefined;
-  // 吹き出しを出しているシナリオと、押した名前のボタン（吹き出しの位置と、閉じたあとのフォーカスの戻り先）
-  const [menu, setMenu] = useState<{ name: string; anchor: HTMLElement }>();
+  // 吹き出しを出しているシナリオ（baseline は何も変えない実行）と、押した名前のボタン（吹き出しの位置と、閉じたあとのフォーカスの戻り先）
+  const [menu, setMenu] = useState<{ name: string; anchor: HTMLElement; baseline?: boolean }>();
   const closeMenu = useCallback(() => setMenu(undefined), []);
-  const isOn = (n: string) => (editing !== undefined && nameKey(editing) === nameKey(n)) || menu?.name === n;
-  const toggleMenu = (n: string, anchor: HTMLElement) => setMenu((m) => (m?.name === n ? undefined : { name: n, anchor }));
+  // 何も変えない実行と同じ名前のシナリオ（前からあるもの）と混ざらないよう、名前と何も変えない実行かの印の両方で比べる
+  const isMenu = (n: string, baseline = false) => !!menu && menu.name === n && !!menu.baseline === baseline;
+  const isOn = (n: string, baseline = false) =>
+    (baseline ? !!editingBaseline : editing !== undefined && nameKey(editing) === nameKey(n)) || isMenu(n, baseline);
+  const toggleMenu = (n: string, anchor: HTMLElement, baseline = false) =>
+    setMenu((m) => (m && m.name === n && !!m.baseline === baseline ? undefined : { name: n, anchor, baseline }));
   // 実行できなかったシナリオと、出していないシナリオの名前も、押すと吹き出しを出す
   const nameButton = (n: string) =>
     onSave ? (
       <button
         className="link inline-link"
         onClick={(e) => toggleMenu(n, e.currentTarget)}
-        aria-expanded={menu?.name === n}
+        aria-expanded={isMenu(n)}
         aria-haspopup="dialog"
         title={`シナリオ「${n}」の名前を変える・説明を直す・消す`}
       >
@@ -606,15 +629,15 @@ function ScenarioLegend({
         )}
       </>
     );
-    return r.baseline || !onSave ? (
+    return (r.baseline ? !onSaveBaseline : !onSave) ? (
       <span className="scenario-chip-label" {...focus}>
         {label}
       </span>
     ) : (
       <button
-        className={`scenario-chip-button ${isOn(r.name) ? "on" : ""}`}
-        onClick={(e) => toggleMenu(r.name, e.currentTarget)}
-        aria-expanded={menu?.name === r.name}
+        className={`scenario-chip-button ${isOn(r.name, r.baseline) ? "on" : ""}`}
+        onClick={(e) => toggleMenu(r.name, e.currentTarget, r.baseline)}
+        aria-expanded={isMenu(r.name, r.baseline)}
         aria-haspopup="dialog"
         {...focus}
       >
@@ -628,7 +651,7 @@ function ScenarioLegend({
       className="link"
       onClick={() => !full && !adding && onAdding({ initial: "" })}
       aria-disabled={full}
-      title={full ? FULL_NOTE : `シナリオの中身の表を開いて、シナリオを足します（名前を付けて Enter）。「${BASELINE_NAME}」と重ねて比べます`}
+      title={full ? FULL_NOTE : `シナリオの中身の表を開いて、シナリオを足します（名前を付けて Enter）。「${baselineOf(model).name}」と重ねて比べます`}
     >
       ＋ シナリオを足す
     </button>
@@ -695,16 +718,18 @@ function ScenarioLegend({
           は出していません
         </p>
       )}
-      {menu && onSave && (
+      {menu && (menu.baseline ? onSaveBaseline : onSave) && (
         <ScenarioMenu
           // 別のシナリオの吹き出しに替えたら、名前の欄を作り直す
-          key={menu.name}
+          key={`${menu.baseline ? "baseline" : "scenario"}:${menu.name}`}
           model={model}
           name={menu.name}
           anchor={menu.anchor}
+          baseline={menu.baseline}
           onRename={onSave}
+          onRenameBaseline={onSaveBaseline}
           onEdit={onEdit}
-          onRemove={onRemove}
+          onRemove={menu.baseline ? undefined : onRemove}
           onClose={closeMenu}
         />
       )}
@@ -714,6 +739,7 @@ function ScenarioLegend({
 
 /**
  * シナリオの名前を押すと出る吹き出し。名前を変える（Enter で保存、Esc でやめる）、説明を直す（左の欄）、シナリオを消す。
+ * baseline なら何も変えない実行の吹き出しで、名前を変える（空にすると既定の名前に戻す）と説明を直すだけを出す（消せない）。
  * 消すときは表の行と同じく確かめず、Ctrl+Z で戻せる（知らせは App が出す）。
  * 表の見出しは切れたり横に流れたりするので、押したボタンの下に重ねて出す（position: fixed）。ほかを押すと閉じる（名前は保存しない）
  */
@@ -721,7 +747,9 @@ function ScenarioMenu({
   model,
   name,
   anchor,
+  baseline,
   onRename,
+  onRenameBaseline,
   onEdit,
   onRemove,
   onClose,
@@ -729,8 +757,10 @@ function ScenarioMenu({
   model: ModelJSON;
   name: string;
   anchor: HTMLElement;
-  onRename(patch: ScenarioPatch): Promise<string | undefined>;
-  onEdit?(name: string): void;
+  baseline?: boolean;
+  onRename?(patch: ScenarioPatch): Promise<string | undefined>;
+  onRenameBaseline?(patch: BaselinePatch): Promise<string | undefined>;
+  onEdit?(name: string, baseline?: boolean): void;
   onRemove?(name: string): Promise<string | undefined>;
   onClose(): void;
 }) {
@@ -780,19 +810,25 @@ function ScenarioMenu({
   };
   const rename = async () => {
     if (saving) return;
-    let patch: ScenarioPatch | undefined;
+    let save: (() => Promise<string | undefined>) | undefined;
     try {
-      patch = renamePatchOf(model, name, text);
+      if (baseline) {
+        const patch = baselineRenamePatchOf(model, text);
+        if (patch && onRenameBaseline) save = () => onRenameBaseline(patch);
+      } else {
+        const patch = renamePatchOf(model, name, text);
+        if (patch && onRename) save = () => onRename(patch);
+      }
     } catch (e) {
       setError((e as Error).message);
       return;
     }
-    if (!patch) {
+    if (!save) {
       cancel();
       return;
     }
     setSaving(true);
-    const err = await onRename(patch);
+    const err = await save();
     setSaving(false);
     // 名前を変えても押したボタンは残る（見出しは並びで作る）ので、Esc のときと同じくそこへ戻す
     if (err) setError(err);
@@ -816,7 +852,7 @@ function ScenarioMenu({
     <div
       className="scenario-menu"
       role="dialog"
-      aria-label={`シナリオ「${name}」`}
+      aria-label={baseline ? `何も変えない実行「${name}」` : `シナリオ「${name}」`}
       ref={ref}
       style={{ left: pos.left, top: pos.top }}
       onKeyDown={(e) => {
@@ -861,13 +897,14 @@ function ScenarioMenu({
           {error}
         </span>
       )}
+      {baseline && <small className="muted">モデルの値を何も変えない実行です。何を表す線かがわかる名前にします（空にすると「{DEFAULT_BASELINE_NAME}」）</small>}
       <small className="muted">Enter で名前を変える、Esc でやめる</small>
       <div className="scenario-menu-actions">
         {onEdit && (
           <button
             className="link"
             onClick={() => {
-              onEdit(name);
+              onEdit(name, baseline);
               onClose();
             }}
             disabled={saving}
@@ -887,9 +924,9 @@ function ScenarioMenu({
 }
 
 /**
- * シナリオの中身の表。列は凡例と同じ並び（「元のモデル」と、重ねているシナリオ）。
+ * シナリオの中身の表。列は凡例と同じ並び（何も変えない実行と、重ねているシナリオ）。
  * 行は、どれかのシナリオで変えた値と、結果（グラフで選んでいる要素の、ある時点の値）。
- * onSave があれば、変えた値の行のシナリオの列（「—」も）をその場で直せる。「元のモデル」の列と結果の行は直せない。
+ * onSave があれば、変えた値の行のシナリオの列（「—」も）をその場で直せる。何も変えない実行の列と結果の行は直せない。
  * また、見出しの右端の「＋」でシナリオを足し、シナリオの見出しの「複製」で同じ値のシナリオを作れる（名前を付けて Enter で保存する）。
  * 変えた値の行の下の「＋ 値を追加」で、どのシナリオでも変えていない値の行（全部「—」）を足せる。足した行は消すまで残す（モデルには保存しない）。
  * onRemoveValue があれば、行の名前にカーソルを乗せると出る × で、すべてのシナリオでその値を変えないことにして行を消せる
@@ -1461,7 +1498,7 @@ function LineSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
 }
 
 /**
- * 1 つの要素について、「元のモデル」とシナリオを重ねた小さなグラフ。
+ * 1 つの要素について、何も変えない実行とシナリオを重ねた小さなグラフ。
  * カーソルを乗せている時点を onHover で知らせる（シナリオの中身の表に出す）。知らせるたびにほかのグラフを描き直さないよう memo にする
  */
 const CompareChart = memo(function CompareChart({

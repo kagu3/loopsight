@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings } from "../core/index.js";
+import type { AnnotationPatch, BaselinePatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings } from "../core/index.js";
 
-export type { AnnotationPatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings };
+export type { AnnotationPatch, BaselinePatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings };
 
 /**
  * GET /api/models。モデルと、一覧に出すフォルダ（モデルがあるフォルダと空のフォルダ）。
@@ -32,7 +32,7 @@ export interface ActualDataResult {
 }
 
 /**
- * 保存したシナリオ 1 つ分の実行結果。時刻は「元のモデル」（RunResult）と同じ。
+ * 保存したシナリオ 1 つ分の実行結果。時刻は何も変えない実行（RunResult）と同じ。
  * 実行できなかったときは series の代わりに error が入る。画面で重ねられる数を超えたシナリオは実行せず、skipped にする
  */
 export interface ScenarioRunResult {
@@ -54,7 +54,7 @@ export interface ModelResponse {
   undo_available: number;
   model: ModelJSON;
   validation: { ok: boolean; errors: Issue[]; warnings: Issue[] };
-  /** 実行できたときの結果（何も変えない実行。「元のモデル」） */
+  /** 実行できたときの結果（何も変えない実行。名前と説明はモデルの baseline） */
   run?: RunResult;
   /** モデルにシナリオが保存されていれば、その実行結果。モデルの並び順 */
   scenarios?: ScenarioRunResult[];
@@ -81,12 +81,14 @@ export interface EditRequest {
   annotations?: AnnotationPatch[];
 }
 
-/** POST /api/models/:name/scenarios の本文。scenarios と remove は MCP の set_scenarios と同じ形 */
+/** POST /api/models/:name/scenarios の本文。scenarios、remove、baseline は MCP の set_scenarios と同じ形 */
 export interface ScenariosRequest {
   version: string;
   scenarios: ScenarioPatch[];
   /** 消すシナリオの名前 */
   remove?: string[];
+  /** 何も変えない実行の名前と説明を直す。あれば scenarios は空でよい */
+  baseline?: BaselinePatch;
 }
 
 /** POST /api/models/:name/groups の本文。groups と remove は MCP の set_groups と同じ形 */

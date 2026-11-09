@@ -143,6 +143,9 @@ describe("デモとビューアのサーバーで、同じ書き込みの結果�
       // 実際のデータの列名も直る
       ["edit", { elements: [{ type: "STOCK", name: stock, rename_to: `${stock}2` }] }],
       ["scenarios", { scenarios: [{ name: "比べる", values: { [`${variable}2`]: 0.01 } }] }],
+      // 何も変えない実行の名前と説明（シナリオと同じ名前は断る）
+      ["scenarios", { scenarios: [], baseline: { name: "今のまま", description: "何も変えない" } }],
+      ["scenarios", { scenarios: [], baseline: { name: "比べる" } }],
       ["groups", { groups: [{ name: "まとまり", elements: [`${stock}2`] }] }],
       ["simulation", { simulation: { time_length: 60 } }],
       ["remove", { elements: [{ name: `${stock}2` }] }],

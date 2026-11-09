@@ -120,6 +120,15 @@ export interface Annotation {
   width?: number;
 }
 
+/**
+ * 何も変えない実行（シナリオと並べて比べる基準）の名前と説明（ループサイト独自。モデルに保存し、シミュレーションには使わない）。
+ * 何を表す線かはモデルごとに違う（「営業は今のまま」など）ので、モデルごとに付けられる。名前がなければ DEFAULT_BASELINE_NAME
+ */
+export interface Baseline {
+  name?: string;
+  description?: string;
+}
+
 export interface ModelJSON {
   engine?: "SIMULATION_PACKAGE";
   name?: string;
@@ -131,6 +140,7 @@ export interface ModelJSON {
   scenarios?: Scenario[];
   groups?: ElementGroup[];
   annotations?: Annotation[];
+  baseline?: Baseline;
   engine_settings?: { units?: { name: string; base?: string; factor?: number }[]; globals?: string };
   [key: string]: unknown;
 }
@@ -143,7 +153,8 @@ export function isConnector(type: ElementType): boolean {
 // 実行するときは engineModel で取り除いてから渡す。
 // 項目を足したら、docs/reference/model-format.md の「loopsight が足した項目」の表にも書く（書き忘れると tests/docs-model-format.test.ts が落ちる）
 
-type ItemOf<K extends keyof ModelJSON> = NonNullable<ModelJSON[K]> extends readonly (infer T)[] ? T : never;
+/** 並びの項目なら 1 件ごとの型、オブジェクトの項目ならその型 */
+type ItemOf<K extends keyof ModelJSON> = NonNullable<ModelJSON[K]> extends readonly (infer T)[] ? T : NonNullable<ModelJSON[K]>;
 
 /** 型に名前を書いた項目（[key: string] のような、どんな名前でもよい項目は除く） */
 type KnownKeys<T> = keyof { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
@@ -156,17 +167,22 @@ type LoopsightModelKey = Exclude<KnownKeys<ModelJSON>, (typeof MODELJSON_TOP_KEY
 
 /**
  * ループサイト独自の最上位の項目と、その 1 件ごとの項目。
- * ModelJSON の型にある公式でない最上位の項目、それぞれの型（ElementGroup、Annotation）の項目と、過不足がないことを型で確かめる
+ * ModelJSON の型にある公式でない最上位の項目、それぞれの型（ElementGroup、Annotation、Baseline）の項目と、過不足がないことを型で確かめる
  * - groups：図のグループ（groups.ts）
  * - annotations：図の注釈（annotationsOf、edit.ts の setAnnotations）
+ * - baseline：何も変えない実行の名前と説明（baselineOf、edit.ts の setScenarios）。並びではなく 1 つのオブジェクト
  */
 const LOOPSIGHT_MODEL_ITEMS = {
   groups: { name: true, color: true, elements: true },
   annotations: { id: true, text: true, coordinates: true, width: true },
+  baseline: { name: true, description: true },
 } as const satisfies { [K in LoopsightModelKey]: Record<keyof ItemOf<K>, true> };
 
 /** ループサイト独自の最上位の項目 */
 export const LOOPSIGHT_MODEL_KEYS = Object.keys(LOOPSIGHT_MODEL_ITEMS) as readonly (keyof typeof LOOPSIGHT_MODEL_ITEMS)[];
+
+/** ループサイト独自の最上位の項目のうち、並びではなく 1 つのオブジェクトのもの（場所の書き方が baseline.name になる） */
+const LOOPSIGHT_OBJECT_KEYS: readonly string[] = ["baseline"];
 
 /**
  * ループサイト独自の display の項目
@@ -177,10 +193,10 @@ export const LOOPSIGHT_DISPLAY_KEYS: readonly string[] = ["emphasis", "delay"];
 
 /**
  * ループサイトが足した項目の場所の一覧（docs/reference/model-format.md の表と突き合わせる）。
- * 書き方は、最上位が groups、その 1 件ごとの項目が groups[].name、要素の display の項目が elements[].display.emphasis
+ * 書き方は、最上位が groups、その 1 件ごとの項目が groups[].name、オブジェクトの項目が baseline.name、要素の display の項目が elements[].display.emphasis
  */
 export const LOOPSIGHT_FIELDS: readonly string[] = [
-  ...LOOPSIGHT_MODEL_KEYS.flatMap((k) => [k, ...Object.keys(LOOPSIGHT_MODEL_ITEMS[k]).map((f) => `${k}[].${f}`)]),
+  ...LOOPSIGHT_MODEL_KEYS.flatMap((k) => [k, ...Object.keys(LOOPSIGHT_MODEL_ITEMS[k]).map((f) => (LOOPSIGHT_OBJECT_KEYS.includes(k) ? `${k}.${f}` : `${k}[].${f}`))]),
   ...LOOPSIGHT_DISPLAY_KEYS.map((k) => `elements[].display.${k}`),
 ];
 
@@ -204,7 +220,7 @@ export const MODELJSON_FIELDS: readonly string[] = [
 ];
 
 /**
- * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の項目（図のグループ groups・図の注釈 annotations）を取り除いたコピー（なければそのまま返す）
+ * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の項目（図のグループ groups・図の注釈 annotations・何も変えない実行の名前 baseline）を取り除いたコピー（なければそのまま返す）
  */
 export function engineModel(model: ModelJSON): ModelJSON {
   const has = (el: ModelElement) => !!el.display && LOOPSIGHT_DISPLAY_KEYS.some((k) => k in el.display!);
@@ -240,6 +256,34 @@ export function annotationsOf(model: ModelJSON): Annotation[] {
       a.coordinates.length === 2 &&
       a.coordinates.every((v) => typeof v === "number" && Number.isFinite(v)),
   );
+}
+
+/** 何も変えない実行の名前を付けていないモデルで使う名前 */
+export const DEFAULT_BASELINE_NAME = "いまのまま";
+
+/**
+ * 何も変えない実行の名前と説明。名前を付けていなければ DEFAULT_BASELINE_NAME。説明がなければ description は付けない。
+ * 手で書き換えて形の合わないもの（文字でない名前など）は、付けていないものとして扱う
+ */
+export function baselineOf(model: ModelJSON): { name: string; description?: string } {
+  const b = model.baseline && typeof model.baseline === "object" ? model.baseline : {};
+  const name = typeof b.name === "string" && b.name.trim() ? b.name.trim() : DEFAULT_BASELINE_NAME;
+  const description = typeof b.description === "string" && b.description.trim() ? b.description : undefined;
+  return description ? { name, description } : { name };
+}
+
+/**
+ * 何も変えない実行と同じ名前のシナリオがあれば、その名前を返す。
+ * 新しく付ける名前はぶつからないよう断るが、前からあるシナリオ（既定の名前を変える前に付けたものや、手で書き換えたもの）はぶつかることがある
+ */
+export function scenarioNamedLikeBaseline(model: ModelJSON): string | undefined {
+  const baseline = baselineOf(model).name;
+  return (model.scenarios ?? []).map((s, i) => s.name ?? `scenario ${i + 1}`).find((n) => sameName(n, baseline));
+}
+
+/** 何も変えない実行と同じ名前のシナリオがあるときの知らせ（set_scenarios の notes と、検証の警告） */
+export function baselineClashMessage(scenario: string): string {
+  return `シナリオ "${scenario}" は、何も変えない実行と同じ名前です。グラフや表で見分けられるよう、シナリオの名前を変えてください（set_scenarios の rename_to か、ビューアの表の見出し）。`;
 }
 
 /** 名前の比較キー。Insight Maker の名前は大文字小文字を区別しない。 */

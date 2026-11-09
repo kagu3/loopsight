@@ -33,7 +33,7 @@ import type { NodeValue } from "./diagramValues.js";
 import { NEW_ELEMENT_LABEL, type FlowEnd, type NewElementType } from "./editing.js";
 import { formulaText, type FormulaToken, type FormulaView } from "./formulaValues.js";
 import { formatTime } from "./format.js";
-import { BASELINE_NAME, nameKey, type ScenarioBadge } from "./scenarios.js";
+import { nameKey, type ScenarioBadge } from "./scenarios.js";
 
 // 図。graph.ts で作ったノードと線を React Flow で描く。
 // 線は「浮いた線」にして、箱の縁どうしを結ぶ（Insight Maker の図と同じ見た目にするため）。
@@ -418,7 +418,9 @@ export interface ValueTools {
   onChange(on: boolean): void;
   /** 値を出せるシナリオの名前。なければ選択を出さない */
   scenarios: string[];
-  /** 値を出しているシナリオ（undefined は「元のモデル」） */
+  /** 何も変えない実行の名前（モデルの baseline。なければ「いまのまま」） */
+  baseline: string;
+  /** 値を出しているシナリオ（undefined は何も変えない実行） */
   scenario?: string;
   onScenario(name: string | undefined): void;
   /** いまどの時点の値を出しているか（「12 週の値」「それぞれの最大の振れ」） */
@@ -969,7 +971,7 @@ function EditTools({
  * 「値を表示」の切り替えと、値を出すシナリオの選択（図の右上）。オンの間は、いまどの時点の値を出しているかを左に添える。
  * 図の左上の編集の道具とは反対の角に置く
  */
-function ValueToolsPanel({ on, onChange, scenarios, scenario, onScenario, caption }: ValueTools) {
+function ValueToolsPanel({ on, onChange, scenarios, baseline, scenario, onScenario, caption }: ValueTools) {
   return (
     <div className={`value-tools ${on ? "on" : ""}`}>
       {on && <span className="value-caption">{caption}</span>}
@@ -981,7 +983,7 @@ function ValueToolsPanel({ on, onChange, scenarios, scenario, onScenario, captio
           value={scenario ?? ""}
           onChange={(e) => onScenario(e.target.value === "" ? undefined : e.target.value)}
         >
-          <option value="">{BASELINE_NAME}</option>
+          <option value="">{baseline}</option>
           {scenarios.map((n) => (
             <option key={n} value={n}>
               {n}

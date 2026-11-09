@@ -1,6 +1,6 @@
 import { checkActualData, namesByElement, parseDataCSV, renamesSince } from "../core/data.js";
 import { toGraph } from "../core/diagram.js";
-import { removeElements, setAnnotations, setScenarios, setSimulation, upsertElements, type AnnotationPatch, type EditReport, type RemoveTarget, type ScenarioReport } from "../core/edit.js";
+import { hasBaselinePatch, removeElements, setAnnotations, setScenarios, setSimulation, upsertElements, type AnnotationPatch, type EditReport, type RemoveTarget, type ScenarioReport } from "../core/edit.js";
 import { setGroups, type GroupReport } from "../core/groups.js";
 import type { ModelElement, ModelJSON } from "../core/modeljson.js";
 import { runScenarios, type RunData } from "../core/simulate.js";
@@ -80,7 +80,7 @@ export function buildModelResponse(args: {
   const res: ModelResponse = { name, modified, version, undo_available: undoAvailable, model, validation };
   if (validation.ok) {
     try {
-      // 「元のモデル」と、保存したシナリオをまとめて実行する
+      // 何も変えない実行と、保存したシナリオをまとめて実行する
       const { baseline, scenarios } = runScenarios(model, { limit: MAX_SCENARIOS });
       res.run = { time_units: baseline.timeUnits, times: baseline.times, series: seriesOf(baseline) };
       if (scenarios.length) {
@@ -213,8 +213,15 @@ export function applyWrite(model: ModelJSON, action: Exclude<WriteAction, "undo"
     if (body.remove !== undefined && !(Array.isArray(body.remove) && body.remove.every((r) => typeof r === "string"))) {
       throw new RequestError(400, "remove は消すシナリオの名前の並びにしてください。");
     }
-    if (body.scenarios.length === 0 && !body.remove?.length) throw new RequestError(400, "scenarios か remove を指定してください。");
-    return { report: setScenarios(model, body.scenarios, { remove: body.remove }), renamed: [] };
+    const baseline = body.baseline;
+    if (baseline !== undefined) {
+      const text = (v: unknown) => v === undefined || v === null || typeof v === "string";
+      if (!baseline || typeof baseline !== "object" || Array.isArray(baseline) || !text(baseline.name) || !text(baseline.description)) {
+        throw new RequestError(400, "baseline は、name と description（文字か null）のオブジェクトにしてください。");
+      }
+    }
+    if (body.scenarios.length === 0 && !body.remove?.length && !hasBaselinePatch(baseline)) throw new RequestError(400, "scenarios か remove か baseline を指定してください。");
+    return { report: setScenarios(model, body.scenarios, { remove: body.remove, baseline }), renamed: [] };
   }
   if (action === "groups") {
     if (!Array.isArray(body.groups)) throw new RequestError(400, "groups がありません。");
