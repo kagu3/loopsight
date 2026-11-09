@@ -515,36 +515,34 @@ button.link {
   min-width: 0;
   min-height: 0;
 }
+/* 上の帯は 2 行。1 行目はモデルの名前と右のボタン類、2 行目は説明の最初の段落だけを帯の幅いっぱいに出す
+   （説明がなければ 1 行）。どちらも 1 行に収め、入りきらないぶんは「…」で省略する（全文はカーソルを乗せると出る） */
 .toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 16px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+.toolbar-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 16px;
-  background: var(--surface-1);
-  border-bottom: 1px solid var(--border);
-}
-/* 上の帯を 1 行に収めるため、モデルの説明は名前の右に並べる。
-   どちらも 1 行に収め、入りきらないぶんは「…」で省略する（全文はカーソルを乗せると出る） */
-.toolbar .title {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
   min-width: 0;
 }
-.toolbar .title h2,
-.toolbar .title p {
+.toolbar .title,
+.toolbar-summary {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.toolbar .title h2 {
+.toolbar .title {
   font-size: 16px;
 }
-/* 名前が長くても、説明があることは分かるように、説明の幅を少し残す（名前のほうを省略する） */
-.toolbar .title p {
-  flex: 1 1 0;
-  min-width: 4em;
+.toolbar-summary {
   margin: 0;
   font-size: 12px;
 }
@@ -2420,11 +2418,11 @@ button.scenario-chip-button.on {
   .splitter {
     display: none;
   }
-  .toolbar {
+  .toolbar-row {
     flex-direction: column;
     align-items: flex-start;
   }
-  /* 名前と説明は 1 行のままなので、画面の幅で止めて「…」で省略する（横にはみ出さないように） */
+  /* 名前は 1 行のままなので、画面の幅で止めて「…」で省略する（横にはみ出さないように） */
   .toolbar .title {
     max-width: 100%;
   }

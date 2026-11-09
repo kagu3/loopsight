@@ -37,6 +37,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function writeModels(dir) {
   const store = new core.ModelStore(dir);
   const population = core.emptyModel("人口モデル", { time_length: 50, time_units: "YEARS" });
+  // 上の帯の 2 行目には、説明の最初の段落だけが出る
+  population.description = "生まれる人が死ぬ人より多いので、人口は増え続ける。\n\nBirth Rate と Death Rate は 1 年あたりの割合。";
   core.upsertElements(population, [
     { type: "STOCK", name: "Population", behavior: { initial_value: 1000 } },
     { type: "VARIABLE", name: "Birth Rate", behavior: { value: 0.03 } },

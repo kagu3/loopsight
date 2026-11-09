@@ -8,6 +8,7 @@ import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioM
 import { blobToBase64, exportDiagram, type ExportedDiagram } from "./diagramExport.js";
 import { nodeValues, peakIndex, timeIndex, valueScenarioNames, valueScenarioRun } from "./diagramValues.js";
 import { formulaView } from "./formulaValues.js";
+import { firstParagraph } from "./description.js";
 import { InfoTip } from "./InfoTip.js";
 import { addElementPatches, addNotePatches, linkProblem, linkRemoveProblem, reconnectChanges, renamedName, type FlowEnd, type NewElementType } from "./editing.js";
 import { toGraph } from "../../src/core/diagram.js";
@@ -1106,6 +1107,7 @@ export function App() {
   }, []);
 
   const title = data?.model.name || current;
+  const summary = firstParagraph(data?.model.description);
 
   if (EMBED) {
     embedEdges = graph?.edges.length ?? 0;
@@ -1242,27 +1244,30 @@ export function App() {
 
       <main className="main" ref={mainRef}>
         <div className="toolbar">
-          <div className="title">
-            <h2 title={title}>{title || "モデルを選んでください"}</h2>
-            {data?.model.description && (
-              <p className="muted" title={data.model.description}>
-                {data.model.description}
-              </p>
+          <div className="toolbar-row">
+            <h2 className="title" title={title}>
+              {title || "モデルを選んでください"}
+            </h2>
+            {graph && data && (
+              <div className="toolbar-right">
+                {graph.missingCoordinates && <InfoTip text="座標のない要素を仮に並べています。「図を編集」で動かすと、この配置を保存します" />}
+                <button
+                  className="toolbar-button"
+                  onClick={() => void undo()}
+                  disabled={!data.undo_available}
+                  title={data.undo_available ? `画面で変えたことを元に戻します（あと ${data.undo_available} 回、Ctrl+Z）` : "元に戻せる変更はありません"}
+                >
+                  ↶ 元に戻す
+                </button>
+                {updatedAt && <span className="muted small">{busy ? "保存しています…" : `更新 ${updatedAt.toLocaleTimeString("ja-JP")}`}</span>}
+              </div>
             )}
           </div>
-          {graph && data && (
-            <div className="toolbar-right">
-              {graph.missingCoordinates && <InfoTip text="座標のない要素を仮に並べています。「図を編集」で動かすと、この配置を保存します" />}
-              <button
-                className="toolbar-button"
-                onClick={() => void undo()}
-                disabled={!data.undo_available}
-                title={data.undo_available ? `画面で変えたことを元に戻します（あと ${data.undo_available} 回、Ctrl+Z）` : "元に戻せる変更はありません"}
-              >
-                ↶ 元に戻す
-              </button>
-              {updatedAt && <span className="muted small">{busy ? "保存しています…" : `更新 ${updatedAt.toLocaleTimeString("ja-JP")}`}</span>}
-            </div>
+          {/* 2 行目は説明の最初の段落だけを、帯の幅いっぱいに出す（全文はカーソルを乗せると出る）。説明がなければ出さない */}
+          {summary && (
+            <p className="toolbar-summary muted" title={data?.model.description}>
+              {summary}
+            </p>
           )}
         </div>
         {error && <div className="banner error">{error}</div>}
