@@ -1174,7 +1174,7 @@ function FormulaList({ view }: { view: FormulaView }) {
 }
 
 /**
- * 目立たせているループの名前と R / B。
+ * 目立たせているループの名前と R / B。名前を付けたループには、記号（R1 など）を小さく添える。
  * 作業画面では、左上の「図を編集」と重ならないよう、その下に出す（書き出す画像では、札はいつも図の上に置く）。
  * onClose を渡すと（作業画面）、やめるための ✕ を札の右上の角に出す。✕ は札の大きさに入れず、書き出す画像にも入れない
  */
@@ -1186,7 +1186,7 @@ function LoopBadge({ loop, belowTools, onClose }: { loop: LoopView; belowTools?:
       </span>
       <span className="loop-text">
         <span className="loop-name">{loop.name}</span>
-        {loop.name !== LOOP_KIND_LABEL[loop.kind] && <span className="loop-kind-label">{LOOP_KIND_LABEL[loop.kind]}</span>}
+        {loop.name !== LOOP_KIND_LABEL[loop.kind] && <span className="loop-kind-label">{loop.symbol ? `${loop.symbol}・${LOOP_KIND_LABEL[loop.kind]}` : LOOP_KIND_LABEL[loop.kind]}</span>}
       </span>
       {onClose && (
         <button className="loop-badge-close" data-export="skip" onClick={onClose} aria-label={`ループ「${loop.name}」を目立たせるのをやめる`} title="ループを目立たせるのをやめます">

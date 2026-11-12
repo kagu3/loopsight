@@ -2,10 +2,11 @@ import { checkActualData, namesByElement, parseDataCSV, renamesSince } from "../
 import { toGraph } from "../core/diagram.js";
 import { hasBaselinePatch, removeElements, setAnnotations, setScenarios, setSimulation, upsertElements, type AnnotationPatch, type EditReport, type RemoveTarget, type ScenarioReport } from "../core/edit.js";
 import { setGroups, type GroupReport } from "../core/groups.js";
+import { setLoops, type LoopReport } from "../core/loops.js";
 import type { ModelElement, ModelJSON } from "../core/modeljson.js";
 import { runScenarios, type RunData } from "../core/simulate.js";
 import { ModelError, validateModel } from "../core/validate.js";
-import type { ActualDataResult, EditRequest, GroupsRequest, ModelResponse, RemoveRequest, RunResult, ScenarioRunResult, ScenariosRequest, SimulationRequest } from "./api.js";
+import type { ActualDataResult, EditRequest, GroupsRequest, LoopsRequest, ModelResponse, RemoveRequest, RunResult, ScenarioRunResult, ScenariosRequest, SimulationRequest } from "./api.js";
 
 // ビューアのサーバー（server.ts）と、デモサイト（web/src/demo）で同じになる処理。
 // モデルを実行して ModelResponse を作ることと、画面からの書き込みを確かめてモデルに当てること。
@@ -23,7 +24,7 @@ export class RequestError extends Error {
 }
 
 /** 画面からの書き込みの種類（POST /api/models/:name/<種類>） */
-export type WriteAction = "edit" | "scenarios" | "groups" | "simulation" | "remove" | "undo";
+export type WriteAction = "edit" | "scenarios" | "groups" | "loops" | "simulation" | "remove" | "undo";
 
 /** 元に戻せる回数の上限（モデルごと） */
 export const HISTORY_LIMIT = 50;
@@ -182,17 +183,17 @@ function checkAnnotationPatches(value: unknown): AnnotationPatch[] {
 }
 
 /** 書き込みの要求の本文（どの種類の書き込みも、この形のどれかの項目を使う） */
-export type WriteBody = EditRequest & ScenariosRequest & GroupsRequest & SimulationRequest & RemoveRequest;
+export type WriteBody = EditRequest & ScenariosRequest & GroupsRequest & LoopsRequest & SimulationRequest & RemoveRequest;
 
 /** 書き込みを当てた結果。renamed は名前の変わった要素の [前の名前, 新しい名前] */
 export interface AppliedWrite {
-  report?: EditReport | ScenarioReport | GroupReport;
+  report?: EditReport | ScenarioReport | GroupReport | LoopReport;
   renamed: [string, string][];
 }
 
 /**
  * 画面からの書き込み（元に戻す、のほか）を確かめて、model に当てる（model を書き換える）。
- * MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_annotations、set_simulation と同じ処理を通す。
+ * MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_loops、set_annotations、set_simulation と同じ処理を通す。
  * 要求がおかしければ RequestError、モデルに当てられなければ EditError などを投げる。版の確かめと保存は、使う側がする
  */
 export function applyWrite(model: ModelJSON, action: Exclude<WriteAction, "undo">, body: WriteBody): AppliedWrite {
@@ -238,6 +239,21 @@ export function applyWrite(model: ModelJSON, action: Exclude<WriteAction, "undo"
     }
     if (body.groups.length === 0 && !body.remove?.length) throw new RequestError(400, "groups か remove を指定してください。");
     return { report: setGroups(model, body.groups, { remove: body.remove }), renamed: [] };
+  }
+  if (action === "loops") {
+    if (!Array.isArray(body.loops)) throw new RequestError(400, "loops がありません。");
+    if (!body.loops.every((l) => l && typeof l === "object" && !Array.isArray(l) && typeof l.name === "string")) {
+      throw new RequestError(400, "loops の中身は、name のあるループの名前の変更（オブジェクト）にしてください。");
+    }
+    const names = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((n) => typeof n === "string"));
+    if (!body.loops.every((l) => names(l.elements) && (l.rename_to === undefined || typeof l.rename_to === "string"))) {
+      throw new RequestError(400, "elements は要素の名前の並び、rename_to は文字にしてください。");
+    }
+    if (body.remove !== undefined && !(Array.isArray(body.remove) && body.remove.every((r) => typeof r === "string"))) {
+      throw new RequestError(400, "remove は外すループの名前の並びにしてください。");
+    }
+    if (body.loops.length === 0 && !body.remove?.length) throw new RequestError(400, "loops か remove を指定してください。");
+    return { report: setLoops(model, body.loops, { remove: body.remove }), renamed: [] };
   }
   if (action === "simulation") {
     const sim = body.simulation as Record<string, unknown> | undefined;

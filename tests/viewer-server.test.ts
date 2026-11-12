@@ -70,6 +70,27 @@ describe("ビューアのサーバー", () => {
     expect(undo.body.model.model.groups).toEqual([{ name: "増える側", color: "green", elements: ["Rate"] }]);
   });
 
+  test("ループに名前を付ける・直す・外す（MCP の set_loops と同じ形）。元に戻せる", async () => {
+    const v0 = (await get<ModelResponse>("/api/models/pop")).body.version;
+    const add = await post<EditResponse>("/api/models/pop/loops", { version: v0, loops: [{ name: "増える輪", elements: ["Births", "Population"] }] });
+    expect(add.status).toBe(200);
+    expect(add.body.model.model.loops).toEqual([{ name: "増える輪", elements: ["Births", "Population"] }]);
+    expect(add.body.report).toEqual({ added: ["増える輪"], updated: [], removed: [], notes: [] });
+    const rename = await post<EditResponse>("/api/models/pop/loops", { version: add.body.model.version, loops: [{ name: "増える輪", rename_to: "人口の輪" }] });
+    expect(rename.body.model.model.loops).toEqual([{ name: "人口の輪", elements: ["Births", "Population"] }]);
+    const notLoop = await post<EditErrorResponse>("/api/models/pop/loops", { version: rename.body.model.version, loops: [{ name: "x", elements: ["Rate", "Births"] }] });
+    expect(notLoop.status).toBe(400);
+    expect(notLoop.body.error).toMatch(/ループになっていません/);
+    const notNames = await post<EditErrorResponse>("/api/models/pop/loops", { version: rename.body.model.version, loops: [{ name: "x", elements: [1] }] });
+    expect(notNames.status).toBe(400);
+    const empty = await post<EditErrorResponse>("/api/models/pop/loops", { version: rename.body.model.version, loops: [] });
+    expect(empty.status).toBe(400);
+    const remove = await post<EditResponse>("/api/models/pop/loops", { version: rename.body.model.version, loops: [], remove: ["人口の輪"] });
+    expect(remove.body.model.model.loops).toBeUndefined();
+    const undo = await post<EditResponse>("/api/models/pop/undo", { version: remove.body.model.version });
+    expect(undo.body.model.model.loops).toEqual([{ name: "人口の輪", elements: ["Births", "Population"] }]);
+  });
+
   test("モデルの一覧を返す", async () => {
     const { status, body } = await get<ModelListResponse>("/api/models");
     expect(status).toBe(200);

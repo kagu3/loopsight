@@ -33,6 +33,8 @@ import {
   findLoops,
   importModelText,
   layoutModel,
+  loopKey,
+  loopNameOf,
   modelScenarios,
   namesByElement,
   parseDataCSV,
@@ -43,6 +45,7 @@ import {
   runToCSV,
   setAnnotations,
   setGroups,
+  setLoops,
   setScenarios,
   setSimulation,
   staticCheck,
@@ -56,6 +59,7 @@ import {
   type AnnotationPatch,
   type ElementPatch,
   type GroupPatch,
+  type LoopPatch,
   type LoopStep,
   type LoopView,
   type ModelJSON,
@@ -132,6 +136,21 @@ function unmarkedDelaysCheck(m: ModelJSON): { unmarked_delays?: { links: string[
 /** ループのつながりを 1 行ずつの文にする（例: "採用 → 新人 (+, フロー)"） */
 const VIA_LABEL: Record<LoopStep["via"], string> = { link: "", flow: ", フロー", reference: ", フローの式の参照" };
 const stepText = (s: LoopStep) => `${s.from} → ${s.to} (${s.polarity}${VIA_LABEL[s.via]}${s.delay ? ", 遅れ ‖" : ""})`;
+
+/**
+ * 図で目立たせるループ（view_diagram と export_diagram の loop）。ループになっていなければ ModelError。
+ * 名前を省くと、set_loops で付けた名前（なければ「強めるループ」などの種類の名前）。付けた名前を出すときは、ビューアの札と同じく find_loops の記号（R1 など）を添える
+ */
+function loopViewOf(m: ModelJSON, loop: { elements: string[]; name?: string }): { view: LoopView; steps: LoopStep[] } {
+  const found = describeLoop(m, loop.elements);
+  if ("error" in found) throw new ModelError(`ループになっていません。${found.error}`, []);
+  const { kind, elements, steps } = found.loop;
+  const registered = loopNameOf(m, elements);
+  const name = loop.name ?? registered ?? LOOP_KIND_LABEL[kind];
+  const key = loopKey(elements);
+  const symbol = registered !== undefined && name === registered ? findLoops(m).loops.find((l) => loopKey(l.elements) === key)?.symbol : undefined;
+  return { view: { name, ...(symbol ? { symbol } : {}), kind, elements }, steps };
+}
 
 const isPrimitive = (v: unknown) => v === null || typeof v !== "object";
 
@@ -224,7 +243,7 @@ list_models でモデルとフォルダの一覧を見られます（ビュー�
 2. upsert_elements でストック、フロー、変数を追加する。式では他の要素を [名前] で参照する。足りないリンクは自動で追加される
 3. 結果に検証エラーが出たら直す。validate_model でも確かめられる
 4. run_simulation で実行する。値を振って調べる（感度分析）ときや、いくつかの値をまとめて変えて比べるときは、run_simulation の overrides を変えて何回か実行する。人に見せるシナリオは set_scenarios でモデルに保存する（ビューアのグラフに、何も変えない実行と重ねて出る）。何も変えない実行には、何を表す線か（「営業は今のまま」など）がわかるよう、set_scenarios の baseline で名前と説明を付ける（付けなければ「${DEFAULT_BASELINE_NAME}」と出る）。保存したシナリオは run_simulation の scenarios: true で、何も変えない実行と並べて読める。実際のデータ（実績や観測値）があれば import_data で取り込む。人はビューアのグラフで、モデルの線とデータの点を見比べる
-5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。view_diagram の loop でループを目立たせた図を見られる。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
+5. 会議などで原因を説明するときは、find_loops でフィードバックループ（R：強める、B：釣り合わせる）を探す。極性が決まっていなければ、upsert_elements で LINK の behavior.polarity を入れる。説明に使うループ（2〜3 個）には、set_loops で名前（「口コミ」など）を付ける。名前の付いたループは、find_loops の結果とビューアの一覧で先に並び、名前が出る。view_diagram の loop でループを目立たせた図を見られる（札に付けた名前が出る）。注釈でループを説明するときは、「R（口コミ）」のようにかっこの中を付けた名前にする（R1 などの番号は書かない）。時間がたってから効くつながり（発注してから届くまでなど）には、upsert_elements の display.delay: true で遅れの印（‖）を付ける
 6. 図の配置を整える。layout_model で座標を付けて保存し、view_diagram で図の画像と、箱の重なり・線が要素や名前の上を通るところ・線の交差・1 か所に集まる線の一覧を見る。気になるところは upsert_elements の display で位置を直し、もう一度 view_diagram で確かめる。説明のときに見てほしい要素（問題になっている在庫など）は、display.emphasis: true で強調すると大きく描かれる。人はビューアで同じ図を見ている（npx -y -p loopsight loopsight-viewer --models-dir <この作業フォルダ> で起動する。clone したものなら npm run viewer）。要素の補足や図の読み方は、set_annotations で説明する箱の近くに注釈（文字だけのもの）として置ける
    要素が多いときは、set_groups で意味のまとまり（「お店側」「お客側」など）をグループにする。図では属する要素が薄い色の背景で囲まれ、凡例が出る。layout_model は同じグループの要素を近くに集めて並べる
 7. 図だけを資料（PDF やスライド）に貼るときは、export_diagram で SVG と PNG に書き出す（既定は exports/<モデル名>/diagram.svg と diagram.png）。人はビューアの図の右上の「書き出す」ボタンで同じものを書き出せる
@@ -443,7 +462,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "注釈（positions の type が NOTE）は set_annotations の coordinates（左上）で直す。" +
         "強調した要素（display.emphasis）は大きく描き、重なりなどの確認もその大きさで行う（positions の size も大きくしたもの）。" +
         "画像には Edge か Chrome が必要（なければ image: false と同じで、一覧だけ返す）。" +
-        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。" +
+        "loop を渡すと、そのループの要素と線だけを目立たせ、ほかを薄くし、ループの名前と R / B を図の左上に出す（会議などで原因を説明するときの表示）。名前を省くと、set_loops で付けた名前を出す。" +
         "遅れの印（display.delay）のあるリンクやフローは、線の途中に ‖ を描く。先の要素の式が元の要素を Delay や Smooth などの時間をまたぐ関数に渡しているのに印のないリンクがあれば、unmarked_delays で知らせる（自動では付けない）。" +
         "資料に貼る図の画像をファイルにするときは export_diagram を使う。",
       inputSchema: {
@@ -452,7 +471,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         loop: z
           .object({
             elements: z.array(z.string()).min(1).describe("ループを作る要素名を、つながる順に（find_loops の elements）"),
-            name: z.string().optional().describe("図に出すループの名前（find_loops の name や「増員で遅れが増える」など。省略すると「強めるループ」などの種類の名前）"),
+            name: z.string().optional().describe("図に出すループの名前（「増員で遅れが増える」など）。省略すると、set_loops で付けた名前（なければ「強めるループ」などの種類の名前）"),
           })
           .optional()
           .describe("目立たせるループ"),
@@ -466,10 +485,9 @@ export function registerTools(server: McpServer, store: ModelStore): void {
       let loop: LoopView | undefined;
       let loopSteps: string[] | undefined;
       if (a.loop) {
-        const found = describeLoop(m, a.loop.elements);
-        if ("error" in found) throw new ModelError(`ループになっていません。${found.error}`, []);
-        loop = { name: a.loop.name ?? LOOP_KIND_LABEL[found.loop.kind], kind: found.loop.kind, elements: found.loop.elements };
-        loopSteps = found.loop.steps.map(stepText);
+        const found = loopViewOf(m, a.loop);
+        loop = found.view;
+        loopSteps = found.steps.map(stepText);
       }
       const check = {
         model: a.model,
@@ -511,7 +529,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         loop: z
           .object({
             elements: z.array(z.string()).min(1).describe("ループを作る要素名を、つながる順に（find_loops の elements）"),
-            name: z.string().optional().describe("図に出すループの名前（省略すると「強めるループ」などの種類の名前）"),
+            name: z.string().optional().describe("図に出すループの名前。省略すると、set_loops で付けた名前（なければ「強めるループ」などの種類の名前）"),
           })
           .optional()
           .describe("目立たせるループ"),
@@ -523,12 +541,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
     },
     handle(async (a: { model: string; loop?: { elements: string[]; name?: string }; formats?: ("svg" | "png")[]; scale?: number; path?: string; name?: string }) => {
       const m = await store.read(a.model);
-      let loop: LoopView | undefined;
-      if (a.loop) {
-        const found = describeLoop(m, a.loop.elements);
-        if ("error" in found) throw new ModelError(`ループになっていません。${found.error}`, []);
-        loop = { name: a.loop.name ?? LOOP_KIND_LABEL[found.loop.kind], kind: found.loop.kind, elements: found.loop.elements };
-      }
+      const loop = a.loop ? loopViewOf(m, a.loop).view : undefined;
       const rel = a.path ?? exportFolderOf(a.model);
       const base = checkFileBase(a.name ?? DIAGRAM_FILE_BASE);
       // 書き出し先は、描く前（ブラウザを起動する前）に確かめる
@@ -588,9 +601,11 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         "モデルのフィードバックループ（リンクとフローがつくる因果の循環）を探し、強めるループ（R）か釣り合わせるループ（B）かを返す。" +
         "R か B かはリンクの極性（behavior.polarity）で決める。フローは行き先のストックを増やし（+）、出元のストックを減らす（-）。- が偶数個なら R、奇数個なら B。" +
         "極性が決まっていないつながり（polarity のないリンクや、フローの式がリンクなしで自分のストックを見ているところ）があれば kind は unknown にし、undetermined に挙げる。" +
-        "ループは短い順。elements はつながる順で、最後の要素は最初の要素につながる。name（R1、B2 など）は返したループの中での通し番号で、element や max_length を変えると変わる。" +
+        "ループは短い順。elements はつながる順で、最後の要素は最初の要素につながる。symbol（R1、B2 など）は返したループの中での通し番号で、element や max_length を変えると変わる。" +
+        "set_loops で名前を付けたループには name（「口コミ」など）を付け、付けた順で先に並べる（symbol は振り直さない。ビューアの左の欄の「ループ」と同じ中身・並び）。" +
         "遅れの印（display.delay）のあるリンクやフローを通るループには、delays にそのつながりを挙げる（遅れのある釣り合わせるループ（B）は、行き過ぎて振れやすい）。" +
-        "view_diagram の loop に elements を渡すと、そのループを目立たせた図を見られる。",
+        "view_diagram の loop に elements を渡すと、そのループを目立たせた図を見られる。" +
+        "説明に使うループ（2〜3 個）には、set_loops で名前を付けておくと、人がビューアの一覧で見つけやすい。",
       inputSchema: {
         model: modelName,
         element: z.string().optional().describe("この要素を通るループだけを返す"),
@@ -613,7 +628,15 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         loops: loops.map((l) => {
           const u = undetermined(l.steps);
           const delays = l.steps.filter((s) => s.delay).map(stepText);
-          return { name: l.name, kind: l.kind, elements: l.elements, steps: l.steps.map(stepText), ...(u.length ? { undetermined: u } : {}), ...(delays.length ? { delays } : {}) };
+          return {
+            ...(l.name !== undefined ? { name: l.name } : {}),
+            symbol: l.symbol,
+            kind: l.kind,
+            elements: l.elements,
+            steps: l.steps.map(stepText),
+            ...(u.length ? { undetermined: u } : {}),
+            ...(delays.length ? { delays } : {}),
+          };
         }),
         ...(truncated
           ? {
@@ -621,7 +644,7 @@ export function registerTools(server: McpServer, store: ModelStore): void {
                 (truncated === "loops"
                   ? `ループが多いため、${MAX_LOOPS} 個で探すのをやめました。`
                   : "つながりが多く、探すのに時間がかかるため、途中で探すのをやめました。") +
-                "短いループから探しているので、返した中で最も長いものと同じ長さか、それより長いループが残っているかもしれません。element（その要素を通るループだけを探す）か max_length で絞ってください。",
+                "短いループから探しているので、返した名前のないループの中で最も長いものと同じ長さか、それより長いループが残っているかもしれません（set_loops で名前を付けたループは、上限を超えても返します）。element（その要素を通るループだけを探す）か max_length で絞ってください。",
             }
           : {}),
         ...(anyUndetermined
@@ -801,6 +824,51 @@ export function registerTools(server: McpServer, store: ModelStore): void {
         groups: m.groups ?? [],
         diagram: { group_issues, ...(groups ? { areas: groups.map((g) => ({ name: g.name, ...g.area })) } : {}) },
         next_step: "view_diagram で図を見て確かめてください。グループの要素が離れているときは、layout_model（reset: true）で並べ直すと近くに集まります。",
+      };
+    }),
+  );
+
+  server.registerTool(
+    "set_loops",
+    {
+      title: "ループに名前を付ける",
+      description:
+        "フィードバックループに名前（「口コミ」「遅れて効く疲れ」など）を付けて、モデルの loops に保存する（シミュレーションには影響しない）。" +
+        "名前の付いたループは、find_loops の結果とビューアの左の欄の「ループ」で先に並び、名前が大きく出る。view_diagram と export_diagram の loop で name を省くと、図の札にもこの名前が出る。" +
+        "ループは elements（通る要素の名前を、つながる順に。find_loops の elements）で見分ける。どこから回り始めても同じループで、極性が変わって R / B が変わっても名前はそのまま。R / B は保存せず、いつも極性から求める。" +
+        "名前で付けた名前を探し、あれば直し（rename_to で名前を変える、elements で付け替える）、なければ足す（elements が必要）。remove で名前を外し、replace: true で今の名前をすべて置き換える。" +
+        "名前は重ねられない（大文字と小文字を区別しない）。1 つのループに名前は 1 つで、名前の付いたループに別の名前を付けると、前の名前は外す。" +
+        "説明に使う 2〜3 個のループに付ける。図の注釈（set_annotations）でループを説明するときは、かっこの中を同じ名前にする（例：「R（口コミ）：…」）。" +
+        "要素の名前を変えると、ループの中の名前も合わせて直る。モデルが変わって名前を付けたループがなくなったときは、validate_model の警告で知らせる（名前は消さずに残す）。",
+      inputSchema: {
+        model: modelName,
+        loops: z
+          .array(
+            z.object({
+              name: z.string().describe("ループの名前。既存の名前なら直し、なければ足す"),
+              rename_to: z.string().optional().describe("既存のループの名前を変える"),
+              elements: z.array(z.string()).optional().describe("ループが通る要素の名前を、つながる順に（find_loops の elements）。新しく名前を付けるときは必須"),
+            }),
+          )
+          .optional()
+          .describe("[{name:'口コミ', elements:['使っている人','使い始める人']}, ...]"),
+        remove: z.array(z.string()).optional().describe("外す名前"),
+        replace: z.boolean().optional().describe("今の名前をすべて捨ててから loops を保存する（既定は false）"),
+      },
+    },
+    handle(async (a: { model: string; loops?: LoopPatch[]; remove?: string[]; replace?: boolean }) => {
+      if (!a.loops?.length && !a.remove?.length && !a.replace) throw new EditError("loops か remove を指定してください。");
+      const m = await store.read(a.model);
+      const report = setLoops(m, a.loops ?? [], { remove: a.remove, replace: a.replace });
+      const file = await store.write(a.model, m);
+      return {
+        model: a.model,
+        file,
+        changes: report,
+        loops: findLoops(m)
+          .loops.filter((l) => l.name !== undefined)
+          .map((l) => ({ name: l.name, symbol: l.symbol, kind: l.kind, elements: l.elements })),
+        next_step: "find_loops で、名前の付いたループが先に並ぶことを確かめられます。view_diagram の loop に elements を渡すと、図の札にこの名前が出ます。",
       };
     }),
   );

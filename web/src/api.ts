@@ -10,6 +10,7 @@ import {
   type EditResponse,
   type ElementPatch,
   type GroupPatch,
+  type LoopPatch,
   type ModelListResponse,
   type ModelResponse,
   type RemoveTarget,
@@ -101,6 +102,9 @@ export const postUndo = (name: string, version: string) => post(name, "undo", { 
 /** 図のグループを足す・直す・消す。groups と remove は MCP の set_groups と同じ形 */
 export const postGroups = (name: string, version: string, groups: GroupPatch[], remove?: string[]) =>
   post(name, "groups", remove?.length ? { version, groups, remove } : { version, groups });
+/** ループに名前を付ける・直す・外す。loops と remove は MCP の set_loops と同じ形 */
+export const postLoops = (name: string, version: string, loops: LoopPatch[], remove?: string[]) =>
+  post(name, "loops", remove?.length ? { version, loops, remove } : { version, loops });
 /** 図を書き出した SVG と PNG（base64）を送り、作業フォルダの exports/<モデル名>/ に書いてもらう（デモにはない） */
 export async function postDiagramExport(name: string, svg: string, png: string): Promise<{ ok: true; data: DiagramExportResponse } | { ok: false; error: string }> {
   if (DEMO) return { ok: false, error: "デモでは図を書き出せません。" };

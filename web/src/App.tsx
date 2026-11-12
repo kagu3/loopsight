@@ -1,7 +1,7 @@
 import { ReactFlowProvider } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { AnnotationPatch, BaselinePatch, ChangeEvent, ElementPatch, GroupPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch, SimulationSettings } from "../../src/viewer/api.js";
-import { DEMO, FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postBaseline, postRemove, postScenarios, postSimulation, postUndo, type WriteResult } from "./api.js";
+import type { AnnotationPatch, BaselinePatch, ChangeEvent, ElementPatch, GroupPatch, LoopPatch, ModelElement, ModelListResponse, ModelResponse, ScenarioPatch, SimulationSettings } from "../../src/viewer/api.js";
+import { DEMO, FetchError, fetchList, fetchModel, postDiagramExport, postEdit, postGroups, postLoops, postBaseline, postRemove, postScenarios, postSimulation, postUndo, type WriteResult } from "./api.js";
 import { Chart, formatTime, formatValue, scenarioColor, TIME_UNIT_LABEL } from "./Chart.js";
 import { Details, DelayToggle, linkPolarity, PolarityPicker } from "./Details.js";
 import { Diagram, type LinkEnds, type NodeValues, type Removable, type ScenarioMarks, type SelectedFormula, type ValueTools } from "./Diagram.js";
@@ -656,6 +656,16 @@ export function App() {
       }, SKIPPED_MESSAGE),
     [applyWrite, enqueueWrite],
   );
+  /** ループに名前を付ける・直す・外す（MCP の set_loops と同じ形） */
+  const editLoops = useCallback(
+    (patches: LoopPatch[], remove?: string[]): Promise<string | undefined> =>
+      enqueueWrite<string | undefined>(async () => {
+        const d = dataRef.current;
+        if (!d || !sameModel(d.name, currentRef.current)) return "モデルを読み込んでいません。";
+        return applyWrite(await postLoops(d.name, d.version, patches, remove));
+      }, SKIPPED_MESSAGE),
+    [applyWrite, enqueueWrite],
+  );
   /** シミュレーションの設定を直す（MCP の set_simulation と同じ形） */
   const editSimulation = useCallback(
     (patch: SimulationSettings): Promise<string | undefined> =>
@@ -987,7 +997,7 @@ export function App() {
   const graph = useMemo(() => (data ? toGraph(data.model) : undefined), [data]);
   // フィードバックループの一覧（AI の find_loops と同じ）。モデルが変わるたびに（AI の変更や極性の付け替えも）探し直す
   const loops = useMemo(() => (data && !EMBED ? listLoops(data.model) : undefined), [data]);
-  // 目立たせているループ。極性が変わって R / B や名前が変わっても、同じ要素を回るループなら目立たせたままにする
+  // 目立たせているループ。極性が変わって R / B や記号が変わっても、名前を付け直しても、同じ要素を回るループなら目立たせたままにする
   const loop = shownLoop !== undefined ? loops?.loops.find((l) => l.key === shownLoop) : undefined;
   const closeLoop = useCallback(() => setShownLoop(undefined), []);
   // 目立たせていたループがなくなったら（リンクを消した・要素の名前が変わったなど）、目立たせるのをやめる
@@ -1216,7 +1226,7 @@ export function App() {
 
         {data && <GroupPanel model={data.model} selected={selectedEl?.name} onSave={editGroups} />}
 
-        {loops && <LoopPanel list={loops} shown={loop?.key} onShow={setShownLoop} />}
+        {loops && <LoopPanel list={loops} shown={loop?.key} onShow={setShownLoop} onSave={editLoops} />}
 
         {data && <Problems data={data} onSelect={selectElement} />}
 

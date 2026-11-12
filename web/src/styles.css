@@ -2560,6 +2560,7 @@ button.scenario-chip-button.on {
   font-weight: 700;
 }
 .loop-row-text {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -2578,7 +2579,71 @@ button.scenario-chip-button.on {
   color: var(--loop);
   font-weight: 600;
 }
+/* 記号と経路。1 行に入らない分は「…」で省き、カーソルを乗せると全部出す（title） */
 .loop-row-elements {
   color: var(--text-secondary);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 行と、右の ✎（名前を付ける）。✎ はカーソルを乗せた行と、キーで選んだときに濃く出す */
+.loop-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+.loop-item > .loop-row {
+  flex: 1;
+  min-width: 0;
+}
+button.loop-rename {
+  flex: none;
+  margin-right: 0;
+  text-decoration: none;
+  color: var(--text-secondary);
+  padding: 4px 4px;
+  font-size: 13px;
+  opacity: 0.35;
+}
+.loop-item:hover .loop-rename,
+.loop-missing-name:hover .loop-rename,
+.loop-rename:focus-visible {
+  opacity: 1;
+}
+.loop-row.editing {
+  cursor: default;
+  border-color: var(--border);
+}
+.loop-name-input {
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 700;
+}
+/* 名前を付けたが、モデルが変わってなくなったループ（✕ で名前を外す） */
+.loop-missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+}
+.loop-missing-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* 名前のないループをたたんだ「ほかの n 個」 */
+button.loop-others-toggle {
+  display: flex;
+  margin-right: 0;
+  text-decoration: none;
+  color: var(--text-secondary);
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
 }

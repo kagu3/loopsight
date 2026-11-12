@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import { findLoops } from "../src/core/index.js";
 import type { EditErrorResponse, EditResponse, ModelResponse } from "../src/viewer/api.js";
 import { startViewer, type Viewer } from "../src/viewer/server.js";
 import { DemoStore } from "../web/src/demo/store.js";
@@ -137,7 +138,11 @@ describe("デモとビューアのサーバーで、同じ書き込みの結果�
     const server0 = (await (await fetch(url(""))).json()) as ModelResponse;
     const variable = server0.model.elements.find((e) => e.type === "VARIABLE")!.name!;
     const stock = server0.model.elements.find((e) => e.type === "STOCK")!.name!;
+    const loop = findLoops(server0.model).loops[0]!.elements;
     const steps: [string, object][] = [
+      // ループの名前（要素の名前を変えると、ループの中の名前も直る）
+      ["loops", { loops: [{ name: "増える輪", elements: loop }] }],
+      ["loops", { loops: [{ name: "ない輪" }] }],
       ["edit", { elements: [{ type: "VARIABLE", name: variable, behavior: { value: 0.05 } }] }],
       ["edit", { elements: [{ type: "VARIABLE", name: variable, rename_to: `${variable}2` }] }],
       // 実際のデータの列名も直る
