@@ -77,6 +77,9 @@ ModelJSON に決まった書き方がない情報は、loopsight 独自の項目
 | `groups[].name` | 文字 | グループの名前。大文字と小文字を区別せず、重ねない | 使わない | エラー |
 | `groups[].color` | 文字 | 囲みの色。`yellow`、`green`、`teal`、`purple`、`pink`、`brown`、`gray` のどれか | 使わない | エラー |
 | `groups[].elements` | 文字の並び | 属する要素の名前。リンクは入れない。1 つの要素が属するグループは 1 つまで | 使わない | エラー |
+| `loops` | 並び | ループの名前。説明に使うループに付ける。名前の付いたループは、`find_loops` の結果とビューアの一覧で先に並ぶ（付けた順） | 使わない | エラー |
+| `loops[].name` | 文字 | ループの名前（「口コミ」など）。大文字と小文字を区別せず、重ねない | 使わない | エラー |
+| `loops[].elements` | 文字の並び | ループが通る要素の名前を、つながる順に（`find_loops` の `elements`）。どこから回り始めても同じループとみなす。R / B は持たず、いつもリンクの極性から求める。モデルが変わってループでなくなっても消さずに残し、`validate_model` の警告で知らせる | 使わない | エラー |
 | `annotations` | 並び | 図の注釈。どこにもつながらない、文字だけのもの。要素ではないので `elements` に入れない | 使わない | エラー |
 | `annotations[].id` | 文字 | 注釈を見分ける名前。直す・消すときに使う | 使わない | エラー |
 | `annotations[].text` | 文字 | 注釈の文字。改行で行を分ける | 使わない | エラー |
@@ -90,7 +93,7 @@ ModelJSON に決まった書き方がない情報は、loopsight 独自の項目
 
 - **シミュレーション：** 実行と検証の前に、これらの項目を取り除いてからエンジンに渡す（`src/core/modeljson.ts` の `engineModel`）
 - **Insight Maker：** エンジンの `loadModelJSON` は、知らない項目があるとエラーにする（`Invalid property "groups" found in the model` など）。確かめたのはエンジンだけ。Insight Maker の Web 版の「Import ModelJSON」で同じようにエラーになるか、黙って消すかは、人が確かめる必要がある。エラーになるなら、これらの項目を含むファイルは、そのままでは Insight Maker に読み込ませられないので、項目を消してから渡す
-- **書き換えたとき：** 形の合わないもの（id や座標のない注釈、名前のないグループなど）は、図に描かずに飛ばす。`validate_model` が知らせるものもある
+- **書き換えたとき：** 形の合わないもの（id や座標のない注釈、名前のないグループ、要素のないループの名前など）は、図や一覧に出さずに飛ばす。`validate_model` が知らせるものもある
 
 項目を足したら、この表にも書く。書き忘れると `npm test` が落ち、足りない項目を知らせる（`tests/docs-model-format.test.ts`。一覧は `src/core/modeljson.ts` の `LOOPSIGHT_FIELDS`）。
 

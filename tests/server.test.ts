@@ -75,6 +75,7 @@ describe("MCP server", () => {
         "run_simulation",
         "set_annotations",
         "set_groups",
+        "set_loops",
         "set_scenarios",
         "set_simulation",
         "upsert_elements",
@@ -435,7 +436,7 @@ describe("MCP server", () => {
     const unknown = await call("find_loops", { model: "brooks", element: "全員の人数", max_length: 3 });
     expect(unknown.loops).toEqual([
       {
-        name: "?1",
+        symbol: "?1",
         kind: "unknown",
         elements: ["新人", "全員の人数", "採用"],
         steps: ["新人 → 全員の人数 (?)", "全員の人数 → 採用 (?)", "採用 → 新人 (+, フロー)"],
@@ -452,7 +453,8 @@ describe("MCP server", () => {
       ],
     });
     const found = await call("find_loops", { model: "brooks", element: "全員の人数", max_length: 3 });
-    expect(found.loops[0]).toMatchObject({ name: "B1", kind: "B" });
+    expect(found.loops[0]).toMatchObject({ symbol: "B1", kind: "B" });
+    expect(found.loops[0].name).toBeUndefined();
     expect(found.loops[0].undetermined).toBeUndefined();
     expect(found.count).toEqual({ R: 0, B: 1, unknown: 0 });
     expect(found.hint).toBeUndefined();
@@ -463,14 +465,52 @@ describe("MCP server", () => {
     expect(await callError("find_loops", { model: "brooks", element: "新入" })).toMatch(/"新入.*見つかりません。もしかして.*新人/);
   });
 
+  test("set_loops でループに名前を付けると、find_loops で先に並び、view_diagram の札にその名前が出る", async () => {
+    await call("import_model", { path: path.join(FIXTURES_DIR, "brooks_law.json"), model: "brooks" });
+    const all = await call("find_loops", { model: "brooks" });
+    const hiring = ["全員の人数", "採用", "新人"]; // どこから回り始めてもよい
+    const symbol = all.loops.find((l: { elements: string[] }) => l.elements.join() === "新人,全員の人数,採用").symbol;
+    const saved = await call("set_loops", { model: "brooks", loops: [{ name: "採用で人数をそろえる", elements: hiring }] });
+    expect(saved.changes.added).toEqual(["採用で人数をそろえる"]);
+    expect(saved.loops).toEqual([{ name: "採用で人数をそろえる", symbol, kind: "unknown", elements: ["新人", "全員の人数", "採用"] }]);
+    const found = await call("find_loops", { model: "brooks" });
+    expect(found.loops[0]).toMatchObject({ name: "採用で人数をそろえる", symbol, elements: ["新人", "全員の人数", "採用"] });
+    expect(found.loops.slice(1).every((l: { name?: string }) => l.name === undefined)).toBe(true);
+    // 名前を省くと、付けた名前と記号を札に出す
+    const view = await call("view_diagram", { model: "brooks", image: false, loop: { elements: hiring } });
+    expect(view.loop).toMatchObject({ name: "採用で人数をそろえる", symbol, kind: "unknown" });
+    const other = await call("view_diagram", { model: "brooks", image: false, loop: { elements: hiring, name: "別の名前" } });
+    expect(other.loop.name).toBe("別の名前");
+    expect(other.loop.symbol).toBeUndefined();
+
+    expect(await callError("set_loops", { model: "brooks" })).toMatch(/loops か remove/);
+    expect(await callError("set_loops", { model: "brooks", loops: [{ name: "x", elements: ["新人", "採用"] }] })).toMatch(/ループになっていません/);
+    expect(await callError("set_loops", { model: "brooks", loops: [{ name: "x", rename_to: "y" }] })).toMatch(/見つかりません/);
+    const renamed = await call("set_loops", { model: "brooks", loops: [{ name: "採用で人数をそろえる", rename_to: "人数をそろえる" }] });
+    expect(renamed.loops.map((l: { name: string }) => l.name)).toEqual(["人数をそろえる"]);
+    // リンクを消してループがなくなっても名前は残し、validate_model で知らせる
+    await call("remove_elements", { model: "brooks", elements: [{ from: "全員の人数", to: "採用" }] });
+    const v = await call("validate_model", { model: "brooks" });
+    expect(JSON.stringify(v.warnings)).toMatch(/名前を付けたループ \\"人数をそろえる\\" が、モデルにありません/);
+    const removed = await call("set_loops", { model: "brooks", remove: ["人数をそろえる"] });
+    expect(removed.changes.removed).toEqual(["人数をそろえる"]);
+    expect((await call<ModelJSON>("get_model", { model: "brooks", format: "full" })).loops).toBeUndefined();
+  });
+
   test("ビューアの「ループ」の一覧は、find_loops と同じループを同じ順・同じ名前で出す（極性を変えたあとも）", async () => {
     await call("import_model", { path: path.join(FIXTURES_DIR, "brooks_law.json"), model: "brooks" });
     const same = async () => {
       const ai = await call("find_loops", { model: "brooks" });
       const m = await call<ModelJSON>("get_model", { model: "brooks", format: "full" });
       const viewer = listLoops(m);
-      expect(viewer.loops.map((l) => ({ name: l.name, kind: l.kind, elements: l.elements, delay: l.delay }))).toEqual(
-        ai.loops.map((l: { name: string; kind: string; elements: string[]; delays?: string[] }) => ({ name: l.name, kind: l.kind, elements: l.elements, delay: !!l.delays })),
+      expect(viewer.loops.map((l) => ({ name: l.name, symbol: l.symbol, kind: l.kind, elements: l.elements, delay: l.delay }))).toEqual(
+        ai.loops.map((l: { name?: string; symbol: string; kind: string; elements: string[]; delays?: string[] }) => ({
+          name: l.name,
+          symbol: l.symbol,
+          kind: l.kind,
+          elements: l.elements,
+          delay: !!l.delays,
+        })),
       );
       expect(ai.truncated).toBeUndefined();
       expect(viewer.truncated).toBe(false);
@@ -485,8 +525,13 @@ describe("MCP server", () => {
       ],
     });
     const after = await same();
-    // 図で目立たせるもの（view_diagram・export_diagram の loop に find_loops の name を渡したときと同じ）
+    // 図で目立たせるもの（view_diagram・export_diagram の loop に find_loops の symbol を name として渡したときと同じ）
     expect(after.loops.find((l) => l.kind === "B")).toMatchObject({ delay: true, view: { name: "B1", kind: "B", elements: ["新人", "全員の人数", "採用"] } });
+    // 名前を付けると、一覧でも先に並び、札には名前と記号を出す（view_diagram で name を省いたときと同じ）
+    await call("set_loops", { model: "brooks", loops: [{ name: "採用で人数をそろえる", elements: ["新人", "全員の人数", "採用"] }] });
+    const named = await same();
+    const view = await call("view_diagram", { model: "brooks", image: false, loop: { elements: ["新人", "全員の人数", "採用"] } });
+    expect(named.loops[0]!.view).toEqual({ name: view.loop.name, symbol: view.loop.symbol, kind: view.loop.kind, elements: view.loop.elements });
   });
 
   test("export_diagram は図だけを SVG と PNG で exports/<モデル名>/ に書き出す（ブラウザと画面のビルドがあるとき）", async () => {

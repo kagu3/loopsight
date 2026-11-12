@@ -1,5 +1,6 @@
 import { loadModelJSON, type Model } from "simulation";
 import type { ModelElement, ModelJSON } from "./modeljson.js";
+import { checkLoops } from "./loops.js";
 import { ELEMENT_TYPES, baselineClashMessage, canReference, scenarioNamedLikeBaseline, didYouMean, engineModel, equationsOf, findElement, isConnector, nameKey, referencesIn, sameName } from "./modeljson.js";
 
 export interface Issue {
@@ -178,6 +179,8 @@ export function staticCheck(model: ModelJSON): { errors: Issue[]; warnings: Issu
   }
   const clash = scenarioNamedLikeBaseline(model);
   if (clash !== undefined) warnings.push({ message: baselineClashMessage(clash) });
+  // 名前を付けたループが、モデルが変わってなくなったときなど（項目は消さずに残す）
+  warnings.push(...checkLoops(model));
   return { errors, warnings };
 }
 

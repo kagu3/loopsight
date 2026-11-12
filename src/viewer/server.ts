@@ -9,22 +9,17 @@ import {
   type DiagramExportRequest,
   type DiagramExportResponse,
   type EditErrorResponse,
-  type EditRequest,
   type EditResponse,
-  type GroupsRequest,
   type ModelListResponse,
   type ModelResponse,
-  type RemoveRequest,
-  type ScenariosRequest,
-  type SimulationRequest,
   type UndoRequest,
 } from "./api.js";
-import { CONFLICT_MESSAGE, NOTHING_TO_UNDO, RequestError, UNDO_CONFLICT_MESSAGE, actualDataResult, applyWrite, buildModelResponse, pushHistory, type HistoryEntry } from "./shared.js";
+import { CONFLICT_MESSAGE, NOTHING_TO_UNDO, RequestError, UNDO_CONFLICT_MESSAGE, actualDataResult, applyWrite, buildModelResponse, pushHistory, type HistoryEntry, type WriteAction, type WriteBody } from "./shared.js";
 import { DIAGRAM_FILE_BASE, exportFolderOf, writeDiagramImages } from "./diagram-export.js";
 import { watchTree } from "./watch.js";
 
 // ビューア（Web 画面）のサーバー。作業フォルダの ModelJSON を読んで返し、変更を Server-Sent Events で知らせる。
-// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_annotations、set_simulation と同じ処理を通す）。
+// 画面からの編集も受け付け、同じファイルに書き戻す（MCP の upsert_elements、remove_elements、set_scenarios、set_groups、set_loops、set_annotations、set_simulation と同じ処理を通す）。
 // モデルを実行して返す形を作ることと、書き込みの確かめは shared.ts にまとめてあり、デモサイト（web/src/demo）と同じものを使う。
 // 127.0.0.1 だけで待ち受け、Host ヘッダーも確かめる（DNS リバインディングで別のサイトから読まれないように）。
 // 書き込みには、さらに Origin と独自のヘッダーを求める（ほかのサイトから送れないように）。
@@ -213,10 +208,10 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
     current: await loadModelResponse(store, name, historyOf(name).length),
   });
 
-  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: "edit" | "scenarios" | "groups" | "simulation" | "remove" | "undo") => {
+  const handleWrite = async (req: IncomingMessage, res: ServerResponse, name: string, action: WriteAction) => {
     try {
       checkWriteRequest(req);
-      const body = await readBody<EditRequest & ScenariosRequest & GroupsRequest & SimulationRequest & RemoveRequest & UndoRequest>(req);
+      const body = await readBody<WriteBody & UndoRequest>(req);
       if (typeof body?.version !== "string") throw new RequestError(400, "version がありません。");
       const result = await serial(name, async (): Promise<[number, EditResponse | EditErrorResponse]> => {
         const current = await store.readVersioned(name);
@@ -297,9 +292,9 @@ export async function startViewer(options: ViewerOptions): Promise<Viewer> {
       await handleExportDiagram(req, res, decodeURIComponent(exported[1]!));
       return;
     }
-    const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|groups|simulation|remove|undo)$/);
+    const write = url.pathname.match(/^\/api\/models\/(.+)\/(edit|scenarios|groups|loops|simulation|remove|undo)$/);
     if (write) {
-      await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as "edit" | "scenarios" | "groups" | "simulation" | "remove" | "undo");
+      await handleWrite(req, res, decodeURIComponent(write[1]!), write[2] as WriteAction);
       return;
     }
     if (p.startsWith("/api/models/")) {

@@ -4,6 +4,7 @@ import { ANNOTATION_MAX_WIDTH, ANNOTATION_MIN_WIDTH, boxLayout, BOX_TYPES } from
 import { DELAY_MARK_TYPES } from "./delay.js";
 import { annotationsOf, baselineClashMessage, baselineOf, DEFAULT_BASELINE_NAME, scenarioNamedLikeBaseline, ELEMENT_TYPES, TIME_UNITS, canReference, isEmphasized, didYouMean, equationsOf, findElement, findLink, nameKey, referencesIn, renameInEquation, sameName } from "./modeljson.js";
 import { removeFromGroups, renameInGroups } from "./groups.js";
+import { renameInLoops } from "./loops.js";
 
 export class EditError extends Error {
   override name = "EditError";
@@ -142,6 +143,7 @@ export function renameElement(model: ModelJSON, oldName: string, newName: string
     }
   }
   renameInGroups(model, from, newName);
+  renameInLoops(model, from, newName);
 }
 
 /**

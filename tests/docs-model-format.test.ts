@@ -85,6 +85,7 @@ describe("loopsight が足した項目とエンジン", () => {
     ]);
     upsertElements(m, [{ type: "LINK", from: "在庫", to: "発注", behavior: { polarity: "POSITIVE" }, display: { delay: true } }]);
     m.groups = [{ name: "お店側", color: "yellow", elements: ["在庫"] }];
+    m.loops = [{ name: "発注の輪", elements: ["在庫", "発注"] }];
     m.annotations = [{ id: "n1", text: "メモ", coordinates: [0, 0], width: 200 }];
     m.scenarios = [{ name: "多め", values: { 在庫: 20 } }];
     m.baseline = { name: "今のまま発注", description: "発注のやり方を変えない" };

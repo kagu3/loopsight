@@ -323,8 +323,20 @@ try {
   // 覚えた「値を表示」は、次に撮るときのために消しておく
   await b.evaluate("localStorage.removeItem('viewer.diagramValues')");
 
-  // フォルダごとに出したモデルの一覧（フォルダの中のモデルを開いて、ほかのフォルダも 1 つ開く）
+  // 名前の付いたループを目立たせたところ（sample 2 の「遅れて効く疲れ」。名前のないループは「ほかの n 個」にたたんである）
   await setColorScheme("light");
+  const fixes = JSON.parse(readFileSync(path.join(root, "examples/2_うまくいかない解決策/fixes-that-fail.json"), "utf8"));
+  await store.write("fixes-that-fail", fixes);
+  await b.evaluate("localStorage.removeItem('viewer.sidebarOpen'); localStorage.removeItem('viewer.loopsOpen'); localStorage.removeItem('viewer.otherLoopsOpen')");
+  await b.open(url("fixes-that-fail"));
+  await b.waitFor("document.querySelector('.loop-row')");
+  await b.clickText(".loop-row-name", "遅れて効く疲れ");
+  await b.waitFor("document.querySelector('.loop-badge')");
+  await sleep(500);
+  await shot("loops");
+  await store.removeModel("fixes-that-fail");
+
+  // フォルダごとに出したモデルの一覧（フォルダの中のモデルを開いて、ほかのフォルダも 1 つ開く）
   const population = await store.read("population");
   // 前の場面で足したモデルは消して、一覧が画面に収まるようにする
   for (const name of ["bullwhip", "sales", "population_error"]) await store.removeModel(name);

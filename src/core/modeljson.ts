@@ -106,6 +106,17 @@ export interface ElementGroup {
 }
 
 /**
+ * 名前を付けたフィードバックループ（ループサイト独自。モデルに保存し、シミュレーションには使わない）。
+ * ループは通る要素の並びで見分ける（どこから回り始めても同じ。loops.ts の loopKey）。R / B は持たず、いつも極性から求める
+ */
+export interface NamedLoop {
+  /** ループの名前（「口コミ」など）。大文字と小文字を区別せず、重ねない */
+  name: string;
+  /** ループが通る要素の名前を、つながる順に（find_loops の elements と同じ） */
+  elements: string[];
+}
+
+/**
  * 図の注釈（どこにもつながらない、文字だけのもの）。シミュレーションの要素ではないので elements に入れず、
  * ループサイト独自の項目としてモデルの annotations に保存する（エンジンの loadModelJSON は知らない項目としてエラーにする）
  */
@@ -139,6 +150,7 @@ export interface ModelJSON {
   visualizations?: Visualization[];
   scenarios?: Scenario[];
   groups?: ElementGroup[];
+  loops?: NamedLoop[];
   annotations?: Annotation[];
   baseline?: Baseline;
   engine_settings?: { units?: { name: string; base?: string; factor?: number }[]; globals?: string };
@@ -167,13 +179,15 @@ type LoopsightModelKey = Exclude<KnownKeys<ModelJSON>, (typeof MODELJSON_TOP_KEY
 
 /**
  * ループサイト独自の最上位の項目と、その 1 件ごとの項目。
- * ModelJSON の型にある公式でない最上位の項目、それぞれの型（ElementGroup、Annotation、Baseline）の項目と、過不足がないことを型で確かめる
+ * ModelJSON の型にある公式でない最上位の項目、それぞれの型（ElementGroup、NamedLoop、Annotation、Baseline）の項目と、過不足がないことを型で確かめる
  * - groups：図のグループ（groups.ts）
+ * - loops：ループの名前（loops.ts の setLoops）
  * - annotations：図の注釈（annotationsOf、edit.ts の setAnnotations）
  * - baseline：何も変えない実行の名前と説明（baselineOf、edit.ts の setScenarios）。並びではなく 1 つのオブジェクト
  */
 const LOOPSIGHT_MODEL_ITEMS = {
   groups: { name: true, color: true, elements: true },
+  loops: { name: true, elements: true },
   annotations: { id: true, text: true, coordinates: true, width: true },
   baseline: { name: true, description: true },
 } as const satisfies { [K in LoopsightModelKey]: Record<keyof ItemOf<K>, true> };
@@ -220,7 +234,7 @@ export const MODELJSON_FIELDS: readonly string[] = [
 ];
 
 /**
- * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の項目（図のグループ groups・図の注釈 annotations・何も変えない実行の名前 baseline）を取り除いたコピー（なければそのまま返す）
+ * エンジンに渡すモデル。ループサイト独自の display の項目と、最上位の項目（図のグループ groups・ループの名前 loops・図の注釈 annotations・何も変えない実行の名前 baseline）を取り除いたコピー（なければそのまま返す）
  */
 export function engineModel(model: ModelJSON): ModelJSON {
   const has = (el: ModelElement) => !!el.display && LOOPSIGHT_DISPLAY_KEYS.some((k) => k in el.display!);

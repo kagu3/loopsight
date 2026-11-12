@@ -1,7 +1,7 @@
 // ビューアのサーバーと画面のあいだでやりとりする形（型だけ。画面からも import type で使う）
-import type { AnnotationPatch, BaselinePatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings } from "../core/index.js";
+import type { AnnotationPatch, BaselinePatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, LoopPatch, LoopReport, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings } from "../core/index.js";
 
-export type { AnnotationPatch, BaselinePatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings };
+export type { AnnotationPatch, BaselinePatch, EditReport, ElementPatch, Equation, FolderInfo, GroupPatch, GroupReport, Issue, LoopPatch, LoopReport, ModelElement, ModelInfo, ModelJSON, RemoveTarget, Scenario, ScenarioPatch, ScenarioReport, SimulationSettings };
 
 /**
  * GET /api/models。モデルと、一覧に出すフォルダ（モデルがあるフォルダと空のフォルダ）。
@@ -99,6 +99,14 @@ export interface GroupsRequest {
   remove?: string[];
 }
 
+/** POST /api/models/:name/loops の本文。loops と remove は MCP の set_loops と同じ形 */
+export interface LoopsRequest {
+  version: string;
+  loops: LoopPatch[];
+  /** 外すループの名前 */
+  remove?: string[];
+}
+
 /** POST /api/models/:name/simulation の本文。simulation は MCP の set_simulation と同じ形（指定しなかった項目はそのまま） */
 export interface SimulationRequest {
   version: string;
@@ -119,8 +127,8 @@ export interface UndoRequest {
 
 /** 書き込みの結果。成功すると新しいモデルを返す */
 export interface EditResponse {
-  /** 要素の編集なら EditReport、シナリオの編集なら ScenarioReport、グループの編集なら GroupReport */
-  report?: EditReport | ScenarioReport | GroupReport;
+  /** 要素の編集なら EditReport、シナリオの編集なら ScenarioReport、グループの編集なら GroupReport、ループの名前なら LoopReport */
+  report?: EditReport | ScenarioReport | GroupReport | LoopReport;
   model: ModelResponse;
   /** 書き込めたが、知らせたいこと（実際のデータの列名を直せなかったときなど） */
   warning?: string;

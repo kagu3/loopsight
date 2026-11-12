@@ -13,10 +13,12 @@ import {
   layoutModel,
   parseDataCSV,
   runScenarios,
+  setLoops,
   setScenarios,
   toModelError,
   upsertElements,
   validateModel,
+  wellFormedLoops,
   type ModelJSON,
 } from "../src/core/index.js";
 import { firstParagraph } from "../web/src/description.js";
@@ -96,6 +98,23 @@ function baselineProblems(model: ModelJSON): string[] {
   return problems;
 }
 
+/**
+ * 注釈とモデルの説明でループを呼ぶ「R（口コミ）」のかっこの中が、loops に付けた名前になっているか。
+ * 一覧の記号（R1 など）とは同じとは限らないので、番号を書かない（「B1（すぐ効く営業）」ではなく「B（すぐ効く営業）」）
+ */
+function loopNameProblems(model: ModelJSON): string[] {
+  const problems: string[] = [];
+  const names = wellFormedLoops(model).map((l) => l.name.toLowerCase());
+  const texts: [string, string][] = [...annotationsOf(model).map((a): [string, string] => [`注釈「${a.id}」`, a.text]), ["モデルの説明", model.description ?? ""]];
+  for (const [where, text] of texts) {
+    for (const [, kind, number, name] of text.matchAll(/(?<![A-Za-z])([RB])(\d*)（([^）]+)）/g)) {
+      if (number) problems.push(`${where}で ${kind}${number} と番号を書いている（番号は一覧の記号と同じとは限らないので、${kind}（${name}）と名前で呼ぶ）`);
+      if (!names.includes(name!.toLowerCase())) problems.push(`${where}の ${kind}（${name}）の名前が、loops にない（set_loops で、そのループに同じ名前を付ける）`);
+    }
+  }
+  return problems;
+}
+
 /** 実際のデータ（.data.csv）が、モデルと照らして問題のあるところ。なければ空 */
 function dataProblems(model: ModelJSON, csv: string): string[] {
   try {
@@ -116,6 +135,7 @@ function sampleProblems(model: ModelJSON): string[] {
   if (!model.description?.trim()) problems.push("モデルの説明（description）がない");
   else problems.push(...descriptionProblems(model.description));
   problems.push(...baselineProblems(model));
+  problems.push(...loopNameProblems(model));
 
   for (const el of model.elements) {
     if (el.type !== "LINK") continue;
@@ -303,6 +323,19 @@ describe("sample の決まりの判定", () => {
       "リンク コーヒーの温度 → 冷める に極性（behavior.polarity）がない",
       expect.stringMatching(/^R か B か決まっていないループがある/),
     ]);
+  });
+
+  test("注釈のループの名前（かっこの中）が loops にあり、番号を書いていない", () => {
+    const m = goodModel();
+    m.annotations = [{ id: "Bの読み方", text: "B（冷める）：熱いほど速く冷める。（‖）は遅れの印。B社（たとえ）", coordinates: [0, 400] }];
+    expect(loopNameProblems(m)).toEqual([expect.stringMatching(/^注釈「Bの読み方」の B（冷める）の名前が、loops にない/)]);
+    setLoops(m, [{ name: "冷める", elements: ["コーヒーの温度", "冷める"] }]);
+    expect(loopNameProblems(m)).toEqual([]);
+    m.annotations[0]!.text = "B1（冷める）：熱いほど速く冷める";
+    expect(loopNameProblems(m)).toEqual([expect.stringMatching(/^注釈「Bの読み方」で B1 と番号を書いている/)]);
+    m.annotations = [];
+    m.description = `${m.description}\nR（ない輪）：説明でも同じ。`;
+    expect(loopNameProblems(m)).toEqual([expect.stringMatching(/^モデルの説明の R（ない輪）の名前が、loops にない/)]);
   });
 
   test("シナリオがない、実行できないシナリオがある", () => {

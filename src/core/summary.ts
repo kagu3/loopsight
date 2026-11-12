@@ -1,6 +1,7 @@
 import { hasDelayMark } from "./delay.js";
 import { annotationsOf, baselineOf, type ModelElement, type ModelJSON } from "./modeljson.js";
 import { wellFormedGroups } from "./groups.js";
+import { wellFormedLoops } from "./loops.js";
 
 /** AI が読みやすい、座標などを省いたモデルの要約 */
 export interface ModelSummary {
@@ -19,6 +20,8 @@ export interface ModelSummary {
   baseline?: { name: string; description?: string };
   /** 図のグループ（名前、色、属する要素） */
   groups?: { name: string; color: string; elements: string[] }[];
+  /** 名前を付けたループ（名前と、通る要素。R / B は find_loops で見る） */
+  loops?: { name: string; elements: string[] }[];
   /** 図の注釈（要素ではない、文字だけのもの） */
   annotations?: { id: string; text: string }[];
 }
@@ -76,6 +79,8 @@ export function summarizeModel(model: ModelJSON): ModelSummary {
   if (model.scenarios?.length || model.baseline) summary.baseline = baselineOf(model);
   const groups = wellFormedGroups(model);
   if (groups.length) summary.groups = groups.map((g) => ({ name: g.name, color: g.color, elements: g.elements }));
+  const loops = wellFormedLoops(model);
+  if (loops.length) summary.loops = loops;
   const notes = annotationsOf(model);
   if (notes.length) summary.annotations = notes.map((a) => ({ id: a.id, text: a.text }));
   return compact(summary as unknown as Record<string, unknown>) as unknown as ModelSummary;
