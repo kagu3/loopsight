@@ -1,7 +1,7 @@
 // 左の欄の「ループ」に並べるもの。中核の findLoops をそのまま使い、AI の find_loops と同じループを同じ順・同じ名前・同じ記号で出す。
 // React に依存しない（テストから直接使う）
 import { findLoops, loopKey, MAX_LOOPS, missingLoops, type FeedbackLoop, type LoopKind, type LoopView } from "../../src/core/loops.js";
-import type { ModelJSON } from "../../src/core/modeljson.js";
+import { sameName, type ModelJSON } from "../../src/core/modeljson.js";
 
 export { loopKey };
 
@@ -53,6 +53,15 @@ export function listLoops(model: ModelJSON): LoopList {
 export function splitLoops(loops: LoopItem[]): { shown: LoopItem[]; others: LoopItem[] } {
   if (!loops.some((l) => l.name !== undefined)) return { shown: loops, others: [] };
   return { shown: loops.filter((l) => l.name !== undefined), others: loops.filter((l) => l.name === undefined) };
+}
+
+/**
+ * 名前のないループに付けようとした名前が、ほかのループにもう付いていれば、そのループ（大文字と小文字は区別しない）。
+ * 画面では、黙って名前を移さずにエラーにする（set_loops に elements で渡すと、名前がそのループから移るため）。
+ * モデルからなくなったループの名前（missing）は、付け直せるようにエラーにしない
+ */
+export function loopNamedAs(loops: LoopItem[], name: string): LoopItem | undefined {
+  return loops.find((l) => l.name !== undefined && sameName(l.name, name));
 }
 
 /** 一覧に出す経路。最後の、始まりと同じ要素は省く（例：「使っている人 → 使い始める人」） */
