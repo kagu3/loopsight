@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LoopPatch } from "../../src/viewer/api.js";
-import { countLoops, loopPath, splitLoops, truncatedText, type LoopItem, type LoopList } from "./loopList.js";
+import { countLoops, loopNamedAs, loopPath, splitLoops, truncatedText, type LoopItem, type LoopList } from "./loopList.js";
 
 // フィードバックループの欄（左の欄）。AI の find_loops と同じループを同じ順に並べ、押したループを図で目立たせる
 // （view_diagram の loop と同じ描き方）。もう一度押すか、ほかのループを押すとやめる。
@@ -70,7 +70,11 @@ export function LoopPanel({ list, shown, onShow, onSave }: LoopPanelProps) {
     if (name === (l.name ?? "")) return;
     if (!name) setError(await onSave([], [l.name!]));
     else if (l.name !== undefined) setError(await onSave([{ name: l.name, rename_to: name }]));
-    else setError(await onSave([{ name, elements: l.elements }]));
+    else {
+      const other = loopNamedAs(loops, name);
+      if (other) setError(`"${name}" という名前は、${other.symbol} のループにもう付いています。名前は重ねられません。`);
+      else setError(await onSave([{ name, elements: l.elements }]));
+    }
   };
 
   const row = (l: LoopItem) => {

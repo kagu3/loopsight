@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { emptyModel, MAX_LOOPS, removeElements, setLoops, upsertElements } from "../src/core/index.js";
-import { countLoops, listLoops, loopKey, loopPath, splitLoops, truncatedText } from "../web/src/loopList.js";
+import { countLoops, listLoops, loopKey, loopNamedAs, loopPath, splitLoops, truncatedText } from "../web/src/loopList.js";
 
 describe("左の欄の「ループ」の一覧", () => {
   test("ループの鍵は、どこから回り始めても、大文字と小文字が違っても同じ。回る向きが違えば別", () => {
@@ -52,6 +52,21 @@ describe("左の欄の「ループ」の一覧", () => {
     removeElements(m, [{ from: "C", to: "B" }]);
     expect(listLoops(m)).toMatchObject({ missing: ["BとC"] });
     expect(listLoops(m).loops.map((l) => l.name)).toEqual([undefined]);
+  });
+
+  test("名前のないループに、ほかのループの名前を付けようとすると見つかる（大文字と小文字は区別しない）。モデルにない名前は付け直せる", () => {
+    const m = emptyModel("t");
+    upsertElements(m, [
+      { type: "VARIABLE", name: "A", behavior: { value: "[B]" } },
+      { type: "VARIABLE", name: "B", behavior: { value: "[A] + [C]" } },
+      { type: "VARIABLE", name: "C", behavior: { value: "[B]" } },
+    ]);
+    setLoops(m, [{ name: "Loop", elements: ["C", "B"] }]);
+    const { loops } = listLoops(m);
+    expect(loopNamedAs(loops, "loop")?.symbol).toBe("?2");
+    expect(loopNamedAs(loops, "別の名前")).toBeUndefined();
+    removeElements(m, [{ from: "C", to: "B" }]);
+    expect(loopNamedAs(listLoops(m).loops, "Loop")).toBeUndefined();
   });
 
   test("経路は、最後の始まりと同じ要素を省く", () => {
